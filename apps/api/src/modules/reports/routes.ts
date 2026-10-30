@@ -510,10 +510,44 @@ reportsRouter.get('/export', requirePermission('report:export'), async (req, res
 // 4. CENTRAL APPROVAL INBOX
 reportsRouter.get('/approvals', async (req, res, next) => {
   try {
-    const { status, module } = req.query;
+    const { status, module, scope } = req.query;
+    const user = req.user!;
     const where: Record<string, unknown> = {};
+
     if (typeof status === 'string' && status) where.status = status;
     if (typeof module === 'string' && module) where.module = module;
+
+    // Role-based scoping: Unit Manager only sees requests belonging to their unit or created by them
+    if (user.roleCode === 'UNIT_MANAGER') {
+      const unitConditions: Record<string, unknown>[] = [{ requestedById: user.userId }];
+      if (user.businessUnitId) {
+        unitConditions.push({ businessUnitId: user.businessUnitId });
+      }
+
+      if (scope === 'assigned') {
+        // Unit Managers have no direct approval authority over GM/FM items
+        where.AND = [
+          { requiredRoleCode: 'UNIT_MANAGER' },
+          { OR: unitConditions },
+        ];
+      } else {
+        where.OR = unitConditions;
+      }
+    } else if (user.roleCode === 'FINANCE_MANAGER') {
+      if (scope === 'assigned') {
+        where.requiredRoleCode = 'FINANCE_MANAGER';
+        where.requestedById = { not: user.userId };
+      }
+    } else if (user.roleCode === 'GM_PMO') {
+      if (scope === 'assigned') {
+        where.requiredRoleCode = 'GM_PMO';
+        where.requestedById = { not: user.userId };
+      }
+    } else if (user.roleCode !== 'SUPER_ADMIN') {
+      if (scope === 'assigned') {
+        where.requiredRoleCode = user.roleCode;
+      }
+    }
 
     const approvals = await prisma.approvalRequest.findMany({
       where,
@@ -522,10 +556,29 @@ reportsRouter.get('/approvals', async (req, res, next) => {
 
     res.json({
       success: true,
-      data: approvals.map((a) => ({
-        ...a,
-        amount: Number(a.amount),
-      })),
+      data: approvals.map((a) => {
+        const isPending = a.status === 'PENDING';
+        const isNotRequester = a.requestedById !== user.userId;
+        let canApprove = false;
+
+        if (isPending && isNotRequester) {
+          if (user.roleCode === 'SUPER_ADMIN') {
+            canApprove = true;
+          } else if (user.roleCode === 'GM_PMO') {
+            canApprove = a.requiredRoleCode === 'GM_PMO' || a.requiredRoleCode === 'FINANCE_MANAGER';
+          } else if (user.roleCode === 'FINANCE_MANAGER') {
+            canApprove = a.requiredRoleCode === 'FINANCE_MANAGER';
+          } else if (user.roleCode === 'UNIT_MANAGER') {
+            canApprove = a.requiredRoleCode === 'UNIT_MANAGER';
+          }
+        }
+
+        return {
+          ...a,
+          amount: Number(a.amount),
+          canApprove,
+        };
+      }),
       meta: { total: approvals.length, requestId: req.requestId },
     });
   } catch (err) {

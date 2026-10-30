@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { apiFetch } from '../services/api';
 import { formatRupiah, formatDateTime } from '../utils/format';
@@ -19,6 +19,9 @@ const statusFilter = ref('PENDING');
 const moduleFilter = ref('');
 const approvals = ref<any[]>([]);
 
+const isUnitManager = computed(() => auth.user?.roleCode === 'UNIT_MANAGER');
+const scopeFilter = ref<'assigned' | 'all'>(auth.user?.roleCode === 'UNIT_MANAGER' ? 'all' : 'assigned');
+
 const {
   currentPage,
   pageSize,
@@ -31,6 +34,12 @@ const selectedApproval = ref<any>(null);
 const rejectReason = ref('');
 const actionBusy = ref(false);
 
+function setScope(scope: 'assigned' | 'all') {
+  scopeFilter.value = scope;
+  currentPage.value = 1;
+  loadApprovals();
+}
+
 async function loadApprovals() {
   loading.value = true;
   errorMsg.value = '';
@@ -38,6 +47,7 @@ async function loadApprovals() {
     const params = new URLSearchParams();
     if (statusFilter.value) params.set('status', statusFilter.value);
     if (moduleFilter.value) params.set('module', moduleFilter.value);
+    params.set('scope', scopeFilter.value === 'assigned' ? 'assigned' : 'my_requests');
     const res = await apiFetch(`/reports/approvals?${params.toString()}`);
     approvals.value = res.data || [];
   } catch (err: any) {
@@ -128,6 +138,39 @@ onMounted(loadApprovals);
       </button>
     </div>
 
+    <!-- Tab Bar Lingkup Approval Berdasarkan Peran -->
+    <div class="tab-bar">
+      <button
+        type="button"
+        class="tab-btn"
+        :class="{ active: scopeFilter === 'assigned' }"
+        @click="setScope('assigned')"
+      >
+        <span style="display: inline-flex; align-items: center; gap: 6px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 11 12 14 22 4"></polyline>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          </svg>
+          Perlu Persetujuan Saya
+        </span>
+      </button>
+
+      <button
+        type="button"
+        class="tab-btn"
+        :class="{ active: scopeFilter === 'all' }"
+        @click="setScope('all')"
+      >
+        <span style="display: inline-flex; align-items: center; gap: 6px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+          </svg>
+          {{ isUnitManager ? 'Status Pengajuan Unit Saya' : 'Semua Riwayat Pengajuan' }}
+        </span>
+      </button>
+    </div>
+
     <AlertBanner
       v-if="feedbackMsg"
       variant="success"
@@ -180,6 +223,15 @@ onMounted(loadApprovals);
     />
 
     <StateBanner
+      v-else-if="approvals.length === 0 && scopeFilter === 'assigned' && isUnitManager"
+      state="empty"
+      title="Tidak Ada Dokumen yang Memerlukan Otorisasi Anda"
+      message="Role Anda adalah Unit Manager (Pengusul Kebutuhan Unit). Wewenang persetujuan (approval) secara tata kelola berada pada Finance Manager dan General Manager PMO. Silakan klik tab 'Status Pengajuan Unit Saya' di atas untuk melacak status dokumen yang diajukan unit Anda."
+      actionLabel="Lihat Status Pengajuan Unit Saya"
+      @action="setScope('all')"
+    />
+
+    <StateBanner
       v-else-if="approvals.length === 0"
       state="empty"
       title="Tidak Ada Permintaan Persetujuan Sesuai Filter"
@@ -226,7 +278,7 @@ onMounted(loadApprovals);
             <td class="money-col"><strong>{{ formatRupiah(item.amount) }}</strong></td>
             <td><StatusBadge :status="item.status" /></td>
             <td>
-              <div v-if="item.status === 'PENDING'" class="btn-row">
+              <div v-if="item.canApprove" class="btn-row">
                 <button
                   type="button"
                   class="btn btn-sm btn-success"
@@ -245,7 +297,23 @@ onMounted(loadApprovals);
                   Tolak
                 </button>
               </div>
-              <span v-else class="text-muted">Selesai</span>
+              <div v-else style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+                <span v-if="item.requestedById === auth.user?.id" class="doc-code text-blue" style="font-size: 0.74rem;">
+                  Diajukan oleh Anda
+                </span>
+                <span v-else-if="item.status === 'PENDING'" class="doc-code text-amber" style="font-size: 0.74rem;">
+                  Wewenang {{ item.requiredRoleCode }}
+                </span>
+                <span v-else-if="item.status === 'APPROVED'" class="doc-code text-emerald" style="font-size: 0.74rem;">
+                  Disetujui
+                </span>
+                <span v-else-if="item.status === 'REJECTED'" class="doc-code text-rose" style="font-size: 0.74rem;">
+                  Ditolak
+                </span>
+                <span v-else class="text-muted" style="font-size: 0.74rem;">
+                  {{ item.status }}
+                </span>
+              </div>
             </td>
           </tr>
         </tbody>
