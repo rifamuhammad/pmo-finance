@@ -8,6 +8,7 @@ import StateBanner from '../components/StateBanner.vue';
 import ModalDialog from '../components/ModalDialog.vue';
 import AlertBanner from '../components/AlertBanner.vue';
 import PaginationControl from '../components/PaginationControl.vue';
+import CurrencyInput from '../components/CurrencyInput.vue';
 import { usePagination } from '../composables/usePagination';
 
 const auth = useAuthStore();
@@ -835,7 +836,13 @@ onMounted(loadRevenueAndCashier);
           </div>
           <div class="form-field">
             <label for="so-disc" class="form-label">Diskon Nominal (IDR)</label>
-            <input id="so-disc" v-model.number="orderForm.discountAmount" type="number" min="0" class="input" required />
+            <CurrencyInput
+              id="so-disc"
+              v-model="orderForm.discountAmount"
+              :min="0"
+              placeholder="0"
+              required
+            />
           </div>
           <div class="form-field">
             <label for="so-tax" class="form-label">Tarif PPN (%)</label>
@@ -871,20 +878,25 @@ onMounted(loadRevenueAndCashier);
 
           <div class="form-field">
             <label for="pay-gross" class="form-label">Nominal Pembayaran Bruto (IDR)</label>
-            <input
+            <CurrencyInput
               id="pay-gross"
-              v-model.number="paymentForm.grossAmount"
-              type="number"
-              min="1000"
+              v-model="paymentForm.grossAmount"
+              :min="1000"
               :max="selectedInvoiceForPayment.balanceDue"
-              class="input"
+              placeholder="0"
               required
             />
           </div>
 
           <div class="form-field">
             <label for="pay-fee" class="form-label">Potongan Biaya Provider / Merchant Fee (IDR)</label>
-            <input id="pay-fee" v-model.number="paymentForm.feeAmount" type="number" min="0" class="input" required />
+            <CurrencyInput
+              id="pay-fee"
+              v-model="paymentForm.feeAmount"
+              :min="0"
+              placeholder="0"
+              required
+            />
           </div>
 
           <div class="form-field">
@@ -914,7 +926,14 @@ onMounted(loadRevenueAndCashier);
         </p>
         <div class="form-field">
           <label for="rfd-amt" class="form-label">Nominal Refund (IDR)</label>
-          <input id="rfd-amt" v-model.number="refundForm.amount" type="number" min="1000" :max="selectedPaymentForRefund.grossAmount" class="input" required />
+          <CurrencyInput
+            id="rfd-amt"
+            v-model="refundForm.amount"
+            :min="1000"
+            :max="selectedPaymentForRefund.grossAmount"
+            placeholder="0"
+            required
+          />
         </div>
         <div class="form-field">
           <label for="rfd-reason" class="form-label">Alasan Pengembalian Dana (Wajib)</label>
@@ -936,7 +955,13 @@ onMounted(loadRevenueAndCashier);
         </p>
         <div class="form-field">
           <label for="csh-actual" class="form-label">Hasil Hitung Fisik Uang Tunai di Laci (IDR)</label>
-          <input id="csh-actual" v-model.number="closeSessionForm.actualCountedCash" type="number" min="0" class="input" required />
+          <CurrencyInput
+            id="csh-actual"
+            v-model="closeSessionForm.actualCountedCash"
+            :min="0"
+            placeholder="0"
+            required
+          />
         </div>
         <div class="form-field">
           <label for="csh-reason" class="form-label">Penjelasan Berita Acara / Alasan Selisih (Wajib bila ada selisih)</label>
@@ -963,7 +988,13 @@ onMounted(loadRevenueAndCashier);
         <div class="form-grid">
           <div class="form-field">
             <label for="dep-amt" class="form-label">Nominal Setoran (IDR)</label>
-            <input id="dep-amt" v-model.number="depositForm.amount" type="number" min="1000" class="input" required />
+            <CurrencyInput
+              id="dep-amt"
+              v-model="depositForm.amount"
+              :min="1000"
+              placeholder="0"
+              required
+            />
           </div>
           <div class="form-field">
             <label for="dep-ref" class="form-label">Nomor Slip Setoran Bank</label>
@@ -985,7 +1016,13 @@ onMounted(loadRevenueAndCashier);
         </p>
         <div class="form-field">
           <label for="prc-new" class="form-label">Harga Satuan Baru (IDR)</label>
-          <input id="prc-new" v-model.number="priceForm.newPrice" type="number" min="1000" class="input" required />
+          <CurrencyInput
+            id="prc-new"
+            v-model="priceForm.newPrice"
+            :min="1000"
+            placeholder="0"
+            required
+          />
         </div>
         <div class="form-field">
           <label for="prc-reason" class="form-label">Alasan Penyesuaian Harga (Wajib)</label>

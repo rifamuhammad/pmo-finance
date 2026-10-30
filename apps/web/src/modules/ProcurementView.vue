@@ -8,6 +8,7 @@ import StateBanner from '../components/StateBanner.vue';
 import ModalDialog from '../components/ModalDialog.vue';
 import AlertBanner from '../components/AlertBanner.vue';
 import PaginationControl from '../components/PaginationControl.vue';
+import CurrencyInput from '../components/CurrencyInput.vue';
 import { usePagination } from '../composables/usePagination';
 
 const auth = useAuthStore();
@@ -75,18 +76,18 @@ const prForm = ref({
   minQuotationsRequired: 3,
   itemName: '',
   specification: '',
-  quantity: 2,
+  quantity: 1,
   unit: 'Unit',
-  estimatedUnitPrice: 7500000,
+  estimatedUnitPrice: 0,
 });
 
 const quoteForm = ref({
   vendorId: '',
   quotationNumber: '',
-  quotedSubtotal: 14500000,
+  quotedSubtotal: 0,
   taxRatePercent: 11,
   deliveryDays: 5,
-  warrantyInfo: 'Garansi Resmi 2 Tahun',
+  warrantyInfo: '',
 });
 
 const poForm = ref({
@@ -204,9 +205,9 @@ function openCreatePr() {
     minQuotationsRequired: 3,
     itemName: '',
     specification: '',
-    quantity: 2,
+    quantity: 1,
     unit: 'Unit',
-    estimatedUnitPrice: 5000000,
+    estimatedUnitPrice: 0,
   };
   prModalOpen.value = true;
 }
@@ -375,9 +376,9 @@ function openCreateExpense() {
     vendorInvoiceId: '',
     category: firstLine?.category || 'OPEX',
     paymentMethod: 'BANK_TRANSFER',
-    recipientName: vendors.value[0]?.name || 'Penerima Pembayaran',
-    subtotal: 6000000,
-    taxAmount: 660000,
+    recipientName: '',
+    subtotal: 0,
+    taxAmount: 0,
     description: '',
     receiptRef: `TRX-${Date.now().toString().slice(-6)}`,
   };
@@ -949,7 +950,13 @@ onMounted(loadAllProcurementData);
           </div>
           <div class="form-field">
             <label for="pr-price" class="form-label">Estimasi Harga Satuan (IDR)</label>
-            <input id="pr-price" v-model.number="prForm.estimatedUnitPrice" type="number" min="1000" class="input" required />
+            <CurrencyInput
+              id="pr-price"
+              v-model="prForm.estimatedUnitPrice"
+              :min="0"
+              placeholder="0"
+              required
+            />
           </div>
         </div>
 
@@ -979,7 +986,13 @@ onMounted(loadAllProcurementData);
           </div>
           <div class="form-field">
             <label for="qt-sub" class="form-label">Harga Penawaran Sebelum Pajak (IDR)</label>
-            <input id="qt-sub" v-model.number="quoteForm.quotedSubtotal" type="number" min="1000" class="input" required />
+            <CurrencyInput
+              id="qt-sub"
+              v-model="quoteForm.quotedSubtotal"
+              :min="0"
+              placeholder="0"
+              required
+            />
           </div>
           <div class="form-field">
             <label for="qt-days" class="form-label">Waktu Pengiriman (Hari)</label>
@@ -1092,11 +1105,23 @@ onMounted(loadAllProcurementData);
           </div>
           <div class="form-field">
             <label for="exp-sub" class="form-label">Nominal Pokok (IDR)</label>
-            <input id="exp-sub" v-model.number="expenseForm.subtotal" type="number" min="1000" class="input" required />
+            <CurrencyInput
+              id="exp-sub"
+              v-model="expenseForm.subtotal"
+              :min="0"
+              placeholder="0"
+              required
+            />
           </div>
           <div class="form-field">
             <label for="exp-tax" class="form-label">Nominal Pajak PPN (IDR)</label>
-            <input id="exp-tax" v-model.number="expenseForm.taxAmount" type="number" min="0" class="input" required />
+            <CurrencyInput
+              id="exp-tax"
+              v-model="expenseForm.taxAmount"
+              :min="0"
+              placeholder="0"
+              required
+            />
           </div>
         </div>
 
