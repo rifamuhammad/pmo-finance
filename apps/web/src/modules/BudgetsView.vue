@@ -9,6 +9,7 @@ import StateBanner from '../components/StateBanner.vue';
 import ModalDialog from '../components/ModalDialog.vue';
 import AlertBanner from '../components/AlertBanner.vue';
 import PaginationControl from '../components/PaginationControl.vue';
+import CurrencyInput from '../components/CurrencyInput.vue';
 
 // PrimeVue official components
 import Drawer from 'primevue/drawer';
@@ -845,7 +846,14 @@ onMounted(loadMasterAndBudgets);
 
           <div class="form-field">
             <label for="new-bdg-rev" class="form-label">Target Pendapatan Unit (IDR)</label>
-            <input id="new-bdg-rev" v-model.number="createForm.revenueTarget" type="number" min="0" class="input" required />
+            <CurrencyInput
+              id="new-bdg-rev"
+              v-model="createForm.revenueTarget"
+              :min="0"
+              placeholder="0"
+              required
+              show-helper
+            />
           </div>
         </div>
 
@@ -885,7 +893,13 @@ onMounted(loadMasterAndBudgets);
 
               <div class="form-field">
                 <label :for="`line-amt-${idx}`" class="form-label">Plafon Alokasi (IDR)</label>
-                <input :id="`line-amt-${idx}`" v-model.number="line.allocatedAmount" type="number" min="1000" class="input" required />
+                <CurrencyInput
+                  :id="`line-amt-${idx}`"
+                  v-model="line.allocatedAmount"
+                  :min="1000"
+                  placeholder="0"
+                  required
+                />
               </div>
             </div>
 
@@ -938,7 +952,14 @@ onMounted(loadMasterAndBudgets);
           <label :for="`rev-line-${rl.lineId}`" class="form-label">
             {{ rl.description }} (Plafon Berjalan: {{ formatRupiah(rl.current) }})
           </label>
-          <input :id="`rev-line-${rl.lineId}`" v-model.number="rl.newAllocatedAmount" type="number" min="1000" class="input" required />
+          <CurrencyInput
+            :id="`rev-line-${rl.lineId}`"
+            v-model="rl.newAllocatedAmount"
+            :min="1000"
+            placeholder="0"
+            required
+            show-helper
+          />
         </div>
 
         <div class="btn-row" style="justify-content: flex-end">
