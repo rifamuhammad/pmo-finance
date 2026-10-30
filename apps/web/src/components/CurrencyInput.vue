@@ -29,7 +29,7 @@ const emit = defineEmits<{
 }>();
 
 const formatNumberId = (val: number | null | undefined): string => {
-  if (val === null || val === undefined || isNaN(val)) return '';
+  if (val === null || val === undefined || isNaN(val) || val === 0) return '';
   return new Intl.NumberFormat('id-ID').format(val);
 };
 

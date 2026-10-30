@@ -146,10 +146,10 @@ const createForm = ref({
   lines: [
     {
       costCenterId: '',
-      accountCode: '5-1100',
+      accountCode: '',
       category: 'OPEX',
       description: '',
-      allocatedAmount: 25000000,
+      allocatedAmount: 0,
     },
   ],
 });
@@ -237,15 +237,15 @@ function openCreateBudget() {
     businessUnitId: defaultUnit,
     fiscalPeriodId: defaultPeriod,
     fundSourceId: defaultFund,
-    revenueTarget: 150000000,
+    revenueTarget: 0,
     notes: '',
     lines: [
       {
         costCenterId: defaultCc,
-        accountCode: '5-1100',
+        accountCode: '',
         category: 'OPEX',
-        description: 'Biaya Penyelenggaraan Operasional & Program Unit',
-        allocatedAmount: 30000000,
+        description: '',
+        allocatedAmount: 0,
       },
     ],
   };
@@ -259,10 +259,10 @@ function addBudgetLineRow() {
   const defaultCc = filtered[0]?.id || master.value.costCenters[0]?.id || '';
   createForm.value.lines.push({
     costCenterId: defaultCc,
-    accountCode: '5-1200',
-    category: 'CAPEX',
-    description: 'Pengadaan Sarana & Prasarana Pendukung',
-    allocatedAmount: 20000000,
+    accountCode: '',
+    category: 'OPEX',
+    description: '',
+    allocatedAmount: 0,
   });
 }
 
@@ -802,7 +802,7 @@ onMounted(loadMasterAndBudgets);
             v-model="createForm.title"
             type="text"
             class="input"
-            placeholder="Contoh: Anggaran Pengadaan & Implementasi Server Q4 2026"
+            placeholder="Contoh: Anggaran Operasional Q4"
             required
           />
         </div>
@@ -852,7 +852,6 @@ onMounted(loadMasterAndBudgets);
               :min="0"
               placeholder="0"
               required
-              show-helper
             />
           </div>
         </div>
@@ -888,7 +887,14 @@ onMounted(loadMasterAndBudgets);
 
               <div class="form-field">
                 <label :for="`line-coa-${idx}`" class="form-label">Kode Akun Beban (COA)</label>
-                <input :id="`line-coa-${idx}`" v-model="line.accountCode" type="text" class="input" required />
+                <input
+                  :id="`line-coa-${idx}`"
+                  v-model="line.accountCode"
+                  type="text"
+                  class="input"
+                  placeholder="Contoh: 5-1100"
+                  required
+                />
               </div>
 
               <div class="form-field">
@@ -910,7 +916,7 @@ onMounted(loadMasterAndBudgets);
                 v-model="line.description"
                 type="text"
                 class="input"
-                placeholder="Contoh: Pengadaan Server Cloud & Lisensi Software Keamanan"
+                placeholder="Contoh: Operasional program unit"
                 required
               />
             </div>
@@ -958,7 +964,6 @@ onMounted(loadMasterAndBudgets);
             :min="1000"
             placeholder="0"
             required
-            show-helper
           />
         </div>
 
