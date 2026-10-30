@@ -1,0 +1,815 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import { prisma } from '../../shared/prisma.js';
+import { toCents, fromCents, subMoney } from '../../shared/decimal.js';
+import { recordAuditLog } from '../../shared/audit.js';
+import { AppError, requireAuth, requirePermission, requireRoles } from '../../middleware/auth.js';
+
+export const reportsRouter = Router();
+
+reportsRouter.use(requireAuth);
+
+// 1. EXECUTIVE & ROLE-AWARE DASHBOARD
+reportsRouter.get('/dashboard', async (req, res, next) => {
+  try {
+    const { businessUnitId, fiscalPeriodId } = req.query;
+    const unitFilter: Record<string, unknown> = {};
+
+    if (req.user!.businessUnitId && ['UNIT_MANAGER', 'CASHIER'].includes(req.user!.roleCode)) {
+      unitFilter.businessUnitId = req.user!.businessUnitId;
+    } else if (typeof businessUnitId === 'string' && businessUnitId) {
+      unitFilter.businessUnitId = businessUnitId;
+    }
+
+    const budgetFilter: Record<string, unknown> = {
+      ...unitFilter,
+      status: { in: ['APPROVED', 'REVISED'] },
+    };
+    if (typeof fiscalPeriodId === 'string' && fiscalPeriodId) {
+      budgetFilter.fiscalPeriodId = fiscalPeriodId;
+    }
+
+    const [
+      budgets,
+      expenses,
+      customerInvoices,
+      payments,
+      vendorInvoices,
+      pendingApprovals,
+      statementLines,
+      cashierSessions,
+      recentAuditLogs,
+      businessUnits,
+      salesOrders,
+      customers,
+      productServices,
+    ] = await Promise.all([
+      prisma.budget.findMany({
+        where: budgetFilter,
+        include: { businessUnit: true, lines: true },
+      }),
+      prisma.expense.findMany({
+        where: { ...unitFilter, status: { not: 'VOID' } },
+        include: { businessUnit: true },
+      }),
+      prisma.customerInvoice.findMany({
+        where: { ...unitFilter, status: { not: 'VOID' } },
+        include: { customer: true, businessUnit: true, lines: true },
+      }),
+      prisma.payment.findMany({
+        where: {
+          status: 'CONFIRMED',
+          ...(unitFilter.businessUnitId
+            ? { customerInvoice: { businessUnitId: unitFilter.businessUnitId as string } }
+            : {}),
+        },
+      }),
+      prisma.vendorInvoice.findMany({
+        where: { ...unitFilter, status: { not: 'VOID' } },
+        include: { vendor: true },
+      }),
+      prisma.approvalRequest.findMany({
+        where: { status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      prisma.bankStatementLine.findMany(),
+      prisma.cashierSession.findMany({ where: unitFilter }),
+      prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 12 }),
+      prisma.businessUnit.findMany({ orderBy: { code: 'asc' } }),
+      prisma.salesOrder.findMany({
+        where: unitFilter,
+        include: { lines: true },
+      }),
+      prisma.customer.findMany(),
+      prisma.productService.findMany({
+        where: unitFilter,
+        include: { businessUnit: true },
+      }),
+    ]);
+
+    const totalBudgetAllocated = budgets.reduce((acc, b) => acc + Number(b.totalAllocated), 0);
+    const totalBudgetCommitted = budgets.reduce((acc, b) => acc + Number(b.totalCommitted), 0);
+    const totalExpenseActual = expenses
+      .filter((e) => ['PAID', 'POSTED'].includes(e.status))
+      .reduce((acc, e) => acc + Number(e.totalAmount), 0);
+    const availableBudget = totalBudgetAllocated - totalBudgetCommitted - totalExpenseActual;
+
+    // Crucial Rule (Section 6 Modul 1): Distinguish Invoiced Revenue vs Confirmed Cash Received!
+    const totalInvoicedRevenue = customerInvoices.reduce((acc, inv) => acc + Number(inv.totalAmount), 0);
+    const totalCashReceivedNet = payments.reduce((acc, p) => acc + Number(p.netAmount), 0);
+    const netCashflow = totalCashReceivedNet - totalExpenseActual;
+
+    const totalReceivablesOutstanding = customerInvoices.reduce((acc, inv) => acc + Number(inv.balanceDue), 0);
+    const totalPayablesOutstanding = vendorInvoices.reduce(
+      (acc, inv) => acc + (Number(inv.totalAmount) - Number(inv.paidAmount)),
+      0
+    );
+
+    // Serapan Plafon Anggaran Persentase
+    const realisasiBiayaPercent = totalBudgetAllocated > 0 ? Math.round((totalExpenseActual / totalBudgetAllocated) * 100) : 0;
+    const komitmenPoPercent = totalBudgetAllocated > 0 ? Math.round((totalBudgetCommitted / totalBudgetAllocated) * 100) : 0;
+    const totalSerapanPercent = Math.min(100, realisasiBiayaPercent + komitmenPoPercent);
+    const sisaPlafonPercent = Math.max(0, 100 - totalSerapanPercent);
+
+    // Budget vs Actual per Category
+    const categories = ['CAPEX', 'OPEX', 'MODAL_KERJA', 'PENGADAAN', 'PEGAWAI', 'PAJAK'];
+    const budgetByCategory = categories.map((cat) => {
+      let allocated = 0;
+      let committed = 0;
+      let actual = 0;
+      for (const b of budgets) {
+        for (const l of b.lines) {
+          if (l.category === cat) {
+            allocated += Number(l.allocatedAmount);
+            committed += Number(l.committedAmount);
+            actual += Number(l.actualAmount);
+          }
+        }
+      }
+      return {
+        category: cat,
+        allocated,
+        committed,
+        actual,
+        available: allocated - committed - actual,
+        utilizationPercent: allocated > 0 ? Math.round(((committed + actual) / allocated) * 100) : 0,
+      };
+    });
+
+    // 4 Divisi PMO UTama Performance Summary (USALI Aligned)
+    const unitPerformance = businessUnits.map((u) => {
+      const unitBudgets = budgets.filter((b) => b.businessUnitId === u.id);
+      const unitAllocated = unitBudgets.reduce((acc, b) => acc + Number(b.totalAllocated), 0);
+      const unitCommitted = unitBudgets.reduce((acc, b) => acc + Number(b.totalCommitted), 0);
+      const unitExpense = expenses
+        .filter((e) => e.businessUnitId === u.id && ['PAID', 'POSTED'].includes(e.status))
+        .reduce((acc, e) => acc + Number(e.totalAmount), 0);
+      const unitRevenue = customerInvoices
+        .filter((inv) => inv.businessUnitId === u.id)
+        .reduce((acc, inv) => acc + Number(inv.totalAmount), 0);
+
+      const serapan = unitAllocated > 0 ? Math.round(((unitCommitted + unitExpense) / unitAllocated) * 100) : 0;
+
+      return {
+        unitId: u.id,
+        unitCode: u.code,
+        unitName: u.name,
+        allocated: unitAllocated,
+        committed: unitCommitted,
+        actualExpense: unitExpense,
+        invoicedRevenue: unitRevenue,
+        operatingMargin: unitRevenue - unitExpense,
+        utilizationPercent: serapan,
+      };
+    });
+
+    // Real Top Services from Seeded PMO Catalog with Real Sales Order counts
+    const productOrderMap = new Map<string, number>();
+    for (const so of salesOrders) {
+      for (const line of so.lines) {
+        if (line.productServiceId) {
+          productOrderMap.set(
+            line.productServiceId,
+            (productOrderMap.get(line.productServiceId) || 0) + Number(line.quantity)
+          );
+        }
+      }
+    }
+
+    const palette = ['#034693', '#F59E0B', '#059669', '#2563EB', '#7C3AED', '#DC2626'];
+    const topProducts = productServices.slice(0, 6).map((ps, idx) => ({
+      id: ps.id,
+      name: ps.name,
+      code: ps.sku,
+      category: ps.category,
+      unitPrice: Number(ps.unitPrice),
+      unitName: ps.businessUnit?.name || 'PMO UTama',
+      orders: productOrderMap.get(ps.id) || 0,
+      color: palette[idx % palette.length],
+    }));
+
+    // Real Monthly trends (12 months) directly aggregated from Database transactions
+    const targetYear = parseInt(req.query.year as string) || 2026;
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+    const monthlyRev = Array(12).fill(0);
+    const monthlyExp = Array(12).fill(0);
+    const monthlyCash = Array(12).fill(0);
+
+    for (const inv of customerInvoices) {
+      const d = new Date(inv.issueDate);
+      if (d.getFullYear() === targetYear) {
+        monthlyRev[d.getMonth()] += Number(inv.totalAmount);
+      }
+    }
+
+    for (const exp of expenses) {
+      if (['PAID', 'POSTED'].includes(exp.status)) {
+        const d = new Date(exp.transactionDate);
+        if (d.getFullYear() === targetYear) {
+          monthlyExp[d.getMonth()] += Number(exp.totalAmount);
+        }
+      }
+    }
+
+    for (const p of payments) {
+      if (p.status === 'CONFIRMED') {
+        const d = new Date(p.paymentDate);
+        if (d.getFullYear() === targetYear) {
+          monthlyCash[d.getMonth()] += Number(p.netAmount);
+        }
+      }
+    }
+
+    const monthlyTrends = monthNames.map((m, idx) => ({
+      month: m,
+      monthIndex: idx,
+      year: targetYear,
+      revenue: monthlyRev[idx],
+      expense: monthlyExp[idx],
+      cash: monthlyCash[idx],
+      netMargin: monthlyCash[idx] - monthlyExp[idx],
+    }));
+
+    // Bank reconciliation status
+    const reconSummary = {
+      matched: statementLines.filter((l) => l.matchStatus === 'MATCHED').length,
+      unmatched: statementLines.filter((l) => l.matchStatus === 'UNMATCHED').length,
+      needsReview: statementLines.filter((l) => ['NEEDS_REVIEW', 'EXCEPTION'].includes(l.matchStatus)).length,
+      total: statementLines.length,
+    };
+
+    // Operational warnings / alerts
+    const alerts: Array<{ id: string; severity: 'WARNING' | 'DANGER' | 'INFO'; title: string; detail: string; route: string }> = [];
+
+    for (const cat of budgetByCategory) {
+      if (cat.allocated > 0 && cat.utilizationPercent >= 80) {
+        alerts.push({
+          id: `alert-bdg-${cat.category}`,
+          severity: cat.utilizationPercent >= 95 ? 'DANGER' : 'WARNING',
+          title: `Serapan Anggaran ${cat.category} Mencapai ${cat.utilizationPercent}%`,
+          detail: `Sisa plafon tersedia Rp ${cat.available.toLocaleString('id-ID')} dari alokasi Rp ${cat.allocated.toLocaleString('id-ID')}.`,
+          route: '/budgets',
+        });
+      }
+    }
+
+    const openCashierCount = cashierSessions.filter((s) => s.status === 'OPEN').length;
+    const discrepancySessions = cashierSessions.filter((s) => s.status === 'CLOSING_SUBMITTED').length;
+    if (discrepancySessions > 0) {
+      alerts.push({
+        id: 'alert-cashier-disc',
+        severity: 'DANGER',
+        title: `${discrepancySessions} Sesi Kasir Memiliki Selisih Fisik`,
+        detail: 'Memerlukan verifikasi berita acara penutupan oleh Finance Manager.',
+        route: '/cashier',
+      });
+    } else if (openCashierCount > 0) {
+      alerts.push({
+        id: 'alert-cashier-open',
+        severity: 'INFO',
+        title: `${openCashierCount} Register Kasir Sedang Beroperasi (OPEN)`,
+        detail: 'Pastikan penutupan sesi dan hitung fisik kas dilakukan pada akhir shift.',
+        route: '/cashier',
+      });
+    }
+
+    if (reconSummary.unmatched + reconSummary.needsReview > 0) {
+      alerts.push({
+        id: 'alert-recon-unmatched',
+        severity: 'WARNING',
+        title: `${reconSummary.unmatched + reconSummary.needsReview} Baris Mutasi Bank Belum Terealisasi Rekonsiliasi`,
+        detail: 'Tinjau mutasi rekening untuk mencocokkan penerimaan atau pengeluaran.',
+        route: '/reconciliation',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        isDemoEnvironment: true,
+        kpis: {
+          totalBudgetAllocated,
+          totalBudgetCommitted,
+          totalExpenseActual,
+          availableBudget,
+          totalInvoicedRevenue,
+          totalCashReceivedNet,
+          netCashflow,
+          totalReceivablesOutstanding,
+          totalPayablesOutstanding,
+          pendingApprovalCount: pendingApprovals.length,
+          totalOrders: salesOrders.length || customerInvoices.length,
+          totalCustomers: customers.length,
+          activeServicesCount: productServices.filter((p) => p.isActive).length,
+          realisasiBiayaPercent,
+          komitmenPoPercent,
+          totalSerapanPercent,
+          sisaPlafonPercent,
+        },
+        budgetByCategory: budgetByCategory.filter((c) => c.allocated > 0 || c.actual > 0),
+        unitPerformance,
+        reconSummary,
+        topProducts,
+        monthlyTrends,
+        pendingApprovals: pendingApprovals.map((a) => ({
+          ...a,
+          amount: Number(a.amount),
+        })),
+        alerts,
+        recentAuditLogs,
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 2. CONSOLIDATED FINANCIAL & OPERATIONAL REPORTS
+reportsRouter.get('/financial', requirePermission('report:view'), async (req, res, next) => {
+  try {
+    const { businessUnitId, fiscalPeriodId } = req.query;
+    const entryWhere: Record<string, unknown> = { status: 'POSTED' };
+    if (typeof businessUnitId === 'string' && businessUnitId) entryWhere.businessUnitId = businessUnitId;
+    if (typeof fiscalPeriodId === 'string' && fiscalPeriodId) entryWhere.fiscalPeriodId = fiscalPeriodId;
+
+    const [accounts, journalLines, budgets, payments, expenses] = await Promise.all([
+      prisma.chartOfAccount.findMany({ orderBy: { code: 'asc' } }),
+      prisma.journalLine.findMany({
+        where: { journalEntry: entryWhere },
+        include: { account: true, journalEntry: true },
+      }),
+      prisma.budget.findMany({
+        where: {
+          status: { in: ['APPROVED', 'REVISED'] },
+          ...(typeof businessUnitId === 'string' && businessUnitId ? { businessUnitId } : {}),
+        },
+        include: { businessUnit: true, lines: { include: { costCenter: true } } },
+      }),
+      prisma.payment.findMany({ where: { status: 'CONFIRMED' } }),
+      prisma.expense.findMany({ where: { status: { in: ['PAID', 'POSTED'] } } }),
+    ]);
+
+    const balances = accounts.map((acc) => {
+      const lines = journalLines.filter((l) => l.accountCode === acc.code);
+      let debitCents = 0n;
+      let creditCents = 0n;
+      for (const l of lines) {
+        debitCents += toCents(l.debit);
+        creditCents += toCents(l.credit);
+      }
+      const netCents = acc.normalBalance === 'DEBIT' ? debitCents - creditCents : creditCents - debitCents;
+      return {
+        code: acc.code,
+        name: acc.name,
+        type: acc.type,
+        normalBalance: acc.normalBalance,
+        debit: Number(fromCents(debitCents)),
+        credit: Number(fromCents(creditCents)),
+        balance: Number(fromCents(netCents)),
+      };
+    });
+
+    const revenueAccounts = balances.filter((b) => b.type === 'REVENUE');
+    const expenseAccounts = balances.filter((b) => b.type === 'EXPENSE');
+    const assetAccounts = balances.filter((b) => b.type === 'ASSET');
+    const liabilityAccounts = balances.filter((b) => b.type === 'LIABILITY');
+    const equityAccounts = balances.filter((b) => b.type === 'EQUITY');
+
+    const totalRevenue = revenueAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const totalExpense = expenseAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const netIncome = totalRevenue - totalExpense;
+
+    const totalAssets = assetAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const totalLiabilities = liabilityAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const totalEquityBeforeCurrentIncome = equityAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const totalLiabilitiesAndEquity = totalLiabilities + totalEquityBeforeCurrentIncome + netIncome;
+
+    const cashInFromCustomers = payments.reduce((acc, p) => acc + Number(p.netAmount), 0);
+    const cashOutForExpenses = expenses.reduce((acc, e) => acc + Number(e.totalAmount), 0);
+
+    const budgetVsActualRows = budgets.flatMap((b) =>
+      b.lines.map((l) => {
+        const alloc = Number(l.allocatedAmount);
+        const comm = Number(l.committedAmount);
+        const act = Number(l.actualAmount);
+        const avail = Number(subMoney(subMoney(l.allocatedAmount, l.committedAmount), l.actualAmount));
+        return {
+          budgetDocNumber: b.docNumber,
+          unitName: b.businessUnit.name,
+          costCenterCode: l.costCenter.code,
+          category: l.category,
+          accountCode: l.accountCode,
+          description: l.description,
+          allocated: alloc,
+          committed: comm,
+          actual: act,
+          available: avail,
+          absorptionRate: alloc > 0 ? Math.round(((comm + act) / alloc) * 100) : 0,
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: {
+        incomeStatement: {
+          revenueAccounts,
+          expenseAccounts,
+          totalRevenue,
+          totalExpense,
+          netIncome,
+        },
+        balanceSheet: {
+          assetAccounts,
+          liabilityAccounts,
+          equityAccounts,
+          currentPeriodEarnings: netIncome,
+          totalAssets,
+          totalLiabilities,
+          totalEquity: totalEquityBeforeCurrentIncome + netIncome,
+          totalLiabilitiesAndEquity,
+          isBalanced: Math.abs(totalAssets - totalLiabilitiesAndEquity) < 1,
+        },
+        cashFlowStatement: {
+          cashInFromCustomers,
+          cashOutForExpenses,
+          netOperatingCashFlow: cashInFromCustomers - cashOutForExpenses,
+        },
+        budgetVsActualRows,
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 3. CSV EXPORT WITH PERMISSION & METADATA HEADER
+reportsRouter.get('/export', requirePermission('report:export'), async (req, res, next) => {
+  try {
+    const type = typeof req.query.type === 'string' ? req.query.type : 'budget-vs-actual';
+    const timestamp = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    const lines: string[] = [
+      `# LAPORAN ERP KEUANGAN & OPERASIONAL PMO UTAMA [STATUS DATA: DATA DEMO]`,
+      `# Jenis Laporan: ${type.toUpperCase()}`,
+      `# Waktu Ekspor (Asia/Jakarta): ${timestamp}`,
+      `# Diekspor Oleh: ${req.user!.fullName} (${req.user!.roleCode})`,
+      ``,
+    ];
+
+    if (type === 'journals') {
+      const journals = await prisma.journalEntry.findMany({
+        include: { businessUnit: true },
+        orderBy: { entryDate: 'desc' },
+      });
+      lines.push('No Jurnal,Tanggal,Unit Bisnis,Sumber,Ref Dokumen,Uraian,Total Debit (IDR),Total Kredit (IDR),Status');
+      for (const j of journals) {
+        lines.push(
+          `"${j.journalNumber}","${j.entryDate.toISOString().slice(0, 10)}","${j.businessUnit.code}","${j.sourceType}","${j.sourceDocNumber || '-'}","${j.description.replace(/"/g, '""')}",${j.totalDebit},${j.totalCredit},"${j.status}"`
+        );
+      }
+    } else {
+      const budgets = await prisma.budget.findMany({
+        include: { businessUnit: true, lines: { include: { costCenter: true } } },
+      });
+      lines.push('No Anggaran,Unit Bisnis,Cost Center,Kategori,Kode Akun,Mata Anggaran,Plafon (IDR),Komitmen (IDR),Aktual (IDR),Sisa Tersedia (IDR)');
+      for (const b of budgets) {
+        for (const l of b.lines) {
+          const avail = subMoney(subMoney(l.allocatedAmount, l.committedAmount), l.actualAmount);
+          lines.push(
+            `"${b.docNumber}","${b.businessUnit.name}","${l.costCenter.code}","${l.category}","${l.accountCode}","${l.description.replace(/"/g, '""')}",${l.allocatedAmount},${l.committedAmount},${l.actualAmount},${avail}`
+          );
+        }
+      }
+    }
+
+    await recordAuditLog({
+      actorId: req.user!.userId,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: 'REPORT_EXPORTED',
+      module: 'REPORT',
+      entityType: 'ReportExport',
+      entityId: type,
+      entityCode: type.toUpperCase(),
+      summary: `Mengekspor laporan CSV (${type})`,
+      requestId: req.requestId,
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="pmo-erp-${type}-${Date.now()}.csv"`);
+    res.send(lines.join('\n'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 4. CENTRAL APPROVAL INBOX
+reportsRouter.get('/approvals', async (req, res, next) => {
+  try {
+    const { status, module } = req.query;
+    const where: Record<string, unknown> = {};
+    if (typeof status === 'string' && status) where.status = status;
+    if (typeof module === 'string' && module) where.module = module;
+
+    const approvals = await prisma.approvalRequest.findMany({
+      where,
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    });
+
+    res.json({
+      success: true,
+      data: approvals.map((a) => ({
+        ...a,
+        amount: Number(a.amount),
+      })),
+      meta: { total: approvals.length, requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 5. NOTIFICATIONS, AUDIT TRAIL & ATTACHMENTS
+reportsRouter.get('/notifications', async (req, res, next) => {
+  try {
+    const notifications = await prisma.notification.findMany({
+      where: {
+        OR: [{ userId: req.user!.userId }, { roleCode: req.user!.roleCode }, { roleCode: null }],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+    });
+    res.json({ success: true, data: notifications, meta: { requestId: req.requestId } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.patch('/notifications/:id/read', async (req, res, next) => {
+  try {
+    const updated = await prisma.notification.update({
+      where: { id: req.params.id },
+      data: { isRead: true },
+    });
+    res.json({ success: true, data: updated, meta: { requestId: req.requestId } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/audit-logs', requirePermission('audit:view'), async (req, res, next) => {
+  try {
+    const { module, action, search } = req.query;
+    const where: Record<string, unknown> = {};
+    if (typeof module === 'string' && module) where.module = module;
+    if (typeof action === 'string' && action) where.action = action;
+    if (typeof search === 'string' && search.trim()) {
+      where.OR = [
+        { summary: { contains: search.trim(), mode: 'insensitive' } },
+        { entityCode: { contains: search.trim(), mode: 'insensitive' } },
+        { actorName: { contains: search.trim(), mode: 'insensitive' } },
+      ];
+    }
+
+    const logs = await prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    res.json({
+      success: true,
+      data: logs,
+      meta: { total: logs.length, requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Safe File Attachment Metadata Registration (Validating MIME, Extension, and Size Limit)
+const ALLOWED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'text/csv'];
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+
+const attachmentSchema = z.object({
+  displayName: z.string().min(3),
+  mimeType: z.string(),
+  sizeBytes: z.number().int().positive(),
+  module: z.string().min(2),
+  entityId: z.string().min(1),
+  documentType: z.string().default('SUPPORTING_DOC'),
+});
+
+reportsRouter.post('/attachments', async (req, res, next) => {
+  try {
+    const parsed = attachmentSchema.parse(req.body);
+
+    if (!ALLOWED_MIME_TYPES.includes(parsed.mimeType)) {
+      throw new AppError(
+        400,
+        'UNSUPPORTED_FILE_TYPE',
+        `Tipe file "${parsed.mimeType}" ditolak. Hanya mendukung PDF, PNG, JPEG, atau CSV.`
+      );
+    }
+
+    if (parsed.sizeBytes > MAX_UPLOAD_BYTES) {
+      throw new AppError(
+        400,
+        'FILE_TOO_LARGE',
+        `Ukuran file (${(parsed.sizeBytes / 1048576).toFixed(2)} MB) melebihi batas maksimum 10 MB.`
+      );
+    }
+
+    // Never trust user-supplied path in storageKey
+    const safeExt = parsed.displayName.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'bin';
+    const storageKey = `priv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
+
+    const created = await prisma.fileAttachment.create({
+      data: {
+        displayName: parsed.displayName.replace(/[\\/]/g, '_'),
+        storageKey,
+        mimeType: parsed.mimeType,
+        sizeBytes: parsed.sizeBytes,
+        module: parsed.module,
+        entityId: parsed.entityId,
+        documentType: parsed.documentType,
+        uploadedById: req.user!.userId,
+        uploadedByName: req.user!.fullName,
+      },
+    });
+
+    await recordAuditLog({
+      actorId: req.user!.userId,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: 'ATTACHMENT_UPLOADED',
+      module: parsed.module,
+      entityType: 'FileAttachment',
+      entityId: created.id,
+      entityCode: created.displayName,
+      summary: `Mengunggah dokumen pendukung "${created.displayName}" (${(created.sizeBytes / 1024).toFixed(1)} KB)`,
+      requestId: req.requestId,
+    });
+
+    res.status(201).json({ success: true, data: created, meta: { requestId: req.requestId } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 6. STRATEGIC EVALUATION & NEXT-PERIOD BUDGET CEILING RECOMMENDATION
+reportsRouter.get('/strategy/evaluations', requirePermission('strategy:view'), async (req, res, next) => {
+  try {
+    const evaluations = await prisma.strategicEvaluation.findMany({
+      include: { fiscalPeriod: true, businessUnit: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({
+      success: true,
+      data: evaluations.map((ev) => ({
+        ...ev,
+        targetRevenue: Number(ev.targetRevenue),
+        actualRevenue: Number(ev.actualRevenue),
+        budgetCeiling: Number(ev.budgetCeiling),
+        actualExpense: Number(ev.actualExpense),
+        netCashflow: Number(ev.netCashflow),
+        recommendedNextCeiling: Number(ev.recommendedNextCeiling),
+        recommendedRevenueTarget: Number(ev.recommendedRevenueTarget),
+      })),
+      meta: { total: evaluations.length, requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const createEvalSchema = z.object({
+  fiscalPeriodId: z.string().min(1),
+  businessUnitId: z.string().min(1),
+  varianceAnalysis: z.string().min(10),
+  riskSummary: z.string().min(10),
+  recommendedNextCeiling: z.number().positive(),
+  recommendedRevenueTarget: z.number().positive(),
+});
+
+reportsRouter.post('/strategy/evaluations', requirePermission('strategy:manage'), async (req, res, next) => {
+  try {
+    const parsed = createEvalSchema.parse(req.body);
+
+    const [budgets, invoices, expenses] = await Promise.all([
+      prisma.budget.findMany({
+        where: { businessUnitId: parsed.businessUnitId, fiscalPeriodId: parsed.fiscalPeriodId },
+      }),
+      prisma.customerInvoice.findMany({
+        where: { businessUnitId: parsed.businessUnitId, status: { not: 'VOID' } },
+      }),
+      prisma.expense.findMany({
+        where: { businessUnitId: parsed.businessUnitId, status: { in: ['PAID', 'POSTED'] } },
+      }),
+    ]);
+
+    const targetRevenue = budgets.reduce((acc, b) => acc + Number(b.revenueTarget), 0);
+    const budgetCeiling = budgets.reduce((acc, b) => acc + Number(b.totalAllocated), 0);
+    const actualRevenue = invoices.reduce((acc, i) => acc + Number(i.totalAmount), 0);
+    const actualExpense = expenses.reduce((acc, e) => acc + Number(e.totalAmount), 0);
+    const netCashflow = actualRevenue - actualExpense;
+
+    const count = await prisma.strategicEvaluation.count();
+    const evalNumber = `EVAL-2026-${String(count + 1).padStart(3, '0')}`;
+
+    const created = await prisma.strategicEvaluation.create({
+      data: {
+        evalNumber,
+        fiscalPeriodId: parsed.fiscalPeriodId,
+        businessUnitId: parsed.businessUnitId,
+        targetRevenue: fromCents(toCents(targetRevenue)),
+        actualRevenue: fromCents(toCents(actualRevenue)),
+        budgetCeiling: fromCents(toCents(budgetCeiling)),
+        actualExpense: fromCents(toCents(actualExpense)),
+        netCashflow: fromCents(toCents(netCashflow)),
+        varianceAnalysis: parsed.varianceAnalysis.trim(),
+        riskSummary: parsed.riskSummary.trim(),
+        recommendedNextCeiling: fromCents(toCents(parsed.recommendedNextCeiling)),
+        recommendedRevenueTarget: fromCents(toCents(parsed.recommendedRevenueTarget)),
+        gmDecision: 'PENDING',
+      },
+      include: { fiscalPeriod: true, businessUnit: true },
+    });
+
+    await recordAuditLog({
+      actorId: req.user!.userId,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: 'STRATEGIC_EVALUATION_CREATED',
+      module: 'STRATEGY',
+      entityType: 'StrategicEvaluation',
+      entityId: created.id,
+      entityCode: created.evalNumber,
+      summary: `Menyusun evaluasi strategis periode ${created.evalNumber} untuk ${created.businessUnit.name}`,
+      requestId: req.requestId,
+    });
+
+    res.status(201).json({ success: true, data: created, meta: { requestId: req.requestId } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const decideEvalSchema = z.object({
+  decision: z.enum(['APPROVED', 'REVISION_REQUIRED', 'REJECTED']),
+  note: z.string().min(5, 'Catatan keputusan strategis GM wajib diisi.'),
+  adjustedNextCeiling: z.number().positive().optional(),
+  adjustedRevenueTarget: z.number().positive().optional(),
+});
+
+reportsRouter.post(
+  '/strategy/evaluations/:id/decide',
+  requireRoles('GM_PMO'),
+  async (req, res, next) => {
+    try {
+      const parsed = decideEvalSchema.parse(req.body);
+      const ev = await prisma.strategicEvaluation.findUnique({ where: { id: req.params.id } });
+      if (!ev) throw new AppError(404, 'EVAL_NOT_FOUND', 'Dokumen evaluasi strategis tidak ditemukan.');
+
+      const updated = await prisma.strategicEvaluation.update({
+        where: { id: ev.id },
+        data: {
+          gmDecision: parsed.decision,
+          gmDecisionNote: parsed.note.trim(),
+          recommendedNextCeiling: parsed.adjustedNextCeiling
+            ? fromCents(toCents(parsed.adjustedNextCeiling))
+            : ev.recommendedNextCeiling,
+          recommendedRevenueTarget: parsed.adjustedRevenueTarget
+            ? fromCents(toCents(parsed.adjustedRevenueTarget))
+            : ev.recommendedRevenueTarget,
+          decidedById: req.user!.userId,
+          decidedByName: req.user!.fullName,
+          decidedAt: new Date(),
+        },
+        include: { fiscalPeriod: true, businessUnit: true },
+      });
+
+      await recordAuditLog({
+        actorId: req.user!.userId,
+        actorName: req.user!.fullName,
+        actorRole: req.user!.roleCode,
+        action: 'STRATEGIC_EVALUATION_DECIDED',
+        module: 'STRATEGY',
+        entityType: 'StrategicEvaluation',
+        entityId: updated.id,
+        entityCode: updated.evalNumber,
+        summary: `Keputusan GM PMO atas evaluasi ${updated.evalNumber}: ${updated.gmDecision}. Catatan: ${parsed.note}`,
+        requestId: req.requestId,
+      });
+
+      res.json({ success: true, data: updated, meta: { requestId: req.requestId } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);

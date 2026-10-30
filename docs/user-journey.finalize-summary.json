@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "workflow",
+  "quality": "showcase",
+  "specification": {
+    "path": "/Users/syahbintang/PmoFinance/.archify/workflow-user-journey-20261030-061500/candidate.json",
+    "sha256": "cb1185269567d88bd1b62c1efca39f3cc21e2a6b5fc6c4bcf36cc3c33d98a8c3",
+    "bytes": 7464
+  },
+  "artifact": {
+    "path": "/Users/syahbintang/PmoFinance/docs/user-journey.html",
+    "sha256": "89dd430c605bb6ad986f5826695be757241cd43328263762ce69ef852e5a3a11",
+    "bytes": 837285
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/Users/syahbintang/PmoFinance/docs/user-journey.finalize.json",
+    "summaryReceipt": "/Users/syahbintang/PmoFinance/docs/user-journey.finalize-summary.json",
+    "browserCheckReceipt": "/Users/syahbintang/PmoFinance/docs/user-journey.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-29T23:16:43.723Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 4306,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

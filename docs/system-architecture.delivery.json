@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "86ea5ada-8232-4aaa-a7b7-ab5651b190ee",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/syahbintang/PmoFinance/.archify/architecture-pmo-erp-20261030-061500/candidate.json",
+  "output": "/Users/syahbintang/PmoFinance/docs/system-architecture.html",
+  "specification": {
+    "sha256": "29118aab69b76321edd8f90622a83a1b06452b2eae8e951b70c3769af40a24f4",
+    "bytes": 6843
+  },
+  "artifact": {
+    "sha256": "27307c89cbeab49c691acbaeb06b55c21876b420b932cc53ab03ddfcfd76052b",
+    "bytes": 838908
+  }
+}

@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "/Users/syahbintang/PmoFinance/.archify/architecture-pmo-erp-20261030-061500/candidate.json",
+    "sha256": "29118aab69b76321edd8f90622a83a1b06452b2eae8e951b70c3769af40a24f4",
+    "bytes": 6843
+  },
+  "artifact": {
+    "path": "/Users/syahbintang/PmoFinance/docs/system-architecture.html",
+    "sha256": "27307c89cbeab49c691acbaeb06b55c21876b420b932cc53ab03ddfcfd76052b",
+    "bytes": 838908
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/Users/syahbintang/PmoFinance/docs/system-architecture.finalize.json",
+    "summaryReceipt": "/Users/syahbintang/PmoFinance/docs/system-architecture.finalize-summary.json",
+    "browserCheckReceipt": "/Users/syahbintang/PmoFinance/docs/system-architecture.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-29T23:16:43.723Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3246,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  },
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "resolvedCrossovers": 4,
+      "routesOverSuggestedBends": 3,
+      "routesOverSuggestedStretch": 1
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [
+        {
+          "left": {
+            "id": "gateway-revenue",
+            "from": "gateway",
+            "to": "revenue_mod",
+            "label": "",
+            "collectionIndex": 5,
+            "artifactIndex": 6
+          },
+          "right": {
+            "id": "bank-to-revenue",
+            "from": "bank_gw",
+            "to": "revenue_mod",
+            "label": "Webhook Notifikasi",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "point": [
+            593.6212121212121,
+            307.02525252525254
+          ],
+          "sharedNode": "revenue_mod"
+        },
+        {
+          "left": {
+            "id": "gateway-accounting",
+            "from": "gateway",
+            "to": "accounting_mod",
+            "label": "",
+            "collectionIndex": 6,
+            "artifactIndex": 7
+          },
+          "right": {
+            "id": "bank-to-revenue",
+            "from": "bank_gw",
+            "to": "revenue_mod",
+            "label": "Webhook Notifikasi",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "point": [
+            587.2222222222222,
+            310
+          ]
+        },
+        {
+          "left": {
+            "id": "gateway-recon",
+            "from": "gateway",
+            "to": "recon_mod",
+            "label": "",
+            "collectionIndex": 7,
+            "artifactIndex": 8
+          },
+          "right": {
+            "id": "gateway-audit",
+            "from": "gateway",
+            "to": "audit_store",
+            "label": "Catat Audit Trail",
+            "collectionIndex": 14,
+            "artifactIndex": 15
+          },
+          "point": [
+            594,
+            422
+          ],
+          "sharedNode": "gateway"
+        },
+        {
+          "left": {
+            "id": "bank-to-revenue",
+            "from": "bank_gw",
+            "to": "revenue_mod",
+            "label": "Webhook Notifikasi",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "right": {
+            "id": "gateway-audit",
+            "from": "gateway",
+            "to": "audit_store",
+            "label": "Catat Audit Trail",
+            "collectionIndex": 14,
+            "artifactIndex": 15
+          },
+          "point": [
+            586,
+            422
+          ]
+        }
+      ],
+      "detours": [
+        {
+          "relationship": {
+            "id": "web-to-gateway",
+            "from": "web",
+            "to": "gateway",
+            "label": "REST API + JWT",
+            "collectionIndex": 1,
+            "artifactIndex": 2
+          },
+          "bends": 3,
+          "stretch": 1.296
+        },
+        {
+          "relationship": {
+            "id": "gateway-revenue",
+            "from": "gateway",
+            "to": "revenue_mod",
+            "label": "",
+            "collectionIndex": 5,
+            "artifactIndex": 6
+          },
+          "bends": 4,
+          "stretch": 1.405
+        },
+        {
+          "relationship": {
+            "id": "gateway-accounting",
+            "from": "gateway",
+            "to": "accounting_mod",
+            "label": "",
+            "collectionIndex": 6,
+            "artifactIndex": 7
+          },
+          "bends": 4,
+          "stretch": 1.3
+        }
+      ],
+      "truncated": false
+    },
+    "hints": [
+      "gateway has 6 relationships facing its right side, which fits 3 ports: make that side at least 102px, or move some of those neighbours so they face another side of gateway.",
+      "db has 5 relationships facing its left side, which fits 3 ports: make that side at least 88px, or move some of those neighbours so they face another side of db.",
+      "gateway → revenue_mod and bank_gw → revenue_mod cross next to revenue_mod: move node gateway or bank_gw so the two reach revenue_mod from different sides (for example one level with it, one directly above or below it).",
+      "gateway → accounting_mod crosses bank_gw → revenue_mod: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "gateway → recon_mod and gateway → audit_store cross next to gateway: move node recon_mod or audit_store so the two reach gateway from different sides (for example one level with it, one directly above or below it).",
+      "bank_gw → revenue_mod crosses gateway → audit_store: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "web → gateway needs 3 bends: move node web or gateway so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "gateway → revenue_mod needs 4 bends: move node gateway or revenue_mod so they share a row or column with matching centers, or sit diagonally with a clear corner."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

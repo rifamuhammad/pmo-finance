@@ -1,0 +1,299 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Peta Alur User Journey End-to-End ERP PMO UTama",
+    "subtitle": "Siklus Lengkap 9 Peran: Penganggaran Unit, Pengadaan 3-Way Match, Kasir POS, Akuntansi Jurnal, hingga Rekonsiliasi Bank",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "output": "docs/user-journey.html"
+  },
+  "lanes": [
+    {
+      "id": "lane_unit",
+      "label": "Manager Unit Bisnis"
+    },
+    {
+      "id": "lane_approver",
+      "label": "Executive & Finance Approval"
+    },
+    {
+      "id": "lane_procure",
+      "label": "Procurement & Rekanan"
+    },
+    {
+      "id": "lane_cashier",
+      "label": "Kasir POS & Pelanggan"
+    },
+    {
+      "id": "lane_accounting",
+      "label": "Akuntansi & Rekonsiliasi Bank"
+    }
+  ],
+  "phases": [
+    {
+      "id": "phase_budget",
+      "label": "Fase 1: Perencanaan & Otorisasi Plafon",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "phase_procure",
+      "label": "Fase 2: Pengajuan PR, PO & Kasir POS",
+      "fromCol": 2,
+      "toCol": 3
+    },
+    {
+      "id": "phase_settle",
+      "label": "Fase 3: 3-Way Match, Pembayaran & Jurnal Rekonsiliasi",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "draft_budget",
+    "approve_budget",
+    "submit_pr",
+    "reserve_commitment",
+    "issue_po",
+    "goods_receipt",
+    "pay_expense",
+    "post_adjustment",
+    "exec_dashboard"
+  ],
+  "nodes": [
+    {
+      "id": "draft_budget",
+      "lane": "lane_unit",
+      "col": 0,
+      "type": "frontend",
+      "label": "1. Draft Anggaran",
+      "sublabel": "Capex/Opex (/budgets)",
+      "tag": "DRAFT",
+      "width": 160
+    },
+    {
+      "id": "approve_budget",
+      "lane": "lane_approver",
+      "col": 1,
+      "type": "security",
+      "label": "2. Otorisasi RKAP",
+      "sublabel": "Approval GM PMO",
+      "tag": "APPROVED",
+      "icon": "decision",
+      "width": 160
+    },
+    {
+      "id": "submit_pr",
+      "lane": "lane_unit",
+      "col": 2,
+      "type": "frontend",
+      "label": "3. Pengajuan PR",
+      "sublabel": "Validasi Sisa Plafon",
+      "tag": "PR Baru",
+      "width": 160
+    },
+    {
+      "id": "reserve_commitment",
+      "lane": "lane_approver",
+      "col": 2,
+      "type": "security",
+      "label": "4. Kunci Komitmen",
+      "sublabel": "Budget Commitment",
+      "tag": "RESERVED",
+      "icon": "security",
+      "width": 160
+    },
+    {
+      "id": "issue_po",
+      "lane": "lane_procure",
+      "col": 3,
+      "type": "backend",
+      "label": "5. Kuotasi & PO",
+      "sublabel": "Pilih Rekanan Terbaik",
+      "tag": "PO ISSUED",
+      "width": 160
+    },
+    {
+      "id": "open_shift",
+      "lane": "lane_cashier",
+      "col": 3,
+      "type": "frontend",
+      "label": "6. Buka Kasir POS",
+      "sublabel": "Input Modal Awal Kas",
+      "tag": "Shift OPEN",
+      "width": 160
+    },
+    {
+      "id": "goods_receipt",
+      "lane": "lane_procure",
+      "col": 4,
+      "type": "backend",
+      "label": "7. Terima Barang",
+      "sublabel": "Validasi 3-Way Match",
+      "tag": "GR Parsial/Penuh",
+      "width": 160
+    },
+    {
+      "id": "pos_payment",
+      "lane": "lane_cashier",
+      "col": 4,
+      "type": "external",
+      "label": "8. Kasir & Bayar",
+      "sublabel": "Tunai / QRIS / VA",
+      "tag": "Kuitansi Sah",
+      "width": 160
+    },
+    {
+      "id": "pay_expense",
+      "lane": "lane_approver",
+      "col": 4,
+      "type": "security",
+      "label": "9. Pencairan Biaya",
+      "sublabel": "Finance Pay & Post",
+      "tag": "Cairkan Beban",
+      "icon": "success",
+      "width": 160
+    },
+    {
+      "id": "close_shift",
+      "lane": "lane_cashier",
+      "col": 5,
+      "type": "frontend",
+      "label": "10. Tutup Kasir",
+      "sublabel": "Hitung Fisik & Setor",
+      "tag": "Setoran Bank",
+      "width": 160
+    },
+    {
+      "id": "post_adjustment",
+      "lane": "lane_accounting",
+      "col": 5,
+      "type": "backend",
+      "label": "11. Posting Jurnal",
+      "sublabel": "Double-Entry & Recon",
+      "tag": "MATCHED",
+      "width": 160
+    },
+    {
+      "id": "exec_dashboard",
+      "lane": "lane_approver",
+      "col": 5,
+      "type": "cloud",
+      "label": "12. Evaluasi KPI",
+      "sublabel": "Dashboard & Laporan",
+      "tag": "Executive Review",
+      "icon": "flag",
+      "width": 160
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_budget_submit",
+      "from": "draft_budget",
+      "to": "approve_budget",
+      "label": "Ajukan Pengesahan",
+      "variant": "default"
+    },
+    {
+      "id": "e_budget_approved",
+      "from": "approve_budget",
+      "to": "submit_pr",
+      "label": "Plafon Disahkan",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_pr_verify",
+      "from": "submit_pr",
+      "to": "reserve_commitment",
+      "label": "Cek Plafon",
+      "variant": "security"
+    },
+    {
+      "id": "e_pr_to_po",
+      "from": "reserve_commitment",
+      "to": "issue_po",
+      "label": "Komitmen Terkunci",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_po_to_gr",
+      "from": "issue_po",
+      "to": "goods_receipt",
+      "label": "Kirim Barang",
+      "variant": "default"
+    },
+    {
+      "id": "e_gr_to_pay",
+      "from": "goods_receipt",
+      "to": "pay_expense",
+      "label": "3-Way Match Valid",
+      "variant": "security"
+    },
+    {
+      "id": "e_shift_to_pay",
+      "from": "open_shift",
+      "to": "pos_payment",
+      "label": "Kasir Melayani",
+      "variant": "default"
+    },
+    {
+      "id": "e_pos_to_close",
+      "from": "pos_payment",
+      "to": "close_shift",
+      "label": "Rekap Shift",
+      "variant": "default"
+    },
+    {
+      "id": "e_pay_to_journal",
+      "from": "pay_expense",
+      "to": "post_adjustment",
+      "label": "Auto-Jurnal Beban",
+      "variant": "dashed"
+    },
+    {
+      "id": "e_close_to_recon",
+      "from": "close_shift",
+      "to": "post_adjustment",
+      "label": "Cocokkan Setoran",
+      "variant": "dashed"
+    },
+    {
+      "id": "e_journal_to_dash",
+      "from": "post_adjustment",
+      "to": "exec_dashboard",
+      "label": "Buku Besar & KPI",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Pemisahan Wewenang (Segregation of Duties)",
+      "items": [
+        "Manager unit penyusun draft tidak dapat menyetujui anggaran atau PR miliknya sendiri",
+        "Pengadaan bernilai >= Rp 25 Juta memerlukan eskalasi persetujuan ke GM PMO",
+        "Auditor internal memiliki akses baca menyeluruh (Read-Only) tanpa hak mutasi data"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Integritas 3-Way Match & Pencadangan Plafon",
+      "items": [
+        "Saat PR disetujui, dana langsung dicadangkan (Budget Commitment) guna mencegah over-budget",
+        "Wajib melampirkan minimal 3 penawaran vendor sebelum PO dapat diterbitkan",
+        "Faktur rekanan diverifikasi otomatis terhadap kuantitas Goods Receipt yang benar-benar diterima"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Disiplin Kasir POS & Rekonsiliasi Bank",
+      "items": [
+        "Setiap shift kasir wajib dibuka dengan hitung modal awal dan ditutup dengan berita acara fisik",
+        "Selisih kas fisik melebihi toleransi Rp 50.000 wajib diajukan ke Finance Manager",
+        "Mutasi rekening koran dicocokkan otomatis ke kuitansi pembayaran dan setoran kasir"
+      ]
+    }
+  ]
+}
