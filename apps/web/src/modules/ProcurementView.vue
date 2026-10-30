@@ -928,10 +928,17 @@ onMounted(loadAllProcurementData);
         <div class="form-field">
           <label for="pr-bline" class="form-label">Pos Mata Anggaran Sumber (Hanya Anggaran Disetujui)</label>
           <select id="pr-bline" v-model="prForm.budgetLineId" class="select" required>
+            <option v-if="availableBudgetLines.length === 0" value="" disabled selected>
+              Belum ada anggaran berstatus APPROVED
+            </option>
+            <option v-else value="" disabled selected>-- Pilih Pos Mata Anggaran Sumber --</option>
             <option v-for="bl in availableBudgetLines" :key="bl.id" :value="bl.id">
-              {{ bl.budgetDocNumber }} - {{ bl.description }} (Tersedia: {{ formatRupiah(bl.availableAmount) }})
+              {{ bl.budgetDocNumber }} - {{ bl.description }} (Sisa Pagu: {{ formatRupiah(bl.availableAmount) }})
             </option>
           </select>
+          <span v-if="availableBudgetLines.length === 0" class="input-hint" style="color: var(--danger-base, #dc2626); font-size: 0.78rem; margin-top: 4px">
+            ⚠️ Belum ada anggaran berstatus APPROVED. Harap buat dan setujui anggaran di menu <strong>Modal & Anggaran</strong> terlebih dahulu.
+          </span>
         </div>
 
         <div class="form-field">
@@ -1082,10 +1089,14 @@ onMounted(loadAllProcurementData);
         </div>
 
         <div class="form-field">
-          <label for="exp-bline" class="form-label">Pos Mata Anggaran</label>
+          <label for="exp-bline" class="form-label">Pos Mata Anggaran Beban</label>
           <select id="exp-bline" v-model="expenseForm.budgetLineId" class="select" required>
+            <option v-if="availableBudgetLines.length === 0" value="" disabled selected>
+              Belum ada anggaran berstatus APPROVED
+            </option>
+            <option v-else value="" disabled selected>-- Pilih Pos Mata Anggaran --</option>
             <option v-for="bl in availableBudgetLines" :key="bl.id" :value="bl.id">
-              {{ bl.budgetDocNumber }} - {{ bl.description }} (Tersedia: {{ formatRupiah(bl.availableAmount) }})
+              {{ bl.budgetDocNumber }} - {{ bl.description }} (Sisa Pagu: {{ formatRupiah(bl.availableAmount) }})
             </option>
           </select>
         </div>
