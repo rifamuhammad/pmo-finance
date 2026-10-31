@@ -125,7 +125,7 @@ onMounted(loadApprovals);
       <div>
         <h1 class="page-title">Kotak Masuk Persetujuan</h1>
         <p class="page-desc">
-          Pusat kendali persetujuan berjenjang dengan penegakan tata kelola pemisahan tugas (Segregation of Duties).
+          Otorisasi berjenjang pengajuan anggaran, pengadaan barang/jasa, dan pengeluaran biaya.
         </p>
       </div>
       <button type="button" class="btn btn-sm" @click="loadApprovals">

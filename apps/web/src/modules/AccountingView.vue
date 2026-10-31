@@ -2,9 +2,9 @@
   <div class="accounting-view">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Akuntansi, Buku Besar & Jurnal</h1>
+        <h1 class="page-title">Akuntansi & Buku Besar</h1>
         <p class="page-desc">
-          Buku besar real-time berimbang (double-entry), penomoran jurnal berurutan, analisis umur piutang/utang, dan bagan akun terstandarisasi.
+          Bagan akun standar (CoA), jurnal transaksi umum, dan saldo buku besar.
         </p>
       </div>
       <div class="btn-row">

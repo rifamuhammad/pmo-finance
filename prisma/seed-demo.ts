@@ -56,8 +56,26 @@ async function main() {
   await prisma.budgetRevision.deleteMany();
   await prisma.budgetLine.deleteMany();
   await prisma.budget.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.role.deleteMany();
+
+  // Remember existing users' business unit codes before wiping businessUnit table
+  const userUnitCodes = new Map<string, string>();
+  try {
+    const usersWithUnits = await prisma.user.findMany({
+      where: { businessUnitId: { not: null } },
+      include: { businessUnit: true },
+    });
+    for (const u of usersWithUnits) {
+      if (u.businessUnit?.code) {
+        userUnitCodes.set(u.id, u.businessUnit.code);
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read existing user business unit mappings:', err);
+  }
+
+  // NOTE: User and Role tables are preserved per requirement!
+  // await prisma.user.deleteMany();
+  // await prisma.role.deleteMany();
   await prisma.costCenter.deleteMany();
   await prisma.fundSource.deleteMany();
   await prisma.fiscalPeriod.deleteMany();
@@ -272,7 +290,16 @@ async function main() {
   ];
 
   for (const r of rolesData) {
-    await prisma.role.create({ data: r });
+    await prisma.role.upsert({
+      where: { code: r.code },
+      update: {
+        name: r.name,
+        description: r.description,
+        permissions: r.permissions,
+        approvalLimit: r.approvalLimit,
+      },
+      create: r,
+    });
   }
 
   // 3. Business Units (4 Divisi Utama PMO UTama + Kantor Pusat), Cost Centers, Fund Sources & Fiscal Periods
@@ -325,6 +352,19 @@ async function main() {
   const unitDiklat = unitTci;
   const unitKonsultansi = unitItSolution;
   const unitOps = unitPusat;
+
+  // Re-link existing users to newly created business units
+  const allCreatedUnits = await prisma.businessUnit.findMany();
+  const unitIdByCode = new Map(allCreatedUnits.map((bu) => [bu.code, bu.id]));
+  for (const [userId, buCode] of userUnitCodes.entries()) {
+    const targetBuId = unitIdByCode.get(buCode);
+    if (targetBuId) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { businessUnitId: targetBuId },
+      }).catch(() => {});
+    }
+  }
 
   // Cost Centers per Division
   const ccItsEng = await prisma.costCenter.create({
@@ -403,8 +443,14 @@ async function main() {
   // 4. Users for All 9 Roles (Demo Password: DemoErp!2026)
   const demoPassHash = hashPassword('DemoErp!2026');
 
-  const userGm = await prisma.user.create({
-    data: {
+  const userGm = await prisma.user.upsert({
+    where: { email: 'gm@pmoutama.demo.id' },
+    update: {
+      fullName: 'Ir. Hendra Wijaya, MBA (GM PMO)',
+      roleCode: 'GM_PMO',
+      businessUnitId: null,
+    },
+    create: {
       email: 'gm@pmoutama.demo.id',
       fullName: 'Ir. Hendra Wijaya, MBA (GM PMO)',
       passwordHash: demoPassHash,
@@ -413,8 +459,14 @@ async function main() {
     },
   });
 
-  const userFin = await prisma.user.create({
-    data: {
+  const userFin = await prisma.user.upsert({
+    where: { email: 'finance@pmoutama.demo.id' },
+    update: {
+      fullName: 'Siti Rahmawati, SE, Ak (Finance Manager)',
+      roleCode: 'FINANCE_MANAGER',
+      businessUnitId: null,
+    },
+    create: {
       email: 'finance@pmoutama.demo.id',
       fullName: 'Siti Rahmawati, SE, Ak (Finance Manager)',
       passwordHash: demoPassHash,
@@ -423,8 +475,14 @@ async function main() {
     },
   });
 
-  const userUnitMgr = await prisma.user.create({
-    data: {
+  const userUnitMgr = await prisma.user.upsert({
+    where: { email: 'unit.diklat@pmoutama.demo.id' },
+    update: {
+      fullName: 'Rendra Pratama, M.Kom (Manager Divisi TCI)',
+      roleCode: 'UNIT_MANAGER',
+      businessUnitId: unitDiklat.id,
+    },
+    create: {
       email: 'unit.diklat@pmoutama.demo.id',
       fullName: 'Rendra Pratama, M.Kom (Manager Divisi TCI)',
       passwordHash: demoPassHash,
@@ -433,8 +491,14 @@ async function main() {
     },
   });
 
-  await prisma.user.create({
-    data: {
+  await prisma.user.upsert({
+    where: { email: 'unit.tci@pmoutama.demo.id' },
+    update: {
+      fullName: 'Rendra Pratama, M.Kom (Manager Divisi TCI)',
+      roleCode: 'UNIT_MANAGER',
+      businessUnitId: unitTci.id,
+    },
+    create: {
       email: 'unit.tci@pmoutama.demo.id',
       fullName: 'Rendra Pratama, M.Kom (Manager Divisi TCI)',
       passwordHash: demoPassHash,
@@ -443,8 +507,14 @@ async function main() {
     },
   });
 
-  await prisma.user.create({
-    data: {
+  await prisma.user.upsert({
+    where: { email: 'unit.mice@pmoutama.demo.id' },
+    update: {
+      fullName: 'Bambang Hartono, SE (Manager Divisi MICE)',
+      roleCode: 'UNIT_MANAGER',
+      businessUnitId: unitMice.id,
+    },
+    create: {
       email: 'unit.mice@pmoutama.demo.id',
       fullName: 'Bambang Hartono, SE (Manager Divisi MICE)',
       passwordHash: demoPassHash,
@@ -453,8 +523,14 @@ async function main() {
     },
   });
 
-  await prisma.user.create({
-    data: {
+  await prisma.user.upsert({
+    where: { email: 'unit.its@pmoutama.demo.id' },
+    update: {
+      fullName: 'Nadia Kusuma, S.Kom (Manager Divisi IT Solution)',
+      roleCode: 'UNIT_MANAGER',
+      businessUnitId: unitItSolution.id,
+    },
+    create: {
       email: 'unit.its@pmoutama.demo.id',
       fullName: 'Nadia Kusuma, S.Kom (Manager Divisi IT Solution)',
       passwordHash: demoPassHash,
@@ -463,8 +539,14 @@ async function main() {
     },
   });
 
-  await prisma.user.create({
-    data: {
+  await prisma.user.upsert({
+    where: { email: 'unit.klinik@pmoutama.demo.id' },
+    update: {
+      fullName: 'dr. Farida Rahmawati (Manager Divisi Klinik Pratama)',
+      roleCode: 'UNIT_MANAGER',
+      businessUnitId: unitKlinik.id,
+    },
+    create: {
       email: 'unit.klinik@pmoutama.demo.id',
       fullName: 'dr. Farida Rahmawati (Manager Divisi Klinik Pratama)',
       passwordHash: demoPassHash,
@@ -473,8 +555,14 @@ async function main() {
     },
   });
 
-  const userProc = await prisma.user.create({
-    data: {
+  const userProc = await prisma.user.upsert({
+    where: { email: 'procurement@pmoutama.demo.id' },
+    update: {
+      fullName: 'Bagus Santoso (Procurement Officer)',
+      roleCode: 'PROCUREMENT',
+      businessUnitId: null,
+    },
+    create: {
       email: 'procurement@pmoutama.demo.id',
       fullName: 'Bagus Santoso (Procurement Officer)',
       passwordHash: demoPassHash,
@@ -483,8 +571,14 @@ async function main() {
     },
   });
 
-  const userAcc = await prisma.user.create({
-    data: {
+  const userAcc = await prisma.user.upsert({
+    where: { email: 'accounting@pmoutama.demo.id' },
+    update: {
+      fullName: 'Larasati Putri, CPA (Accounting Officer)',
+      roleCode: 'ACCOUNTING',
+      businessUnitId: null,
+    },
+    create: {
       email: 'accounting@pmoutama.demo.id',
       fullName: 'Larasati Putri, CPA (Accounting Officer)',
       passwordHash: demoPassHash,
@@ -493,8 +587,14 @@ async function main() {
     },
   });
 
-  const userCashier = await prisma.user.create({
-    data: {
+  const userCashier = await prisma.user.upsert({
+    where: { email: 'kasir@pmoutama.demo.id' },
+    update: {
+      fullName: 'Dimas Aditya (Petugas Kasir)',
+      roleCode: 'CASHIER',
+      businessUnitId: unitDiklat.id,
+    },
+    create: {
       email: 'kasir@pmoutama.demo.id',
       fullName: 'Dimas Aditya (Petugas Kasir)',
       passwordHash: demoPassHash,
@@ -503,8 +603,14 @@ async function main() {
     },
   });
 
-  const userTax = await prisma.user.create({
-    data: {
+  const userTax = await prisma.user.upsert({
+    where: { email: 'tax@pmoutama.demo.id' },
+    update: {
+      fullName: 'Fajar Nugroho, BKP (Tax Officer)',
+      roleCode: 'TAX_OFFICER',
+      businessUnitId: null,
+    },
+    create: {
       email: 'tax@pmoutama.demo.id',
       fullName: 'Fajar Nugroho, BKP (Tax Officer)',
       passwordHash: demoPassHash,
@@ -513,8 +619,14 @@ async function main() {
     },
   });
 
-  const userAuditor = await prisma.user.create({
-    data: {
+  const userAuditor = await prisma.user.upsert({
+    where: { email: 'auditor@pmoutama.demo.id' },
+    update: {
+      fullName: 'Dewi Anggraini, CIA (Internal Auditor)',
+      roleCode: 'AUDITOR',
+      businessUnitId: null,
+    },
+    create: {
       email: 'auditor@pmoutama.demo.id',
       fullName: 'Dewi Anggraini, CIA (Internal Auditor)',
       passwordHash: demoPassHash,
@@ -523,8 +635,14 @@ async function main() {
     },
   });
 
-  const userAdmin = await prisma.user.create({
-    data: {
+  const userAdmin = await prisma.user.upsert({
+    where: { email: 'admin@pmoutama.demo.id' },
+    update: {
+      fullName: 'Arif Budiman (System Administrator)',
+      roleCode: 'SUPER_ADMIN',
+      businessUnitId: null,
+    },
+    create: {
       email: 'admin@pmoutama.demo.id',
       fullName: 'Arif Budiman (System Administrator)',
       passwordHash: demoPassHash,
@@ -533,8 +651,15 @@ async function main() {
     },
   });
 
-  await prisma.user.create({
-    data: {
+  await prisma.user.upsert({
+    where: { email: 'superadmin@pmoutama.id' },
+    update: {
+      fullName: 'Super Administrator PMO UTama',
+      roleCode: 'SUPER_ADMIN',
+      businessUnitId: null,
+      isDemoData: false,
+    },
+    create: {
       email: 'superadmin@pmoutama.id',
       fullName: 'Super Administrator PMO UTama',
       passwordHash: demoPassHash,

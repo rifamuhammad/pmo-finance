@@ -2,9 +2,9 @@
   <div class="admin-audit-view">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Master Data Role, Otorisasi Menu &amp; Audit Trail</h1>
+        <h1 class="page-title">Pengaturan & Jejak Audit</h1>
         <p class="page-desc">
-          Pusat kendali master data peran (RBAC), otorisasi akses menu dinamis, tata kelola akun personel, kebijakan persetujuan, dan jejak audit server-side permanen.
+          Manajemen peran, hak akses personel, dan rekaman audit sistem.
         </p>
       </div>
       <div class="btn-row">

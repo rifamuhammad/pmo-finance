@@ -167,9 +167,9 @@ onMounted(loadReconciliation);
   <div class="reconciliation-view">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Rekening Bank & Rekonsiliasi Mutasi</h1>
+        <h1 class="page-title">Rekonsiliasi Bank</h1>
         <p class="page-desc">
-          Impor mutasi bank dengan pratinjau wajib, deteksi transaksi ganda berbasis fingerprint SHA-256, saran pencocokan otomatis, dan penguncian finalisasi.
+          Pencocokan mutasi rekening koran bank dengan pencatatan transaksi kas internal.
         </p>
       </div>
       <div class="btn-row">

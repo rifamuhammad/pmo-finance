@@ -1,776 +1,928 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
-import { apiFetch } from '../services/api';
 import logoPmoEmblem from '../assets/logo-pmo-emblem.png';
 
 const auth = useAuthStore();
 const router = useRouter();
 
+// Default kredensial (terisi otomatis di balik layar untuk kemudahan dev)
 const email = ref('finance@pmoutama.demo.id');
 const password = ref('DemoErp!2026');
+const showPassword = ref(false);
+const rememberMe = ref(true);
 const loading = ref(false);
 const errorMsg = ref('');
-const activeCategory = ref<'ALL' | 'EXEC' | 'UNIT' | 'OPS'>('ALL');
-const searchQuery = ref('');
 
-interface DemoAccount {
-  email: string;
-  fullName: string;
-  roleCode: string;
-  roleName: string;
-  businessUnitName: string;
-  demoPassword?: string;
-  category: 'EXEC' | 'UNIT' | 'OPS';
-  color: string;
-}
+// State untuk micro-motion interaktif & cinematic zoom portal transition
+const isPasswordFocused = ref(false);
+const isTransitioning = ref(false);
 
-const DEFAULT_ACCOUNTS: DemoAccount[] = [
-  {
-    email: 'admin@pmoutama.demo.id',
-    fullName: 'Arif Budiman (Super Admin)',
-    roleCode: 'SUPER_ADMIN',
-    roleName: 'System Administrator',
-    businessUnitName: 'Semua Unit (Pusat)',
-    demoPassword: 'DemoErp!2026',
-    category: 'EXEC',
-    color: '#4F46E5',
-  },
-  {
-    email: 'gm@pmoutama.demo.id',
-    fullName: 'Ir. Hendra Wijaya, MBA (GM PMO)',
-    roleCode: 'GM_PMO',
-    roleName: 'General Manager PMO',
-    businessUnitName: 'Semua Unit (Pusat)',
-    demoPassword: 'DemoErp!2026',
-    category: 'EXEC',
-    color: '#D97706',
-  },
-  {
-    email: 'finance@pmoutama.demo.id',
-    fullName: 'Siti Rahmawati, SE, Ak (Finance Manager)',
-    roleCode: 'FINANCE_MANAGER',
-    roleName: 'Finance Manager / Kabag Keuangan',
-    businessUnitName: 'Semua Unit (Pusat)',
-    demoPassword: 'DemoErp!2026',
-    category: 'EXEC',
-    color: '#034693',
-  },
-  {
-    email: 'unit.manager@pmoutama.demo.id',
-    fullName: 'Rendra Pratama, M.Kom (Unit Manager)',
-    roleCode: 'UNIT_MANAGER',
-    roleName: 'Unit / Divisi Manager',
-    businessUnitName: 'Divisi TCI (Diklat & Sertifikasi)',
-    demoPassword: 'DemoErp!2026',
-    category: 'UNIT',
-    color: '#059669',
-  },
-  {
-    email: 'procurement@pmoutama.demo.id',
-    fullName: 'Bagus Santoso (Procurement Officer)',
-    roleCode: 'PROCUREMENT',
-    roleName: 'Procurement Officer',
-    businessUnitName: 'Pengadaan & Vendor Pusat',
-    demoPassword: 'DemoErp!2026',
-    category: 'OPS',
-    color: '#EA580C',
-  },
-  {
-    email: 'accounting@pmoutama.demo.id',
-    fullName: 'Larasati Putri, CPA (Accounting Officer)',
-    roleCode: 'ACCOUNTING',
-    roleName: 'Accounting Officer',
-    businessUnitName: 'Buku Besar & Pajak Pusat',
-    demoPassword: 'DemoErp!2026',
-    category: 'OPS',
-    color: '#9333EA',
-  },
-  {
-    email: 'kasir@pmoutama.demo.id',
-    fullName: 'Dimas Aditya (Petugas Kasir)',
-    roleCode: 'CASHIER',
-    roleName: 'Petugas Kasir / Loket POS',
-    businessUnitName: 'Divisi TCI & Kasir Pusat',
-    demoPassword: 'DemoErp!2026',
-    category: 'OPS',
-    color: '#10B981',
-  },
-  {
-    email: 'tax@pmoutama.demo.id',
-    fullName: 'Fajar Nugroho, BKP (Tax Officer)',
-    roleCode: 'TAX_OFFICER',
-    roleName: 'Tax Officer / Staf Pajak',
-    businessUnitName: 'Pajak & Kepatuhan Fiskal',
-    demoPassword: 'DemoErp!2026',
-    category: 'OPS',
-    color: '#D97706',
-  },
-  {
-    email: 'auditor@pmoutama.demo.id',
-    fullName: 'Dewi Anggraini, CIA (Internal Auditor)',
-    roleCode: 'AUDITOR',
-    roleName: 'Internal Auditor / SPI',
-    businessUnitName: 'Satuan Pengawas Internal',
-    demoPassword: 'DemoErp!2026',
-    category: 'EXEC',
-    color: '#0891B2',
-  },
-];
-
-const demoAccounts = ref<DemoAccount[]>(DEFAULT_ACCOUNTS);
-
-async function loadDemoAccounts() {
-  try {
-    const res = await apiFetch('/auth/demo-accounts');
-    if (res.data && res.data.length > 0) {
-      demoAccounts.value = res.data.map((u: any) => {
-        let cat: 'EXEC' | 'UNIT' | 'OPS' = 'OPS';
-        let col = '#034693';
-        if (['GM_PMO', 'SUPER_ADMIN', 'FINANCE_MANAGER', 'AUDITOR'].includes(u.roleCode)) {
-          cat = 'EXEC';
-          col = u.roleCode === 'GM_PMO' ? '#D97706' : u.roleCode === 'SUPER_ADMIN' ? '#4F46E5' : u.roleCode === 'AUDITOR' ? '#0891B2' : '#034693';
-        } else if (u.roleCode === 'UNIT_MANAGER') {
-          cat = 'UNIT';
-          col = '#059669';
-        } else {
-          cat = 'OPS';
-          col = u.roleCode === 'CASHIER' ? '#10B981' : u.roleCode === 'PROCUREMENT' ? '#EA580C' : u.roleCode === 'TAX_OFFICER' ? '#D97706' : '#9333EA';
-        }
-
-        return {
-          ...u,
-          category: cat,
-          color: col,
-          demoPassword: u.demoPassword || 'DemoErp!2026',
-        };
-      });
-    }
-  } catch {
-    // Keep DEFAULT_ACCOUNTS fallback if API fails
-  }
-}
-
-const filteredAccounts = computed(() => {
-  return demoAccounts.value.filter((acc) => {
-    const matchCat = activeCategory.value === 'ALL' || acc.category === activeCategory.value;
-    if (!matchCat) return false;
-    if (!searchQuery.value.trim()) return true;
-    const q = searchQuery.value.toLowerCase();
-    return (
-      acc.email.toLowerCase().includes(q) ||
-      acc.fullName.toLowerCase().includes(q) ||
-      acc.roleName.toLowerCase().includes(q) ||
-      acc.roleCode.toLowerCase().includes(q) ||
-      acc.businessUnitName.toLowerCase().includes(q)
-    );
-  });
-});
-
-function selectDemoAccount(acc: DemoAccount) {
-  email.value = acc.email;
-  password.value = acc.demoPassword || 'DemoErp!2026';
-  errorMsg.value = '';
-}
-
-async function quickLogin(acc: DemoAccount) {
-  selectDemoAccount(acc);
-  await submitLogin();
-}
-
-async function submitLogin() {
+async function handleLogin() {
   errorMsg.value = '';
   if (!email.value.trim() || !password.value) {
-    errorMsg.value = 'Email dan password wajib diisi.';
+    errorMsg.value = 'Email dan kata sandi wajib diisi.';
     return;
   }
+
   loading.value = true;
   try {
     await auth.login(email.value.trim(), password.value);
-    router.push('/');
+    
+    // Trigger Cinematic Logo Zoom Portal Transition (Smooth & Silky)!
+    isTransitioning.value = true;
+    setTimeout(() => {
+      router.push('/');
+    }, 850);
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal melakukan autentikasi kredensial.';
+    errorMsg.value = err.message || 'Kredensial tidak valid. Silakan periksa email dan kata sandi Anda.';
   } finally {
     loading.value = false;
   }
 }
-
-onMounted(() => {
-  auth.applyTheme(auth.theme);
-  loadDemoAccounts();
-});
 </script>
 
 <template>
-  <div class="login-page">
-    <div class="login-container">
-      <!-- 1. LEFT PANEL: LOGIN FORM -->
-      <section class="login-card panel panel-elevated" aria-labelledby="login-heading">
-        <div class="brand-hero">
-          <img :src="logoPmoEmblem" alt="PMO UTama Logo" class="login-logo-img" />
-          <div class="brand-hero-text">
-            <span class="brand-title">PMO UTama</span>
-            <span class="brand-tagline">INTEGRATED FINANCE & OPERATIONAL ERP</span>
+  <div class="login-page-light">
+    <!-- Cinematic Logo Zoom Splash Portal (Muncul pas Login Sukses) -->
+    <Transition name="splash-fade">
+      <div v-if="isTransitioning" class="splash-portal-overlay">
+        <div class="splash-logo-container">
+          <div class="splash-light-burst"></div>
+          <img :src="logoPmoEmblem" alt="PMO UTama" class="splash-logo-img" />
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Pilihan 2: Flowing Cashflow Streamlines Background (Pita Aliran Likuiditas) -->
+    <div class="streamlines-bg-canvas" aria-hidden="true">
+      <!-- Ambient Fluid Color Blurs -->
+      <div class="stream-ambient-orb orb-blue"></div>
+      <div class="stream-ambient-orb orb-gold"></div>
+
+      <!-- Multi-Layered Flowing Streamline Ribbons SVG -->
+      <svg class="streamlines-svg" viewBox="0 0 1440 900" fill="none" preserveAspectRatio="none">
+        <defs>
+          <!-- Streamline Gradient 1: Deep PMO Navy -->
+          <linearGradient id="streamBlueGrad" x1="0%" y1="20%" x2="100%" y2="80%">
+            <stop offset="0%" stop-color="#034693" stop-opacity="0.12" />
+            <stop offset="45%" stop-color="#0284c7" stop-opacity="0.09" />
+            <stop offset="100%" stop-color="#034693" stop-opacity="0.02" />
+          </linearGradient>
+
+          <!-- Streamline Gradient 2: Golden Amber Wealth -->
+          <linearGradient id="streamGoldGrad" x1="10%" y1="0%" x2="90%" y2="100%">
+            <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.10" />
+            <stop offset="60%" stop-color="#d97706" stop-opacity="0.06" />
+            <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.01" />
+          </linearGradient>
+
+          <!-- Streamline Gradient 3: Marine Flow -->
+          <linearGradient id="streamCyanGrad" x1="0%" y1="50%" x2="100%" y2="50%">
+            <stop offset="0%" stop-color="#0284c7" stop-opacity="0.09" />
+            <stop offset="50%" stop-color="#059669" stop-opacity="0.07" />
+            <stop offset="100%" stop-color="#0284c7" stop-opacity="0.01" />
+          </linearGradient>
+
+          <!-- Stroke Edge Gradient -->
+          <linearGradient id="streamStrokeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#034693" stop-opacity="0.22" />
+            <stop offset="50%" stop-color="#f59e0b" stop-opacity="0.25" />
+            <stop offset="100%" stop-color="#0284c7" stop-opacity="0.15" />
+          </linearGradient>
+        </defs>
+
+        <!-- Ribbon Layer 1: Navy Flow -->
+        <path
+          class="ribbon-layer ribbon-1"
+          d="M-100,220 C280,140 580,360 880,260 C1180,160 1340,320 1550,280 L1550,680 C1320,720 1120,540 820,620 C520,700 240,520 -100,600 Z"
+          fill="url(#streamBlueGrad)"
+        />
+
+        <!-- Ribbon Layer 2: Golden Amber Stream -->
+        <path
+          class="ribbon-layer ribbon-2"
+          d="M-50,480 C260,420 540,620 860,540 C1160,460 1350,600 1520,530 L1520,840 C1280,890 1080,720 760,790 C460,860 200,720 -50,780 Z"
+          fill="url(#streamGoldGrad)"
+        />
+
+        <!-- Ribbon Layer 3: Cyan Fluid Stream -->
+        <path
+          class="ribbon-layer ribbon-3"
+          d="M-80,80 C240,160 600,-40 920,80 C1240,200 1380,40 1540,120 L1540,420 C1320,380 1140,500 840,420 C540,340 220,460 -80,380 Z"
+          fill="url(#streamCyanGrad)"
+        />
+
+        <!-- Elegant Edge Contour Lines -->
+        <path
+          class="ribbon-contour contour-1"
+          d="M-100,220 C280,140 580,360 880,260 C1180,160 1340,320 1550,280"
+          stroke="url(#streamStrokeGrad)"
+          stroke-width="1.8"
+          stroke-linecap="round"
+        />
+        <path
+          class="ribbon-contour contour-2"
+          d="M-50,480 C260,420 540,620 860,540 C1160,460 1350,600 1520,530"
+          stroke="rgba(245, 158, 11, 0.2)"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        />
+      </svg>
+    </div>
+
+    <!-- Main Login Card Container -->
+    <main class="login-card-container">
+      <div class="login-card">
+        <!-- Interactive Card Top Accent Border (Shimmering PMO Gradient) -->
+        <div class="card-accent-bar"></div>
+
+        <!-- Brand Identity Section with Shimmering Emblem Aura -->
+        <header class="brand-section">
+          <div class="emblem-container">
+            <div class="emblem-shimmer"></div>
+            <img :src="logoPmoEmblem" alt="PMO UTama" class="emblem-img" />
           </div>
-        </div>
+          <div class="brand-headings">
+            <h1 class="brand-title">PMO UTama</h1>
+            <p class="brand-subtitle">Financial & Operational ERP System</p>
+          </div>
+        </header>
 
-        <div class="brand-badges">
-          <span class="status-pill status-active">
-            <i class="pulse-dot"></i> Multi-Role RBAC Aktif
-          </span>
-          <span class="doc-code">FY-2026</span>
-        </div>
-
-        <h1 id="login-heading" class="page-title" style="margin-top: 14px">Masuk ke Ruang Kerja</h1>
-        <p class="text-muted" style="margin-top: 6px; margin-bottom: 18px">
-          Pilih akun peran di sebelah kanan untuk masuk instan (1-klik) atau isi kredensial manual di bawah.
-        </p>
-
-        <!-- Quick Dropdown Preset Selector -->
-        <div class="quick-select-box">
-          <label class="form-label" for="quick-role-select">Pilih Cepat Akun Pengguna:</label>
-          <select
-            id="quick-role-select"
-            class="select quick-select"
-            @change="(e: any) => {
-              const selected = demoAccounts.find(a => a.email === e.target.value);
-              if (selected) selectDemoAccount(selected);
-            }"
-            :value="email"
-          >
-            <option v-for="acc in demoAccounts" :key="acc.email" :value="acc.email">
-              {{ acc.fullName }} — [{{ acc.roleCode }}]
-            </option>
-          </select>
-        </div>
-
+        <!-- Error Alert -->
         <div v-if="errorMsg" class="error-alert" role="alert">
-          <strong>[GALAT AUTENTIKASI]</strong> {{ errorMsg }}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="error-icon">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <span>{{ errorMsg }}</span>
         </div>
 
-        <form @submit.prevent="submitLogin" class="login-form">
-          <div class="form-field">
-            <label for="login-email" class="form-label">Alamat Email Pengguna</label>
-            <input
-              id="login-email"
-              v-model="email"
-              type="email"
-              class="input"
-              placeholder="nama.peran@pmoutama.demo.id"
-              required
-              autocomplete="username"
-            />
-          </div>
-
-          <div class="form-field">
-            <label for="login-password" class="form-label">Kata Sandi</label>
-            <input
-              id="login-password"
-              v-model="password"
-              type="password"
-              class="input"
-              placeholder="Masukkan kata sandi"
-              required
-              autocomplete="current-password"
-            />
-            <span class="input-hint">Kata sandi standar seluruh akun: <code>DemoErp!2026</code></span>
-          </div>
-
-          <button type="submit" class="btn btn-primary btn-login-submit" :disabled="loading">
-            <span v-if="loading" class="spinner-sm"></span>
-            <span>{{ loading ? 'Memverifikasi Kredensial...' : 'Masuk ke Ruang Kerja ERP' }}</span>
-          </button>
-        </form>
-
-        <div class="login-footer-info">
-          <span>Keamanan Sesi: JWT 12 Jam</span>
-          <span>•</span>
-          <span>Integritas Audit Trail Otomatis</span>
-        </div>
-      </section>
-
-      <!-- 2. RIGHT PANEL: 1-CLICK INSTANT DEMO ACCOUNTS SELECTOR -->
-      <section class="demo-accounts-panel panel" aria-labelledby="demo-acc-heading">
-        <div class="panel-header-custom">
-          <div>
-            <div class="panel-title-row">
-              <h2 id="demo-acc-heading" class="demo-panel-title">Pilih Akun Pengguna (RBAC)</h2>
-              <span class="accounts-count-pill">{{ filteredAccounts.length }} Akun Tersedia</span>
-            </div>
-            <p class="text-muted demo-panel-desc">
-              Klik kartu untuk mengisi formulir, atau klik tombol <strong>"⚡ Masuk"</strong> untuk langsung login tanpa mengetik sandi.
-            </p>
-          </div>
-
-          <!-- Category Filter Tabs & Search -->
-          <div class="filter-controls-row">
-            <div class="category-tabs">
-              <button
-                type="button"
-                class="cat-tab-btn"
-                :class="{ active: activeCategory === 'ALL' }"
-                @click="activeCategory = 'ALL'"
-              >
-                Semua
-              </button>
-              <button
-                type="button"
-                class="cat-tab-btn"
-                :class="{ active: activeCategory === 'EXEC' }"
-                @click="activeCategory = 'EXEC'"
-              >
-                Manajemen & Keuangan
-              </button>
-              <button
-                type="button"
-                class="cat-tab-btn"
-                :class="{ active: activeCategory === 'UNIT' }"
-                @click="activeCategory = 'UNIT'"
-              >
-                Divisi Bisnis
-              </button>
-              <button
-                type="button"
-                class="cat-tab-btn"
-                :class="{ active: activeCategory === 'OPS' }"
-                @click="activeCategory = 'OPS'"
-              >
-                Kasir & Staf
-              </button>
-            </div>
-
-            <div class="search-box">
+        <!-- Login Form with Focus Micro-Animations -->
+        <form class="login-form" @submit.prevent="handleLogin">
+          <!-- Email Field -->
+          <div class="form-item">
+            <label for="login-email" class="item-label">
+              <span>Email Pengguna</span>
+              <span class="required-mark">*</span>
+            </label>
+            <div class="input-container">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="field-icon icon-mail">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                <polyline points="22,6 12,13 2,6"></polyline>
+              </svg>
               <input
-                v-model="searchQuery"
-                type="text"
-                class="input input-search"
-                placeholder="Cari nama, role, email..."
+                id="login-email"
+                v-model="email"
+                type="email"
+                class="field-input"
+                placeholder="nama@pmoutama.id"
+                autocomplete="username"
+                required
               />
             </div>
           </div>
-        </div>
 
-        <div class="demo-grid">
-          <div
-            v-for="acc in filteredAccounts"
-            :key="acc.email"
-            class="demo-role-card"
-            :class="{ selected: email === acc.email }"
-            @click="selectDemoAccount(acc)"
-          >
-            <div class="demo-card-top">
-              <span class="role-pill" :style="{ backgroundColor: `${acc.color}18`, color: acc.color, borderColor: `${acc.color}35` }">
-                {{ acc.roleCode }}
-              </span>
-              <span class="demo-unit">{{ acc.businessUnitName }}</span>
+          <!-- Password Field with Tactile Lock Micro-Motion -->
+          <div class="form-item">
+            <div class="label-header">
+              <label for="login-password" class="item-label">
+                <span>Kata Sandi</span>
+                <span class="required-mark">*</span>
+              </label>
+              <a href="mailto:admin@pmoutama.id?subject=Bantuan%20Akses%20ERP" class="forgot-link" tabindex="-1">
+                Lupa sandi?
+              </a>
             </div>
-
-            <div class="demo-user-meta">
-              <strong class="demo-name">{{ acc.fullName }}</strong>
-              <span class="demo-role-title">{{ acc.roleName }}</span>
-              <span class="demo-email">{{ acc.email }}</span>
-            </div>
-
-            <div class="demo-card-actions">
+            <div class="input-container" :class="{ 'is-lock-active': isPasswordFocused }">
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="field-icon icon-lock"
+              >
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" class="lock-shackle"></path>
+              </svg>
+              <input
+                id="login-password"
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                class="field-input"
+                placeholder="Masukkan kata sandi"
+                autocomplete="current-password"
+                required
+                @focus="isPasswordFocused = true"
+                @blur="isPasswordFocused = false"
+              />
               <button
                 type="button"
-                class="btn-instant-login"
-                :disabled="loading"
-                @click.stop="quickLogin(acc)"
+                class="password-toggle"
+                :title="showPassword ? 'Sembunyikan sandi' : 'Tampilkan sandi'"
+                :aria-label="showPassword ? 'Sembunyikan sandi' : 'Tampilkan sandi'"
+                @click="showPassword = !showPassword"
               >
-                <span>⚡ Masuk Langsung</span>
+                <svg v-if="!showPassword" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
               </button>
             </div>
           </div>
-        </div>
-      </section>
-    </div>
+
+          <!-- Options -->
+          <div class="form-options">
+            <label class="checkbox-label">
+              <input v-model="rememberMe" type="checkbox" class="styled-checkbox" />
+              <span>Simpan sesi login di perangkat ini</span>
+            </label>
+          </div>
+
+          <!-- Submit Button with Shimmer Wave & Arrow Glide -->
+          <button type="submit" class="login-submit-btn" :disabled="loading">
+            <div class="btn-shimmer-sweep"></div>
+            <span v-if="loading" class="spinner-circle"></span>
+            <span v-else class="btn-text-row">
+              <span>Masuk ke Sistem ERP</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="submit-arrow">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </span>
+          </button>
+        </form>
+
+        <!-- Corporate Footer (PMO UTama Resmi) -->
+        <footer class="card-footer">
+          <p class="copyright-text">
+            Sistem Informasi Keuangan & Operasional PMO UTama
+          </p>
+          <div class="security-badges">
+            <span class="security-pill">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              TLS 1.3 Terenkripsi
+            </span>
+            <span class="security-pill">Sistem Terotentikasi</span>
+          </div>
+        </footer>
+      </div>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.login-page {
+/* Pure Bright Executive Canvas */
+.login-page-light {
+  position: relative;
   min-height: 100vh;
-  padding: clamp(20px, 4vw, 48px);
+  width: 100vw;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-canvas);
-  position: relative;
-  overflow-x: hidden;
+  background: radial-gradient(ellipse at 50% 0%, #ffffff 0%, #f8fafc 55%, #edf2f7 100%);
+  padding: 32px 16px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
-.login-container {
-  width: 100%;
-  max-width: 1240px;
-  display: grid;
-  grid-template-columns: 420px 1fr;
-  gap: 28px;
-  align-items: start;
-  position: relative;
-  z-index: 10;
-}
-
-/* 1. LEFT CARD */
-.login-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 20px;
-  padding: 32px;
-  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.12);
-}
-
-.brand-hero {
+/* ===================================================
+   CINEMATIC LOGO ZOOM SPLASH PORTAL (SILKY & SMOOTH)
+   =================================================== */
+.splash-portal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 16px;
+  justify-content: center;
+  pointer-events: all;
+  animation: portalFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.login-logo-img {
-  width: 52px;
-  height: 54px;
+.splash-logo-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: logoSilkyZoom 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.splash-logo-img {
+  width: 110px;
+  height: 110px;
   object-fit: contain;
-  background: transparent;
-  flex-shrink: 0;
+  filter: drop-shadow(0 12px 28px rgba(3, 70, 147, 0.22));
+  position: relative;
+  z-index: 2;
 }
 
-.brand-hero-text {
+.splash-light-burst {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(3, 70, 147, 0.22) 0%, rgba(245, 158, 11, 0.14) 45%, transparent 70%);
+  filter: blur(24px);
+  pointer-events: none;
+  animation: burstExpand 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Silky Optical Deceleration Zoom (Zero Motion Sickness) */
+@keyframes logoSilkyZoom {
+  0% {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  20% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+  65% {
+    transform: scale(1.4);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(2.3);
+    opacity: 0;
+  }
+}
+
+@keyframes burstExpand {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes portalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.splash-fade-enter-active,
+.splash-fade-leave-active {
+  transition: opacity 0.35s ease;
+}
+
+/* ===================================================
+   FLOWING CASHFLOW STREAMLINES (CALM & TRANQUIL DRIFT)
+   =================================================== */
+.streamlines-bg-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.stream-ambient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(150px);
+  pointer-events: none;
+}
+
+.orb-blue {
+  top: -160px;
+  left: 20%;
+  width: 580px;
+  height: 440px;
+  background: radial-gradient(circle, rgba(3, 70, 147, 0.07), transparent 70%);
+  animation: driftStreamOrbA 32s ease-in-out infinite alternate;
+}
+
+.orb-gold {
+  bottom: -140px;
+  right: 18%;
+  width: 520px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.05), transparent 70%);
+  animation: driftStreamOrbB 36s ease-in-out infinite alternate;
+}
+
+@keyframes driftStreamOrbA {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(25px, 20px) scale(1.05); }
+}
+
+@keyframes driftStreamOrbB {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-20px, -15px) scale(1.04); }
+}
+
+/* Multi-Layer Flowing Streamlines SVG */
+.streamlines-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.9;
+}
+
+.ribbon-layer {
+  transform-origin: center center;
+}
+
+.ribbon-1 {
+  animation: streamFlowA 32s ease-in-out infinite alternate;
+}
+
+.ribbon-2 {
+  animation: streamFlowB 38s ease-in-out infinite alternate;
+}
+
+.ribbon-3 {
+  animation: streamFlowC 44s ease-in-out infinite alternate;
+}
+
+.contour-1 {
+  animation: streamContourA 32s ease-in-out infinite alternate;
+}
+
+.contour-2 {
+  animation: streamContourB 38s ease-in-out infinite alternate;
+}
+
+/* Gentle, tranquil breathing - No Wobble */
+@keyframes streamFlowA {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+  100% { transform: translateY(3px); }
+}
+
+@keyframes streamFlowB {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
+  100% { transform: translateY(-3px); }
+}
+
+@keyframes streamFlowC {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+  100% { transform: translateY(4px); }
+}
+
+@keyframes streamContourA {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-4px); }
+}
+
+@keyframes streamContourB {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(4px); }
+}
+
+/* ===================================================
+   MAIN LOGIN CARD CONTAINER & CARD STYLING
+   =================================================== */
+.login-card-container {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  justify-content: center;
+}
+
+/* White Corporate Card with Subtle Top Accent Bar */
+.login-card {
+  position: relative;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 20px;
+  padding: 40px 36px 32px;
+  box-shadow:
+    0 20px 40px -15px rgba(15, 23, 42, 0.08),
+    0 0 1px rgba(15, 23, 42, 0.12);
   display: flex;
   flex-direction: column;
+  gap: 26px;
+  overflow: hidden;
+}
+
+/* Top Accent Shimmer Bar */
+.card-accent-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #034693 0%, #0284c7 45%, #f59e0b 80%, #059669 100%);
+  opacity: 0.9;
+}
+
+/* Brand Section */
+.brand-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+/* Shimmering Emblem Aura */
+.emblem-container {
+  position: relative;
+  width: 66px;
+  height: 66px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  box-shadow:
+    0 8px 18px -4px rgba(3, 70, 147, 0.12),
+    0 2px 6px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.emblem-container:hover {
+  transform: translateY(-2px) scale(1.04);
+}
+
+/* Diagonal Light Sweep across Emblem */
+.emblem-shimmer {
+  position: absolute;
+  inset: -100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0%,
+    transparent 42%,
+    rgba(255, 255, 255, 0.8) 50%,
+    rgba(245, 158, 11, 0.25) 55%,
+    transparent 65%,
+    transparent 100%
+  );
+  animation: emblemSheen 5.5s infinite;
+  pointer-events: none;
+}
+
+@keyframes emblemSheen {
+  0% { transform: translateX(-100%) translateY(-100%); }
+  25% { transform: translateX(100%) translateY(100%); }
+  100% { transform: translateX(100%) translateY(100%); }
+}
+
+.emblem-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  position: relative;
+  z-index: 1;
+}
+
+.brand-headings {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .brand-title {
-  font-size: 1.6rem;
-  font-weight: 800;
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 750;
+  color: #034693;
   letter-spacing: -0.02em;
-  color: var(--text-primary);
-  line-height: 1.1;
 }
 
-.brand-tagline {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--primary);
-  text-transform: uppercase;
+.brand-subtitle {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #64748b;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
-.brand-badges {
+/* Error Alert */
+.error-alert {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 10px 14px;
   display: flex;
-  gap: 8px;
   align-items: center;
+  gap: 10px;
+  color: #b91c1c;
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 20px;
-  font-size: 0.76rem;
-  font-weight: 600;
+.error-icon {
+  flex-shrink: 0;
+  color: #dc2626;
 }
 
-.status-active {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10B981;
-  border: 1px solid rgba(16, 185, 129, 0.25);
-}
-
-.pulse-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #10B981;
-  box-shadow: 0 0 8px #10B981;
-}
-
-.quick-select-box {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-subtle);
-  padding: 12px 14px;
-  border-radius: 12px;
-  margin-bottom: 18px;
-}
-
-.quick-select {
-  width: 100%;
-  margin-top: 6px;
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-
+/* Form Styles */
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 }
 
-.input-hint {
-  font-size: 0.76rem;
-  color: var(--text-secondary);
-  margin-top: 4px;
-  display: block;
-}
-
-.input-hint code {
-  background: var(--bg-hover);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 700;
-  color: var(--primary);
-}
-
-.btn-login-submit {
-  width: 100%;
-  margin-top: 6px;
-  padding: 12px;
-  font-size: 0.95rem;
-  font-weight: 700;
-  border-radius: 12px;
+.form-item {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 7px;
 }
 
-.error-alert {
-  padding: 12px 14px;
-  border-radius: var(--radius-md);
-  background: var(--status-danger-bg);
-  color: var(--status-danger-text);
-  border: 1px solid var(--status-danger-border);
-  margin-bottom: 14px;
-  font-size: 0.88rem;
-}
-
-.login-footer-info {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 24px;
-  font-size: 0.74rem;
-  color: var(--text-secondary);
-}
-
-/* 2. RIGHT CARD: DEMO ACCOUNTS */
-.demo-accounts-panel {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 20px;
-  padding: 28px 32px;
-  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08);
-}
-
-.panel-title-row {
+.label-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
 }
 
-.demo-panel-title {
-  font-size: 1.25rem;
-  font-weight: 800;
-  color: var(--text-primary);
-  margin: 0;
-}
-
-.accounts-count-pill {
-  font-size: 0.75rem;
-  font-weight: 700;
-  padding: 4px 10px;
-  border-radius: 20px;
-  background: var(--primary-soft);
-  color: var(--primary);
-  border: 1px solid rgba(3, 70, 147, 0.2);
-}
-
-.demo-panel-desc {
-  margin-top: 6px;
-  margin-bottom: 18px;
-  font-size: 0.88rem;
-}
-
-.filter-controls-row {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.category-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.cat-tab-btn {
-  padding: 6px 14px;
-  border-radius: 20px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-  font-size: 0.8rem;
+.item-label {
+  font-size: 0.83rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: all 140ms ease;
-}
-
-.cat-tab-btn:hover {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-
-.cat-tab-btn.active {
-  background: var(--primary);
-  color: #ffffff;
-  border-color: var(--primary);
-  font-weight: 700;
-}
-
-.search-box {
-  width: 100%;
-}
-
-.input-search {
-  width: 100%;
-  padding: 8px 14px;
-  font-size: 0.84rem;
-  border-radius: 10px;
-}
-
-.demo-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
-  max-height: 520px;
-  overflow-y: auto;
-  padding-right: 6px;
-}
-
-.demo-grid::-webkit-scrollbar {
-  width: 6px;
-}
-.demo-grid::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
-  border-radius: 4px;
-}
-
-.demo-role-card {
-  text-align: left;
-  padding: 16px;
-  border-radius: 14px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  cursor: pointer;
+  color: #1e293b;
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 12px;
-  transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
-  position: relative;
-}
-
-.demo-role-card:hover {
-  border-color: var(--primary);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px -4px rgba(3, 70, 147, 0.15);
-  background: var(--bg-hover);
-}
-
-.demo-role-card.selected {
-  border: 2px solid var(--primary);
-  background: var(--primary-soft);
-  box-shadow: 0 0 20px rgba(3, 70, 147, 0.16);
-}
-
-.demo-card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.role-pill {
-  font-size: 0.72rem;
-  font-weight: 800;
-  padding: 3px 8px;
-  border-radius: 6px;
-  border: 1px solid;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-
-.demo-unit {
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  text-align: right;
-  line-height: 1.2;
-}
-
-.demo-user-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.demo-name {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.demo-role-title {
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-}
-
-.demo-email {
-  font-size: 0.74rem;
-  color: var(--primary);
-  font-weight: 600;
-  margin-top: 2px;
-}
-
-.demo-card-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border-subtle);
-}
-
-.btn-instant-login {
-  background: var(--primary);
-  color: #ffffff;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 0.76rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 140ms ease;
-  display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
-.btn-instant-login:hover {
-  filter: brightness(1.1);
-  transform: scale(1.02);
+.required-mark {
+  color: #dc2626;
 }
 
-@media (max-width: 1024px) {
-  .login-container {
-    grid-template-columns: 1fr;
+.forgot-link {
+  font-size: 0.78rem;
+  color: #034693;
+  text-decoration: none;
+  font-weight: 550;
+  transition: opacity 0.15s ease;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+.input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.input-container:focus-within {
+  transform: translateY(-1px);
+}
+
+.field-icon {
+  position: absolute;
+  left: 14px;
+  color: #94a3b8;
+  pointer-events: none;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.field-input {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 11px 40px 11px 40px;
+  font-family: inherit;
+  font-size: 0.90rem;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-sizing: border-box;
+}
+
+.field-input::placeholder {
+  color: #94a3b8;
+}
+
+.field-input:focus {
+  border-color: #034693;
+  box-shadow: 0 0 0 3px rgba(3, 70, 147, 0.14);
+}
+
+.input-container:focus-within .field-icon {
+  color: #034693;
+}
+
+/* Tactile Lock Snap Animation on Password Focus */
+.input-container.is-lock-active .icon-lock {
+  color: #034693;
+}
+
+.input-container.is-lock-active .lock-shackle {
+  animation: lockClick 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: bottom center;
+}
+
+@keyframes lockClick {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+  100% { transform: translateY(0); }
+}
+
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.password-toggle:hover {
+  color: #334155;
+  transform: scale(1.08);
+}
+
+/* Options */
+.form-options {
+  display: flex;
+  align-items: center;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: #475569;
+  cursor: pointer;
+  user-select: none;
+}
+
+.styled-checkbox {
+  accent-color: #034693;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+/* Submit Button with Shimmer Sweep */
+.login-submit-btn {
+  position: relative;
+  width: 100%;
+  margin-top: 4px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #034693 0%, #022b5c 100%);
+  border: none;
+  border-radius: 10px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(3, 70, 147, 0.32);
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  overflow: hidden;
+}
+
+/* Subtle Shimmer Sweep on Hover */
+.btn-shimmer-sweep {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 100%
+  );
+  transform: skewX(-20deg);
+  transition: left 0.6s ease;
+  pointer-events: none;
+}
+
+.login-submit-btn:hover:not(:disabled) .btn-shimmer-sweep {
+  left: 150%;
+}
+
+.login-submit-btn:hover:not(:disabled) {
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 20px rgba(3, 70, 147, 0.42);
+}
+
+.login-submit-btn:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.login-submit-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.btn-text-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.submit-arrow {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.login-submit-btn:hover:not(:disabled) .submit-arrow {
+  transform: translateX(4px);
+}
+
+.spinner-circle {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
-  .demo-grid {
-    max-height: 380px;
+}
+
+/* Footer Section */
+.card-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 18px;
+}
+
+.copyright-text {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.security-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.security-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 30px 20px 24px;
   }
 }
 </style>

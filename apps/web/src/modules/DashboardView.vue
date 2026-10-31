@@ -306,8 +306,8 @@ onMounted(loadDashboard);
     <!-- Page Header: Overview & Date Range Dropdown -->
     <section class="overview-header">
       <div>
-        <h1 class="page-title">Ringkasan Eksekutif Keuangan & Operasional</h1>
-        <p class="overview-subtitle">Konsolidasi 4 Divisi Bisnis PMO UTama (IT Solution, MICE, TCI, Klinik Pratama)</p>
+        <h1 class="page-title">Ringkasan Keuangan & Operasional</h1>
+        <p class="overview-subtitle">Konsolidasi kinerja keuangan 4 unit bisnis PMO UTama</p>
       </div>
 
       <div class="date-range-pill" title="Tahun Anggaran Berjalan">
@@ -317,7 +317,7 @@ onMounted(loadDashboard);
           <line x1="8" y1="2" x2="8" y2="6"></line>
           <line x1="3" y1="10" x2="21" y2="10"></line>
         </svg>
-        <span>Tahun Buku FY-2026 (Aktif)</span>
+        <span>Tahun Buku FY-2026</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon">
           <polyline points="6 9 12 15 18 9"></polyline>
         </svg>
@@ -327,8 +327,8 @@ onMounted(loadDashboard);
     <StateBanner
       v-if="loading"
       state="loading"
-      title="Memuat Dashboard Keuangan & Operasional"
-      message="Menghubungkan data transaksi, pesanan, dan metrik kinerja..."
+      title="Memuat Dashboard Keuangan"
+      message="Mengambil ringkasan transaksi dan metrik keuangan..."
     />
 
     <StateBanner
@@ -341,7 +341,7 @@ onMounted(loadDashboard);
     />
 
     <div v-else class="dashboard-content-grid">
-      <!-- 1. Four Metric KPI Cards (Real Data from Demo PostgreSQL) -->
+      <!-- 1. Four Metric KPI Cards -->
       <section class="kpi-metric-row" aria-label="Key Performance Indicators">
         <!-- Hero Card: PMO Royal Navy (Total Pendapatan Faktur) -->
         <article class="metric-card hero-card">
@@ -358,14 +358,7 @@ onMounted(loadDashboard);
             {{ formatRupiah(dashboard?.kpis?.totalInvoicedRevenue || 0) }}
           </div>
           <div class="metric-trend-wrap">
-            <span class="trend-badge positive">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="7 7 17 7 17 17"></polyline>
-                <line x1="17" y1="7" x2="7" y2="17"></line>
-              </svg>
-              Invoiced
-            </span>
-            <span class="trend-text">{{ dashboard?.kpis?.totalOrders || 0 }} Pesanan Layanan</span>
+            <span class="trend-text">{{ dashboard?.kpis?.totalOrders || 0 }} pesanan layanan</span>
           </div>
         </article>
 
@@ -389,9 +382,9 @@ onMounted(loadDashboard);
                 <polyline points="7 7 17 7 17 17"></polyline>
                 <line x1="17" y1="7" x2="7" y2="17"></line>
               </svg>
-              Terkonfirmasi
+              Arus Kas Masuk
             </span>
-            <span class="trend-text">Kas Masuk Kasir & Bank</span>
+            <span class="trend-text">Kasir & Rekening Bank</span>
           </div>
         </article>
 
@@ -412,13 +405,9 @@ onMounted(loadDashboard);
           </div>
           <div class="metric-trend-wrap">
             <span class="trend-text-colored positive">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="7 7 17 7 17 17"></polyline>
-                <line x1="17" y1="7" x2="7" y2="17"></line>
-              </svg>
-              {{ dashboard?.kpis?.realisasiBiayaPercent || 0 }}% Plafon
+              {{ dashboard?.kpis?.realisasiBiayaPercent || 0 }}%
             </span>
-            <span class="trend-text">Beban Usaha Terbayar</span>
+            <span class="trend-text">dari plafon anggaran</span>
           </div>
         </article>
 
@@ -437,13 +426,9 @@ onMounted(loadDashboard);
           </div>
           <div class="metric-trend-wrap">
             <span class="trend-text-colored positive">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="7 7 17 7 17 17"></polyline>
-                <line x1="17" y1="7" x2="7" y2="17"></line>
-              </svg>
-              {{ dashboard?.kpis?.sisaPlafonPercent || 0 }}% Bebas
+              {{ dashboard?.kpis?.sisaPlafonPercent || 0 }}%
             </span>
-            <span class="trend-text">Dari Rp {{ formatRupiah(dashboard?.kpis?.totalBudgetAllocated || 0) }}</span>
+            <span class="trend-text">tersedia untuk realisasi</span>
           </div>
         </article>
       </section>
@@ -454,13 +439,8 @@ onMounted(loadDashboard);
         <article class="poital-card orders-overview-card">
           <div class="card-header-bar">
             <div>
-              <div class="card-title-row">
-                <h2 class="card-title">Tren Keuangan & Realisasi Kas</h2>
-                <span class="real-data-badge" title="Data dihitung otomatis dari transaksi riil PostgreSQL">
-                  <i class="pulse-dot"></i> Data Riil PostgreSQL
-                </span>
-              </div>
-              <span class="card-subtitle">Perbandingan Beban Operasional vs Penerimaan Kas Bersih (FY-{{ selectedYear }})</span>
+              <h2 class="card-title">Tren Keuangan & Realisasi Kas</h2>
+              <span class="card-subtitle">Perbandingan beban operasional vs penerimaan kas (FY-{{ selectedYear }})</span>
             </div>
 
             <div class="header-controls">
@@ -847,40 +827,61 @@ onMounted(loadDashboard);
           </div>
         </article>
 
-        <!-- Purchase Analytics (Dual Bar Chart: Penerimaan Kas vs Beban) -->
-        <article class="poital-card purchase-analytics-card">
+        <!-- Likuiditas Kas & Status Bank -->
+        <article class="poital-card cash-status-card">
           <div class="card-header-bar">
             <div>
-              <h2 class="card-title">Distribusi Kas Masuk vs Beban Keluar</h2>
-              <span class="card-subtitle">12 Bulan Tahun Berjalan (IDR)</span>
+              <h2 class="card-title">Likuiditas Kas & Rekonsiliasi Bank</h2>
+              <span class="card-subtitle">Penerimaan kas masuk dan verifikasi rekening koran</span>
             </div>
-            <div class="header-controls">
-              <div class="chart-legend-pills">
-                <span class="legend-item"><i class="dot emerald"></i> Kas Masuk</span>
-                <span class="legend-item"><i class="dot navy"></i> Beban Kas</span>
+            <Button
+              label="Buka Rekonsiliasi"
+              icon="pi pi-arrow-right"
+              iconPos="right"
+              size="small"
+              severity="secondary"
+              outlined
+              @click="router.push('/reconciliation')"
+            />
+          </div>
+
+          <div class="cash-status-grid">
+            <div class="cash-stat-block">
+              <span class="cash-stat-label">Total Kas Masuk Terverifikasi</span>
+              <div class="cash-stat-num money text-emerald">
+                {{ formatRupiah(dashboard?.kpis?.totalCashReceivedNet || 0) }}
               </div>
+              <span class="cash-stat-hint">Penerimaan faktur & setoran loket</span>
+            </div>
+
+            <div class="cash-stat-block">
+              <span class="cash-stat-label">Piutang Pelanggan Berjalan</span>
+              <div class="cash-stat-num money text-amber">
+                {{ formatRupiah(dashboard?.kpis?.totalReceivablesOutstanding || 0) }}
+              </div>
+              <span class="cash-stat-hint">Menunggu pelunasan termin</span>
             </div>
           </div>
 
-          <!-- Dual Bar Chart Area -->
-          <div class="chart-container-area">
-            <div class="y-axis-labels">
-              <span>Rp 150M</span>
-              <span>Rp 120M</span>
-              <span>Rp 90M</span>
-              <span>Rp 60M</span>
-              <span>Rp 30M</span>
-              <span>Rp 0</span>
+          <div class="bank-recon-strip">
+            <div class="recon-stat-item">
+              <span class="recon-count text-emerald">{{ dashboard?.reconSummary?.matched || 0 }}</span>
+              <span class="recon-label">Mutasi Cocok</span>
             </div>
-
-            <div class="bar-chart-container">
-              <div v-for="(m, idx) in months" :key="m" class="bar-month-group">
-                <div class="bars-pair">
-                  <span class="bar-col emerald-bar" :style="{ height: getBarHeight(idx, 'cash') }" title="Kas Masuk"></span>
-                  <span class="bar-col navy-bar" :style="{ height: getBarHeight(idx, 'expense') }" title="Beban Kas"></span>
-                </div>
-                <span class="bar-month-label">{{ m }}</span>
-              </div>
+            <div class="recon-divider"></div>
+            <div class="recon-stat-item">
+              <span class="recon-count text-amber">{{ dashboard?.reconSummary?.unmatched || 0 }}</span>
+              <span class="recon-label">Belum Dicocokkan</span>
+            </div>
+            <div class="recon-divider"></div>
+            <div class="recon-stat-item">
+              <span class="recon-count text-purple">{{ dashboard?.reconSummary?.needsReview || 0 }}</span>
+              <span class="recon-label">Perlu Review</span>
+            </div>
+            <div class="recon-divider"></div>
+            <div class="recon-stat-item">
+              <span class="recon-count">{{ dashboard?.reconSummary?.total || 0 }}</span>
+              <span class="recon-label">Total Mutasi</span>
             </div>
           </div>
         </article>
@@ -891,7 +892,10 @@ onMounted(loadDashboard);
         <!-- Service Catalog / Operational Stats Card -->
         <article class="poital-card catalog-stats-card">
           <div class="card-header-bar">
-            <h2 class="card-title">Katalog & Status Operasional</h2>
+            <div>
+              <h2 class="card-title">Status Operasional & Aksi Cepat</h2>
+              <span class="card-subtitle">Pintasan navigasi modul transaksi</span>
+            </div>
           </div>
 
           <div class="inventory-stats-row">
@@ -903,10 +907,10 @@ onMounted(loadDashboard);
               </div>
             </div>
             <div class="inv-stat">
-              <span class="inv-lbl">Akun Pelanggan</span>
+              <span class="inv-lbl">Akun Mitra</span>
               <div class="inv-val-row">
-                <strong class="inv-num text-purple">{{ dashboard?.kpis?.totalCustomers || 6 }} Mitra</strong>
-                <span class="trend-pill-sm positive">Terverifikasi</span>
+                <strong class="inv-num text-purple">{{ dashboard?.kpis?.totalCustomers || 6 }} Pelanggan</strong>
+                <span class="trend-pill-sm positive">Terdaftar</span>
               </div>
             </div>
             <div class="inv-stat">
@@ -920,19 +924,35 @@ onMounted(loadDashboard);
             </div>
           </div>
 
-          <div class="catalog-summary-box">
-            <div class="summary-line">
-              <span class="text-secondary">Plafon RKAP Disetujui:</span>
-              <strong class="money">{{ formatRupiah(dashboard?.kpis?.totalBudgetAllocated || 0) }}</strong>
-            </div>
-            <div class="summary-line">
-              <span class="text-secondary">Komitmen PO Terbit:</span>
-              <strong class="money text-emerald">{{ formatRupiah(dashboard?.kpis?.totalBudgetCommitted || 0) }}</strong>
-            </div>
-            <div class="summary-line">
-              <span class="text-secondary">Piutang Pelanggan Berjalan:</span>
-              <strong class="money text-amber">{{ formatRupiah(dashboard?.kpis?.totalReceivablesOutstanding || 0) }}</strong>
-            </div>
+          <div class="quick-nav-actions">
+            <button type="button" class="quick-action-btn" @click="router.push('/approvals')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 11 12 14 22 4"></polyline>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+              </svg>
+              <span>Antrean Approval</span>
+            </button>
+            <button type="button" class="quick-action-btn" @click="router.push('/procurement')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              <span>Pengadaan & PR</span>
+            </button>
+            <button type="button" class="quick-action-btn" @click="router.push('/revenue')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                <line x1="2" y1="10" x2="22" y2="10"></line>
+              </svg>
+              <span>Faktur & Kasir</span>
+            </button>
+            <button type="button" class="quick-action-btn" @click="router.push('/accounting')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="1" x2="12" y2="23"></line>
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+              </svg>
+              <span>Buku Besar (CoA)</span>
+            </button>
           </div>
         </article>
 
@@ -941,10 +961,10 @@ onMounted(loadDashboard);
           <div class="card-header-bar">
             <div>
               <h2 class="card-title">Layanan Unggulan & Transaksi Teratas</h2>
-              <span class="card-subtitle">Katalog Jasa Komersial PMO UTama</span>
+              <span class="card-subtitle">Katalog jasa komersial unit bisnis</span>
             </div>
             <Button
-              label="Lihat Katalog POS"
+              label="Buka Katalog"
               icon="pi pi-arrow-right"
               iconPos="right"
               size="small"
@@ -1804,6 +1824,112 @@ onMounted(loadDashboard);
 .bar-month-label {
   font-size: 0.68rem;
   color: var(--text-secondary);
+}
+
+/* Cash Status & Bank Reconciliation Card */
+.cash-status-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cash-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 12px 0 16px;
+}
+
+.cash-stat-block {
+  background: var(--bg-subtle);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cash-stat-label {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.cash-stat-num {
+  font-size: 1.35rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.cash-stat-hint {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
+.bank-recon-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-subtle);
+  border-radius: 12px;
+  padding: 12px 18px;
+  gap: 12px;
+}
+
+.recon-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+
+.recon-count {
+  font-size: 1.2rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.recon-label {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.recon-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--border-subtle);
+}
+
+/* Quick Navigation Actions */
+.quick-nav-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.quick-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.quick-action-btn:hover {
+  background: rgba(3, 70, 147, 0.08);
+  border-color: #034693;
+  color: #034693;
 }
 
 /* 4 Divisions Performance Card */

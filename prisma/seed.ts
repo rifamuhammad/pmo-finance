@@ -50,8 +50,26 @@ async function main() {
   await prisma.budgetRevision.deleteMany();
   await prisma.budgetLine.deleteMany();
   await prisma.budget.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.role.deleteMany();
+
+  // Remember existing users' business unit codes before wiping businessUnit table
+  const userUnitCodes = new Map<string, string>();
+  try {
+    const usersWithUnits = await prisma.user.findMany({
+      where: { businessUnitId: { not: null } },
+      include: { businessUnit: true },
+    });
+    for (const u of usersWithUnits) {
+      if (u.businessUnit?.code) {
+        userUnitCodes.set(u.id, u.businessUnit.code);
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read existing user business unit mappings:', err);
+  }
+
+  // NOTE: User and Role tables are preserved per requirement!
+  // await prisma.user.deleteMany();
+  // await prisma.role.deleteMany();
   await prisma.costCenter.deleteMany();
   await prisma.fundSource.deleteMany();
   await prisma.fiscalPeriod.deleteMany();
@@ -276,7 +294,16 @@ async function main() {
   ];
 
   for (const r of rolesData) {
-    await prisma.role.create({ data: r });
+    await prisma.role.upsert({
+      where: { code: r.code },
+      update: {
+        name: r.name,
+        description: r.description,
+        permissions: r.permissions,
+        approvalLimit: r.approvalLimit,
+      },
+      create: r,
+    });
   }
 
   // 3. Business Units (4 Divisi PMO UTama + Kantor Pusat), Cost Centers, Fund Sources & Fiscal Periods
@@ -324,6 +351,19 @@ async function main() {
       managerName: 'Darmawan Setiadi',
     },
   });
+
+  // Re-link existing users to newly created business units
+  const allCreatedUnits = await prisma.businessUnit.findMany();
+  const unitIdByCode = new Map(allCreatedUnits.map((bu) => [bu.code, bu.id]));
+  for (const [userId, buCode] of userUnitCodes.entries()) {
+    const targetBuId = unitIdByCode.get(buCode);
+    if (targetBuId) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { businessUnitId: targetBuId },
+      }).catch(() => {});
+    }
+  }
 
   // Cost Centers per Division
   await prisma.costCenter.createMany({
@@ -461,7 +501,15 @@ async function main() {
   ];
 
   for (const u of usersData) {
-    await prisma.user.create({ data: u });
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: {
+        fullName: u.fullName,
+        roleCode: u.roleCode,
+        businessUnitId: u.businessUnitId,
+      },
+      create: u,
+    });
   }
 
   // 5. Approval Policies

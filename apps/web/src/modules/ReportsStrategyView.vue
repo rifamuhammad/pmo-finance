@@ -2,9 +2,9 @@
   <div class="reports-strategy-view">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Laporan Keuangan & Evaluasi Strategis</h1>
+        <h1 class="page-title">Laporan Keuangan</h1>
         <p class="page-desc">
-          Konsolidasi Laba Rugi, Posisi Keuangan (Neraca), Arus Kas, dan evaluasi capaian periode untuk penentuan plafon berikutnya.
+          Laporan Laba Rugi, Posisi Keuangan (Neraca), Arus Kas, dan evaluasi realisasi periode.
         </p>
       </div>
       <div class="btn-row">

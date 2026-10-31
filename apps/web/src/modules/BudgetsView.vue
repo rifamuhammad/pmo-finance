@@ -367,7 +367,7 @@ onMounted(loadMasterAndBudgets);
       <div>
         <h1 class="page-title">Perencanaan Anggaran & Plafon</h1>
         <p class="page-desc">
-          Kelola siklus plafon modal, pengajuan persetujuan berjenjang, revisi plafon ber-histori, dan kontrol realisasi per unit bisnis.
+          Alokasi plafon belanja operasional dan kontrol realisasi per unit bisnis.
         </p>
       </div>
       <div class="btn-row">

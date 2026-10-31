@@ -33,7 +33,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
   beforeAll(async () => {
     gmToken = await loginAs('gm@pmoutama.demo.id');
     financeToken = await loginAs('finance@pmoutama.demo.id');
-    unitMgrToken = await loginAs('unit.diklat@pmoutama.demo.id');
+    unitMgrToken = await loginAs('unit.manager@pmoutama.demo.id');
     procurementToken = await loginAs('procurement@pmoutama.demo.id');
     accountingToken = await loginAs('accounting@pmoutama.demo.id');
     cashierToken = await loginAs('kasir@pmoutama.demo.id');
@@ -178,12 +178,12 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
     });
 
     it('enforces Separation of Duties so creator cannot approve their own submitted budget', async () => {
-      // Finance Manager creates and submits a budget, then tries to approve it themselves
-      const finCreate = await request(app)
+      // GM PMO creates and submits a budget, then tries to approve it themselves
+      const gmCreate = await request(app)
         .post('/api/v1/budgets')
-        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Authorization', `Bearer ${gmToken}`)
         .send({
-          title: 'Anggaran Uji SoD Finance [DATA DEMO]',
+          title: 'Anggaran Uji SoD GM [DATA DEMO]',
           businessUnitId: unitDiklatId,
           fiscalPeriodId: period2026OpenId,
           fundSourceId: fundInternalId,
@@ -197,17 +197,17 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
             },
           ],
         });
-      expect(finCreate.status).toBe(201);
-      const sodBudgetId = finCreate.body.data.id;
+      expect(gmCreate.status).toBe(201);
+      const sodBudgetId = gmCreate.body.data.id;
 
       const subRes = await request(app)
         .post(`/api/v1/budgets/${sodBudgetId}/submit`)
-        .set('Authorization', `Bearer ${financeToken}`);
+        .set('Authorization', `Bearer ${gmToken}`);
       expect(subRes.status).toBe(200);
 
       const selfApprove = await request(app)
         .post(`/api/v1/budgets/${sodBudgetId}/approve`)
-        .set('Authorization', `Bearer ${financeToken}`)
+        .set('Authorization', `Bearer ${gmToken}`)
         .send({ note: 'Coba setujui sendiri' });
       expect(selfApprove.status).toBe(403);
       expect(selfApprove.body.error.code).toBe('SEPARATION_OF_DUTIES_VIOLATION');
@@ -668,7 +668,23 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       const cshRes = await request(app)
         .get('/api/v1/revenue/cashier/sessions')
         .set('Authorization', `Bearer ${cashierToken}`);
-      const openSession = cshRes.body.data.sessions.find((s: any) => s.status === 'OPEN');
+      expect(cshRes.status).toBe(200);
+      const register = cshRes.body.data.registers[0];
+      expect(register).toBeDefined();
+
+      let openSession = cshRes.body.data.sessions?.find((s: any) => s.status === 'OPEN');
+
+      if (!openSession) {
+        const createSession = await request(app)
+          .post('/api/v1/revenue/cashier/sessions/open')
+          .set('Authorization', `Bearer ${cashierToken}`)
+          .send({
+            cashRegisterId: register.id,
+            openingFloat: 1000000,
+          });
+        expect(createSession.status).toBe(201);
+        openSession = createSession.body.data;
+      }
       expect(openSession).toBeDefined();
 
       // Trying to open another session on the same register while OPEN -> 409
@@ -797,6 +813,23 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(ledgerRes.body.data.trialBalanceSummary.totalDebit).toBe(
         ledgerRes.body.data.trialBalanceSummary.totalCredit
       );
+    });
+  });
+
+  describe('7. Qwen AI Financial Copilot (/reports/ai-assistant)', () => {
+    it('answers financial inquiries with real-time database context', async () => {
+      const res = await request(app)
+        .post('/api/v1/reports/ai-assistant')
+        .set('Authorization', `Bearer ${unitMgrToken}`)
+        .send({
+          query: 'Berapa sisa anggaran divisi saya saat ini?',
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.reply).toContain('Analisis Anggaran Terkini');
+      expect(res.body.data.reply).toContain('Rp');
+      expect(res.body.data.suggestions).toBeInstanceOf(Array);
+      expect(res.body.data.contextMetrics).toBeDefined();
     });
   });
 });

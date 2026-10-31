@@ -25,18 +25,19 @@ export const useAuthStore = defineStore('auth', () => {
   const unreadNotifications = ref<number>(0);
   const settings = ref<Record<string, string>>({});
   const selectedBusinessUnitId = ref<string>('');
-  const theme = ref<'light' | 'dark'>((localStorage.getItem('pmo_erp_theme') as 'light' | 'dark') || 'dark');
+  const theme = ref<'light'>('light');
 
   const isAuthenticated = computed(() => Boolean(token.value && user.value));
 
-  function applyTheme(newTheme: 'light' | 'dark') {
-    theme.value = newTheme;
-    localStorage.setItem('pmo_erp_theme', newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
+  function applyTheme(_newTheme?: 'light' | 'dark') {
+    theme.value = 'light';
+    localStorage.setItem('pmo_erp_theme', 'light');
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.documentElement.classList.remove('dark');
   }
 
   function toggleTheme() {
-    applyTheme(theme.value === 'light' ? 'dark' : 'light');
+    applyTheme();
   }
 
   function hasPermission(perm: string): boolean {

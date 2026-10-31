@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { apiFetch } from '../services/api';
 import { formatRupiah, formatDate } from '../utils/format';
@@ -473,16 +474,32 @@ async function submitVendor() {
   }
 }
 
-onMounted(loadAllProcurementData);
+const route = useRoute();
+
+function applyTabFromRoute() {
+  const t = route.query.tab;
+  if (t === 'expenses' || t === 'po' || t === 'vendors' || t === 'pr') {
+    activeTab.value = t;
+  }
+}
+
+watch(() => route.query.tab, () => {
+  applyTabFromRoute();
+});
+
+onMounted(() => {
+  applyTabFromRoute();
+  loadAllProcurementData();
+});
 </script>
 
 <template>
   <div class="procurement-view">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Pengadaan, PO & Pengeluaran Biaya</h1>
+        <h1 class="page-title">Pengadaan & Beban Operasional</h1>
         <p class="page-desc">
-          Alur pengadaan dari PR, perbandingan 3 penawaran vendor, PO, verifikasi 3-way match, hingga pencairan beban operasional.
+          Pengajuan Purchase Request, komparasi penawaran vendor, dan penerbitan PO.
         </p>
       </div>
       <div class="btn-row">
@@ -531,16 +548,16 @@ onMounted(loadAllProcurementData);
 
     <div class="tab-bar" role="tablist">
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'pr' }" @click="activeTab = 'pr'">
-        1. Purchase Request & Kuotasi ({{ prs.length }})
+        Purchase Request & Kuotasi ({{ prs.length }})
       </button>
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'po' }" @click="activeTab = 'po'">
-        2. Purchase Order & Penerimaan ({{ pos.length }})
+        Purchase Order & Penerimaan ({{ pos.length }})
       </button>
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'expenses' }" @click="activeTab = 'expenses'">
-        3. Pengeluaran Kas & Realisasi ({{ expenses.length }})
+        Pengeluaran Kas & Beban ({{ expenses.length }})
       </button>
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'vendors' }" @click="activeTab = 'vendors'">
-        4. Master Vendor ({{ vendors.length }})
+        Daftar Vendor ({{ vendors.length }})
       </button>
     </div>
 

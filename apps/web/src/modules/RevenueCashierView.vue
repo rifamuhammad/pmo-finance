@@ -359,9 +359,9 @@ onMounted(loadRevenueAndCashier);
   <div class="revenue-cashier-view">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Pendapatan, Pesanan & Kasir</h1>
+        <h1 class="page-title">Pendapatan, Faktur & Kasir</h1>
         <p class="page-desc">
-          Pelacakan terpadu penyerahan layanan, pelunasan invoice pelanggan, potongan merchant fee, hingga kontrol sesi kasir & setoran bank.
+          Penerbitan faktur tagihan pelanggan, pembayaran piutang, dan sesi kasir.
         </p>
       </div>
       <div class="btn-row">
@@ -402,16 +402,16 @@ onMounted(loadRevenueAndCashier);
 
     <div class="tab-bar" role="tablist">
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'invoices' }" @click="activeTab = 'invoices'">
-        1. Tagihan (Invoice) & Pembayaran ({{ customerInvoices.length }})
+        Faktur Tagihan & Pembayaran ({{ customerInvoices.length }})
       </button>
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'orders' }" @click="activeTab = 'orders'">
-        2. Pesanan & Penyerahan Layanan ({{ salesOrders.length }})
+        Pesanan Layanan ({{ salesOrders.length }})
       </button>
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'cashier' }" @click="activeTab = 'cashier'">
-        3. Sesi Kasir, Closeout & Setoran ({{ cashierData.sessions?.length || 0 }})
+        Sesi Kasir & Setoran ({{ cashierData.sessions?.length || 0 }})
       </button>
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'catalog' }" @click="activeTab = 'catalog'">
-        4. Pelanggan & Katalog Layanan ({{ products.length }})
+        Katalog Layanan & Tarif ({{ products.length }})
       </button>
     </div>
 

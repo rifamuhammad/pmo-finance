@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import AppShell from '../layouts/AppShell.vue';
 import LoginView from '../modules/LoginView.vue';
+import AppsLauncherView from '../modules/AppsLauncherView.vue';
 import DashboardView from '../modules/DashboardView.vue';
 import ApprovalsView from '../modules/ApprovalsView.vue';
 import BudgetsView from '../modules/BudgetsView.vue';
@@ -27,6 +28,16 @@ export const router = createRouter({
       children: [
         {
           path: '',
+          name: 'apps-launcher',
+          component: AppsLauncherView,
+          meta: { title: 'Menu Aplikasi ERP' },
+        },
+        {
+          path: 'apps',
+          redirect: '/',
+        },
+        {
+          path: 'dashboard',
           name: 'dashboard',
           component: DashboardView,
           meta: { title: 'Dashboard Eksekutif & Operasional' },

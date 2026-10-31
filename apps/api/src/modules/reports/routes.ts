@@ -4,6 +4,7 @@ import { prisma } from '../../shared/prisma.js';
 import { toCents, fromCents, subMoney } from '../../shared/decimal.js';
 import { recordAuditLog } from '../../shared/audit.js';
 import { AppError, requireAuth, requirePermission, requireRoles } from '../../middleware/auth.js';
+import { queryQwenAiAssistant } from '../../shared/qwen.js';
 
 export const reportsRouter = Router();
 
@@ -866,3 +867,164 @@ reportsRouter.post(
     }
   }
 );
+
+// 12. AI FINANCIAL ASSISTANT (ODTI-STYLE COPILOT FOR PMO FINANCE)
+const aiAssistantSchema = z.object({
+  query: z.string().min(1).max(1000),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+      })
+    )
+    .optional(),
+});
+
+function formatRupiahInt(amount: number): string {
+  return 'Rp ' + Math.round(amount).toLocaleString('id-ID');
+}
+
+reportsRouter.post('/ai-assistant', async (req, res, next) => {
+  try {
+    const { query, history } = aiAssistantSchema.parse(req.body);
+    const qLower = query.toLowerCase();
+    const user = req.user!;
+
+    // Scoped context based on role and unit
+    const unitFilter: Record<string, unknown> = {};
+    if (user.businessUnitId && ['UNIT_MANAGER', 'CASHIER'].includes(user.roleCode)) {
+      unitFilter.businessUnitId = user.businessUnitId;
+    }
+
+    // Fetch live ERP context
+    const [currentUserData, budgets, expenses, approvals, customerInvoices, cashierSessions, businessUnits] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: user.userId },
+        include: { businessUnit: true, role: true },
+      }),
+      prisma.budget.findMany({
+        where: {
+          ...unitFilter,
+          status: { in: ['APPROVED', 'REVISED'] },
+        },
+        include: { businessUnit: true, lines: true },
+      }),
+      prisma.expense.findMany({
+        where: unitFilter,
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        include: { businessUnit: true },
+      }),
+      prisma.approvalRequest.findMany({
+        where: { status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      prisma.customerInvoice.findMany({
+        where: unitFilter,
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        include: { businessUnit: true, customer: true },
+      }),
+      prisma.cashierSession.findMany({
+        where: { status: 'OPEN' },
+        include: { cashRegister: true },
+      }),
+      prisma.businessUnit.findMany({ where: { isActive: true } }),
+    ]);
+
+    // Calculate aggregated metrics
+    let totalAllocated = 0;
+    let totalCommitted = 0;
+    let totalActualExpense = 0;
+
+    budgets.forEach((b) => {
+      b.lines.forEach((l) => {
+        totalAllocated += Number(l.allocatedAmount);
+        totalCommitted += Number(l.committedAmount);
+        totalActualExpense += Number(l.actualAmount);
+      });
+    });
+
+    const totalAvailable = Math.max(0, totalAllocated - totalCommitted - totalActualExpense);
+
+    const qwenResult = await queryQwenAiAssistant({
+      query,
+      history,
+      context: {
+        user: {
+          fullName: currentUserData?.fullName || user.fullName,
+          email: currentUserData?.email || user.email,
+          roleCode: user.roleCode,
+          roleName: currentUserData?.role?.name || user.roleCode,
+          businessUnitId: user.businessUnitId,
+          businessUnitName: currentUserData?.businessUnit?.name || 'Kantor Pusat / Holding (Lintas Divisi)',
+        },
+        metrics: {
+          totalAllocated,
+          totalCommitted,
+          totalActualExpense,
+          totalAvailable,
+          serapanPercent:
+            totalAllocated > 0
+              ? Math.round(((totalCommitted + totalActualExpense) / totalAllocated) * 100)
+              : 0,
+        },
+        budgets: budgets.map((b) => ({
+          title: b.title,
+          unitCode: b.businessUnit?.code,
+          unitName: b.businessUnit?.name,
+          allocated: b.lines.reduce((acc, l) => acc + Number(l.allocatedAmount), 0),
+          committed: b.lines.reduce((acc, l) => acc + Number(l.committedAmount), 0),
+          actual: b.lines.reduce((acc, l) => acc + Number(l.actualAmount), 0),
+        })),
+        pendingApprovals: approvals.map((a) => ({
+          code: a.entityCode || a.requestNumber,
+          module: a.module,
+          title: a.title,
+          requestedBy: a.requestedByName,
+          requiredRole: a.requiredRoleCode,
+        })),
+        recentExpenses: expenses.map((e) => ({
+          docNumber: e.docNumber,
+          title: e.title,
+          recipientName: e.recipientName,
+          amount: Number(e.totalAmount),
+          status: e.status,
+        })),
+        unpaidInvoices: customerInvoices
+          .filter((i) => i.status !== 'PAID')
+          .map((i) => ({
+            docNumber: i.docNumber,
+            customerName: i.customer?.name || 'Pelanggan',
+            amount: Number(i.totalAmount),
+            status: i.status,
+          })),
+        openCashierSessionsCount: cashierSessions.length,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        reply: qwenResult.reply,
+        suggestions: qwenResult.suggestions,
+        provider: qwenResult.provider,
+        model: qwenResult.model,
+        contextMetrics: {
+          totalAllocated,
+          totalCommitted,
+          totalActualExpense,
+          totalAvailable,
+          pendingApprovalsCount: approvals.length,
+          expensesCount: expenses.length,
+          openCashierSessionsCount: cashierSessions.length,
+        },
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
