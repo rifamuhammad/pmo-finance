@@ -12,21 +12,20 @@ const emit = defineEmits<{
   (e: 'open-launchpad'): void;
 }>();
 
-// Auto-Hide Dock State (Strategi 1)
-// Default is unpinned (false) for maximum workspace productivity, remembers user setting
-const isPinned = ref<boolean>(localStorage.getItem('pmo_dock_pinned') === 'true');
-const isHovered = ref<boolean>(false);
+// Explicit Arrow Toggle State (Tutup / Buka via Arrow Button)
+// Default is open (false), remembers user preference
+const isClosed = ref<boolean>(localStorage.getItem('pmo_dock_closed') === 'true');
 
-function togglePin() {
-  isPinned.value = !isPinned.value;
-  localStorage.setItem('pmo_dock_pinned', String(isPinned.value));
+function toggleDock(closed?: boolean) {
+  isClosed.value = typeof closed === 'boolean' ? closed : !isClosed.value;
+  localStorage.setItem('pmo_dock_closed', String(isClosed.value));
 }
 
 function handleGlobalKeydown(e: KeyboardEvent) {
-  // Option+D / Alt+D or Cmd+Option+D toggles dock pin state (matches native macOS)
+  // Option+D / Alt+D or Cmd+Option+D toggles dock open / close
   if ((e.metaKey || e.altKey) && e.key.toLowerCase() === 'd') {
     e.preventDefault();
-    togglePin();
+    toggleDock();
   }
 }
 
@@ -179,37 +178,43 @@ function handleItemClick(item: DockItem) {
 </script>
 
 <template>
-  <!-- Invisible bottom trigger zone (auto-reveal dock on hover) -->
-  <div
-    v-if="!isPinned"
-    class="dock-bottom-trigger"
-    aria-hidden="true"
-    @mouseenter="isHovered = true"
-  ></div>
+  <!-- Floating Upward Arrow Pill to Open / Buka Dock when closed -->
+  <button
+    v-if="isClosed"
+    type="button"
+    class="dock-expand-tab"
+    title="Buka Navigasi Dock (Alt+D)"
+    aria-label="Buka Navigasi Dock"
+    @click="toggleDock(false)"
+  >
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+    <span class="expand-tab-label">Buka Dock</span>
+  </button>
 
-  <!-- Dock Wrapper with Auto-Hide Translation -->
+  <!-- Dock Wrapper with Smooth Slide Translation -->
   <div
     class="mac-dock-wrapper"
     :class="{
-      'is-hidden': !isPinned && !isHovered,
-      'is-pinned': isPinned,
-      'is-revealed': isPinned || isHovered
+      'is-closed': isClosed,
+      'is-open': !isClosed
     }"
     role="navigation"
     aria-label="macOS Floating Dock ERP"
-    @mouseenter="isHovered = true"
-    @mouseleave="isHovered = false"
   >
-    <!-- Subtle Peek Indicator when Dock is hidden -->
-    <div
-      v-if="!isPinned"
-      class="dock-peek-handle"
-      :class="{ 'is-peek-active': !isHovered }"
-      title="Arahkan kursor ke bawah untuk memunculkan Dock (Alt+D untuk Pin)"
-      @click="isHovered = true"
+    <!-- Top-Center Chevron Handle to Collapse / Tutup Dock -->
+    <button
+      type="button"
+      class="dock-collapse-tab"
+      title="Tutup Navigasi Dock (Alt+D)"
+      aria-label="Tutup Dock"
+      @click="toggleDock(true)"
     >
-      <span class="peek-pill"></span>
-    </div>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"></polyline>
+      </svg>
+    </button>
 
     <div class="mac-dock-glass">
       <template v-for="item in visibleItems" :key="item.id">
@@ -340,106 +345,122 @@ function handleItemClick(item: DockItem) {
         <div v-if="item.isDividerAfter" class="dock-divider" aria-hidden="true"></div>
       </template>
 
-      <!-- Pin / Auto-Hide Mode Toggle Item -->
+      <!-- Tutup Dock (Minimize Arrow) Item -->
       <button
         type="button"
-        class="dock-item pin-toggle-item"
-        :class="{ 'is-pinned-active': isPinned }"
-        @click="togglePin"
-        aria-label="Toggle Pin / Auto-Hide Dock"
+        class="dock-item close-toggle-item"
+        title="Tutup Navigasi Dock (Alt+D)"
+        aria-label="Tutup Dock"
+        @click="toggleDock(true)"
       >
         <div class="mac-tooltip">
-          <span>{{ isPinned ? '📌 Dock Terkunci (Klik / Alt+D untuk Auto-Hide)' : '👁️ Auto-Hide Aktif (Klik / Alt+D untuk Kunci)' }}</span>
+          <span>Tutup Dock (Sembunyikan)</span>
         </div>
 
-        <div class="dock-squircle pin-squircle">
-          <!-- Pin Icon (Angled when unpinned, vertical when pinned) -->
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="12" y1="17" x2="12" y2="22"></line>
-            <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.89A2 2 0 0 0 5 15.24Z"></path>
+        <div class="dock-squircle close-squircle">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
         </div>
-
-        <!-- Dot glows amber when pinned, transparent when auto-hide -->
-        <span
-          class="dock-active-dot"
-          :class="{ 'is-running': isPinned }"
-        ></span>
       </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Invisible trigger hitbox spanning full width at bottom of screen */
-.dock-bottom-trigger {
+/* Floating Expand Tab at Bottom Center when Dock is Closed */
+.dock-expand-tab {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 22px;
-  z-index: 59;
-  pointer-events: auto;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 14px 5px 11px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  color: #f8fafc;
+  cursor: pointer;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: popIn 220ms ease;
 }
 
+.dock-expand-tab:hover {
+  background: #0f172a;
+  transform: translateX(-50%) translateY(-2px);
+  border-color: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: #38bdf8;
+}
+
+.expand-tab-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Collapse Arrow Tab on top of Dock Glass */
+.dock-collapse-tab {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(14, 26, 46, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 180ms ease;
+  z-index: 5;
+}
+
+.dock-collapse-tab:hover {
+  background: #0f172a;
+  color: #ffffff;
+  width: 44px;
+  transform: translateX(-50%) translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Dock Wrapper Transition */
 .mac-dock-wrapper {
   position: fixed;
   bottom: 14px;
   left: 50%;
   transform: translateX(-50%) translateY(0);
   z-index: 60;
-  pointer-events: none;
-  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 240ms ease;
+  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
 }
 
-/* When Auto-Hide is active and user is not hovering: slide down out of way */
-.mac-dock-wrapper.is-hidden {
-  transform: translateX(-50%) translateY(calc(100% + 24px));
+.mac-dock-wrapper.is-closed {
+  transform: translateX(-50%) translateY(calc(100% + 30px));
   opacity: 0;
   pointer-events: none;
 }
 
-.mac-dock-wrapper.is-revealed,
-.mac-dock-wrapper.is-pinned {
+.mac-dock-wrapper.is-open {
   transform: translateX(-50%) translateY(0);
   opacity: 1;
   pointer-events: auto;
 }
 
-/* Subtle Peek Handle bar at the very bottom center when dock is hidden */
-.dock-peek-handle {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 18px 2px;
-  cursor: pointer;
-  pointer-events: auto;
-  z-index: 61;
-  display: flex;
-  justify-content: center;
-  transition: all 200ms ease;
-}
-
-.peek-pill {
-  width: 44px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.5);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.dock-peek-handle:hover .peek-pill {
-  width: 64px;
-  height: 5px;
-  background: #38bdf8;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
-}
-
 /* Glassmorphism macOS Dock Bar */
 .mac-dock-glass {
   pointer-events: auto;
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 8px;
@@ -456,26 +477,29 @@ function handleItemClick(item: DockItem) {
   transition: all 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Pin Toggle Squircle Styling */
-.pin-squircle {
-  background: linear-gradient(135deg, #334155, #1e293b);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+/* Close Squircle Styling */
+.close-squircle {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   color: #94a3b8;
-  transition: all 200ms ease;
+  transition: all 180ms ease;
 }
 
-.pin-toggle-item:hover .pin-squircle {
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.3);
+.close-toggle-item:hover .close-squircle {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #ef4444;
 }
 
-.pin-toggle-item.is-pinned-active .pin-squircle {
-  background: linear-gradient(135deg, #0284c7, #0369a1);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.35);
-  box-shadow:
-    0 4px 14px rgba(2, 132, 199, 0.45),
-    inset 0 1px 1px rgba(255, 255, 255, 0.3);
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 /* Hover over Dock container expands slightly */
