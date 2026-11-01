@@ -118,13 +118,33 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
       throw new AppError(404, 'USER_NOT_FOUND', 'Data pengguna tidak ditemukan.');
     }
 
-    const [activePeriod, unreadCount, settings] = await Promise.all([
+    const approvalWhere: Record<string, unknown> = { status: 'PENDING' };
+    if (user.roleCode === 'GM_PMO') {
+      approvalWhere.requiredRoleCode = { in: ['GM_PMO', 'FINANCE_MANAGER'] };
+      approvalWhere.requestedById = { not: user.id };
+    } else if (user.roleCode === 'FINANCE_MANAGER') {
+      approvalWhere.requiredRoleCode = 'FINANCE_MANAGER';
+      approvalWhere.requestedById = { not: user.id };
+    } else if (user.roleCode === 'UNIT_MANAGER') {
+      approvalWhere.requiredRoleCode = 'UNIT_MANAGER';
+      approvalWhere.requestedById = { not: user.id };
+    } else if (user.roleCode === 'SUPER_ADMIN') {
+      // Super admin can see all
+    } else {
+      approvalWhere.requiredRoleCode = user.roleCode;
+      approvalWhere.requestedById = { not: user.id };
+    }
+
+    const [activePeriod, unreadCount, pendingApprovalsCount, settings] = await Promise.all([
       prisma.fiscalPeriod.findFirst({ where: { isClosed: false }, orderBy: { startDate: 'desc' } }),
       prisma.notification.count({
         where: {
           isRead: false,
           OR: [{ userId: user.id }, { roleCode: user.roleCode }],
         },
+      }),
+      prisma.approvalRequest.count({
+        where: approvalWhere,
       }),
       prisma.systemSetting.findMany(),
     ]);
@@ -147,6 +167,7 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
         },
         activePeriod,
         unreadNotifications: unreadCount,
+        pendingApprovalsCount,
         settings: Object.fromEntries(settings.map((s) => [s.key, s.value])),
       },
       meta: { requestId: req.requestId },

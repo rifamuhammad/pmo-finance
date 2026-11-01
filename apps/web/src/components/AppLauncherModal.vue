@@ -29,7 +29,7 @@ interface AppTile {
   badgeColor?: string;
 }
 
-const appTiles: AppTile[] = [
+const appTiles = computed<AppTile[]>(() => [
   {
     id: 'dashboard',
     title: 'Executive Dashboard',
@@ -44,8 +44,8 @@ const appTiles: AppTile[] = [
     permission: 'approval:view',
     gradient: 'linear-gradient(135deg, #d97706, #92400e)',
     icon: 'approvals',
-    badge: '2 Menunggu',
-    badgeColor: '#f59e0b',
+    badge: auth.pendingApprovalsCount > 0 ? `${auth.pendingApprovalsCount} Menunggu` : undefined,
+    badgeColor: '#ef4444',
   },
   {
     id: 'budgets',
@@ -120,7 +120,7 @@ const appTiles: AppTile[] = [
     badge: 'Copilot',
     badgeColor: '#a855f7',
   },
-];
+]);
 
 function isTileLocked(tile: AppTile): boolean {
   if (!tile.permission) return false;
@@ -129,8 +129,8 @@ function isTileLocked(tile: AppTile): boolean {
 
 const filteredTiles = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
-  if (!query) return appTiles;
-  return appTiles.filter((tile) => tile.title.toLowerCase().includes(query));
+  if (!query) return appTiles.value;
+  return appTiles.value.filter((tile) => tile.title.toLowerCase().includes(query));
 });
 
 const lockedShakeId = ref<string | null>(null);

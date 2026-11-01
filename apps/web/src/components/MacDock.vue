@@ -50,7 +50,7 @@ interface DockItem {
   isDividerAfter?: boolean;
 }
 
-const dockItems: DockItem[] = [
+const dockItems = computed<DockItem[]>(() => [
   {
     id: 'home',
     name: 'Menu Aplikasi (Launchpad)',
@@ -73,8 +73,8 @@ const dockItems: DockItem[] = [
     permission: 'approval:view',
     gradient: 'linear-gradient(135deg, #d97706, #92400e)',
     icon: 'approvals',
-    badge: '2',
-    badgeColor: '#f59e0b',
+    badge: auth.pendingApprovalsCount > 0 ? String(auth.pendingApprovalsCount) : undefined,
+    badgeColor: '#ef4444',
   },
   {
     id: 'budgets',
@@ -150,11 +150,11 @@ const dockItems: DockItem[] = [
     badge: 'AI',
     badgeColor: '#a855f7',
   },
-];
+]);
 
 // Show all items on the Dock so users can visually recognize what features exist,
 // while unauthorized modules are disabled, badged with 🔒, and prevented from opening.
-const visibleItems = computed(() => dockItems);
+const visibleItems = computed(() => dockItems.value);
 
 function isItemLocked(item: DockItem): boolean {
   if (!item.permission) return false;
@@ -622,13 +622,19 @@ function handleItemClick(item: DockItem) {
   top: -4px;
   right: -4px;
   color: #ffffff;
+  background-color: #ef4444;
   font-size: 0.62rem;
   font-weight: 750;
-  padding: 1px 5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
   border-radius: 9999px;
-  border: 1.5px solid rgba(14, 26, 46, 0.9);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-  line-height: 1.2;
+  border: 1.5px solid rgba(14, 26, 46, 0.95);
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 /* macOS Running Dot Indicator */

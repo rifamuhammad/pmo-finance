@@ -50,6 +50,9 @@ async function loadApprovals() {
     params.set('scope', scopeFilter.value === 'assigned' ? 'assigned' : 'my_requests');
     const res = await apiFetch(`/reports/approvals?${params.toString()}`);
     approvals.value = res.data || [];
+    auth.pendingApprovalsCount = approvals.value.filter(
+      (a: any) => a.canApprove && a.status === 'PENDING'
+    ).length;
   } catch (err: any) {
     errorMsg.value = err.message || 'Gagal memuat antrean persetujuan.';
   } finally {

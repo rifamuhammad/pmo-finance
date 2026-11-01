@@ -375,19 +375,6 @@ onUnmounted(() => {
           </select>
         </div>
 
-        <!-- Role Simulation Active Pill (Fast reset when testing) -->
-        <button
-          v-if="auth.simulatedRole"
-          type="button"
-          class="nav-role-sim-pill"
-          title="Mode Simulasi Role Aktif (Klik untuk Reset ke Akun Asli)"
-          @click="auth.setSimulatedRole(null)"
-        >
-          <span class="pill-dot-pulse"></span>
-          <span>Simulasi: <b>{{ auth.effectiveRoleName }}</b></span>
-          <span class="pill-close-tag">✕</span>
-        </button>
-
         <!-- AI Assistant Quick Trigger (Hanya tampil di dalam modul kerja) -->
         <button
           v-if="!isHomeLauncher"
@@ -415,7 +402,7 @@ onUnmounted(() => {
             <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
             <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
           </svg>
-          <span class="nav-notif-badge">2</span>
+          <span v-if="auth.unreadNotifications > 0" class="nav-notif-badge">{{ auth.unreadNotifications }}</span>
         </button>
 
         <!-- User Profile Avatar Capsule -->
@@ -431,7 +418,7 @@ onUnmounted(() => {
           >
             <div class="user-capsule-avatar">
               <span>{{ userInitials }}</span>
-              <span class="user-capsule-status" :class="{ 'is-simulated': auth.simulatedRole }"></span>
+              <span class="user-capsule-status"></span>
             </div>
             <div class="user-capsule-text">
               <span class="user-capsule-name">{{ auth.user?.fullName || 'Pengguna PMO' }}</span>
@@ -466,36 +453,6 @@ onUnmounted(() => {
                 <div class="dropdown-badges-row">
                   <span class="dropdown-role-badge">{{ auth.effectiveRoleName }}</span>
                   <span class="dropdown-unit-badge">🏢 {{ currentBusinessUnitLabel }}</span>
-                </div>
-              </div>
-
-              <!-- Quick Role Simulation Selector for Testing Permissions -->
-              <div class="dropdown-divider"></div>
-              <div class="dropdown-role-sim-section">
-                <div class="dropdown-section-title">
-                  <span>SIMULASI WEWENANG ROLE</span>
-                  <button
-                    v-if="auth.simulatedRole"
-                    type="button"
-                    class="role-reset-link"
-                    @click="auth.setSimulatedRole(null)"
-                  >
-                    Reset
-                  </button>
-                </div>
-                <p class="dropdown-section-desc">Pilih role untuk melihat fitur yang terkunci & tidak bisa diklik:</p>
-                <div class="role-sim-grid">
-                  <button
-                    v-for="(profile, code) in auth.roleProfilesMap"
-                    :key="code"
-                    type="button"
-                    class="role-sim-btn"
-                    :class="{ 'is-active': auth.effectiveRoleCode === code }"
-                    @click="auth.setSimulatedRole(auth.simulatedRole === code ? null : String(code))"
-                  >
-                    <span class="role-sim-name">{{ profile.roleName }}</span>
-                    <span v-if="auth.effectiveRoleCode === code" class="role-sim-check">✓</span>
-                  </button>
                 </div>
               </div>
 
@@ -1413,16 +1370,18 @@ onUnmounted(() => {
   position: absolute;
   top: 4px;
   right: 4px;
-  background: #f43f5e;
+  background: #ef4444;
   color: #ffffff;
   font-size: 0.6rem;
   font-weight: 750;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 9999px;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
 }
 
 /* User Profile Wrapper & Dropdown Menu */
@@ -2161,131 +2120,9 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.user-capsule-status.is-simulated {
-  background: #f59e0b;
-}
-
 .user-capsule-chevron {
   color: rgba(255, 255, 255, 0.5);
   margin-left: 2px;
-}
-
-/* Nav Role Simulation Active Pill */
-.nav-role-sim-pill {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 10px;
-  border-radius: 9999px;
-  background: rgba(245, 158, 11, 0.16);
-  border: 1px solid rgba(245, 158, 11, 0.45);
-  color: #fbbf24;
-  font-size: 0.72rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 160ms ease;
-  white-space: nowrap;
-}
-
-.nav-role-sim-pill:hover {
-  background: rgba(245, 158, 11, 0.28);
-  border-color: #f59e0b;
-  color: #ffffff;
-}
-
-.pill-dot-pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #f59e0b;
-  box-shadow: 0 0 6px #f59e0b;
-}
-
-.pill-close-tag {
-  font-size: 0.65rem;
-  background: rgba(245, 158, 11, 0.3);
-  padding: 1px 4px;
-  border-radius: 4px;
-  margin-left: 2px;
-}
-
-/* Role Simulation Grid inside Profile Dropdown */
-.dropdown-role-sim-section {
-  padding: 10px 14px 6px;
-}
-
-.dropdown-section-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.68rem;
-  font-weight: 750;
-  letter-spacing: 0.04em;
-  color: #94a3b8;
-  margin-bottom: 3px;
-  text-transform: uppercase;
-}
-
-.role-reset-link {
-  background: none;
-  border: none;
-  color: #38bdf8;
-  font-size: 0.68rem;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
-}
-
-.role-reset-link:hover {
-  text-decoration: underline;
-}
-
-.dropdown-section-desc {
-  font-size: 0.70rem;
-  color: #64748b;
-  margin-bottom: 8px;
-  line-height: 1.25;
-}
-
-.role-sim-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.role-sim-btn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: #cbd5e1;
-  font-size: 0.75rem;
-  font-weight: 550;
-  cursor: pointer;
-  text-align: left;
-  transition: all 140ms ease;
-}
-
-.role-sim-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #ffffff;
-}
-
-.role-sim-btn.is-active {
-  background: rgba(245, 158, 11, 0.15);
-  border-color: #f59e0b;
-  color: #f59e0b;
-  font-weight: 650;
-}
-
-.role-sim-check {
-  font-weight: 800;
-  color: #f59e0b;
 }
 
 /* Floating Glass Toast Alert for Access Denied */

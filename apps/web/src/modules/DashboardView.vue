@@ -582,6 +582,7 @@ onMounted(loadDashboard);
 
                 <!-- Active Vertical Guide Line following mouse -->
                 <line
+                  v-if="isChartHovered"
                   :x1="currentExpPoint.x"
                   y1="20"
                   :x2="currentExpPoint.x"
@@ -594,7 +595,7 @@ onMounted(loadDashboard);
 
                 <!-- Glowing Marker Dots on active month -->
                 <!-- Beban Marker -->
-                <g v-if="activeSeries !== 'cash'">
+                <g v-if="isChartHovered && activeSeries !== 'cash'">
                   <circle
                     :cx="currentExpPoint.x"
                     :cy="currentExpPoint.y"
@@ -615,7 +616,7 @@ onMounted(loadDashboard);
                 </g>
 
                 <!-- Kas Marker -->
-                <g v-if="activeSeries !== 'expense'">
+                <g v-if="isChartHovered && activeSeries !== 'expense'">
                   <circle
                     :cx="currentCashPoint.x"
                     :cy="currentCashPoint.y"
@@ -636,43 +637,46 @@ onMounted(loadDashboard);
                 </g>
               </svg>
 
-              <!-- Dynamic Floating Tooltip Box -->
-              <div
-                class="chart-tooltip-box enhanced-tooltip"
-                :style="tooltipLeftStyle"
-              >
-                <div class="tooltip-header-row">
-                  <span class="tooltip-month">{{ tooltipData.month }} {{ tooltipData.year }}</span>
-                  <span class="tooltip-status-pill" :class="tooltipData.hasActivity ? 'active' : 'idle'">
-                    {{ tooltipData.hasActivity ? 'Aktif' : 'Nihil' }}
-                  </span>
-                </div>
-                <div class="tooltip-body">
-                  <div class="tooltip-item">
-                    <span class="dot emerald"></span>
-                    <span class="item-label">Kas Masuk:</span>
-                    <strong class="item-val">{{ tooltipData.cash }}</strong>
-                  </div>
-                  <div class="tooltip-item">
-                    <span class="dot navy"></span>
-                    <span class="item-label">Beban Kas:</span>
-                    <strong class="item-val">{{ tooltipData.expense }}</strong>
-                  </div>
-                  <div class="tooltip-divider"></div>
-                  <div class="tooltip-item net-row">
-                    <span class="item-label">Arus Kas Bersih:</span>
-                    <span
-                      class="net-badge"
-                      :class="tooltipData.isSurplus ? 'surplus' : 'defisit'"
-                    >
-                      {{ tooltipData.isSurplus ? '+' : '-' }} {{ tooltipData.netMargin }}
+              <!-- Dynamic Floating Tooltip Box (Hanya muncul saat kursor di-hover pada chart) -->
+              <transition name="tooltip-fade">
+                <div
+                  v-if="isChartHovered"
+                  class="chart-tooltip-box enhanced-tooltip"
+                  :style="tooltipLeftStyle"
+                >
+                  <div class="tooltip-header-row">
+                    <span class="tooltip-month">{{ tooltipData.month }} {{ tooltipData.year }}</span>
+                    <span class="tooltip-status-pill" :class="tooltipData.hasActivity ? 'active' : 'idle'">
+                      {{ tooltipData.hasActivity ? 'Aktif' : 'Nihil' }}
                     </span>
                   </div>
-                  <div v-if="tooltipData.hasActivity && Number(activeTrend.expense) > 0" class="coverage-row">
-                    <span>Coverage Kas: <strong>{{ tooltipData.ratio }}x beban</strong></span>
+                  <div class="tooltip-body">
+                    <div class="tooltip-item">
+                      <span class="dot emerald"></span>
+                      <span class="item-label">Kas Masuk:</span>
+                      <strong class="item-val">{{ tooltipData.cash }}</strong>
+                    </div>
+                    <div class="tooltip-item">
+                      <span class="dot navy"></span>
+                      <span class="item-label">Beban Kas:</span>
+                      <strong class="item-val">{{ tooltipData.expense }}</strong>
+                    </div>
+                    <div class="tooltip-divider"></div>
+                    <div class="tooltip-item net-row">
+                      <span class="item-label">Arus Kas Bersih:</span>
+                      <span
+                        class="net-badge"
+                        :class="tooltipData.isSurplus ? 'surplus' : 'defisit'"
+                      >
+                        {{ tooltipData.isSurplus ? '+' : '-' }} {{ tooltipData.netMargin }}
+                      </span>
+                    </div>
+                    <div v-if="tooltipData.hasActivity && Number(activeTrend.expense) > 0" class="coverage-row">
+                      <span>Coverage Kas: <strong>{{ tooltipData.ratio }}x beban</strong></span>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </transition>
             </div>
 
             <!-- View 2: Interactive Comparative Bar Chart -->
@@ -1457,6 +1461,16 @@ onMounted(loadDashboard);
 }
 
 /* Enhanced Tooltip */
+.tooltip-fade-enter-active,
+.tooltip-fade-leave-active {
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.tooltip-fade-enter-from,
+.tooltip-fade-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
 .chart-tooltip-box.enhanced-tooltip {
   position: absolute;
   top: 8px;

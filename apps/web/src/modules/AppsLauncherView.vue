@@ -24,7 +24,7 @@ interface AppTile {
 }
 
 // 11 Modul Utama Keuangan ERP PMO UTama
-const appTiles: AppTile[] = [
+const appTiles = computed<AppTile[]>(() => [
   {
     id: 'dashboard',
     title: 'Executive Dashboard',
@@ -40,8 +40,8 @@ const appTiles: AppTile[] = [
     permission: 'approval:view',
     gradient: 'linear-gradient(135deg, #d97706, #92400e)',
     icon: 'approvals',
-    badge: '2 Menunggu',
-    badgeColor: '#f59e0b',
+    badge: auth.pendingApprovalsCount > 0 ? `${auth.pendingApprovalsCount} Menunggu` : undefined,
+    badgeColor: '#ef4444',
     tags: ['approval', 'persetujuan', 'otorisasi', 'inbox', 'sod', 'tugas'],
   },
   {
@@ -126,7 +126,7 @@ const appTiles: AppTile[] = [
     badgeColor: '#a855f7',
     tags: ['ai', 'copilot', 'qwen', 'asisten', 'analisis', 'kecerdasan'],
   },
-];
+]);
 
 function isTileLocked(tile: AppTile): boolean {
   if (!tile.permission) return false;
@@ -135,9 +135,9 @@ function isTileLocked(tile: AppTile): boolean {
 
 // Display all tiles on the desktop grid; tiles without permission are styled as locked
 const filteredTiles = computed(() => {
-  if (!searchQuery.value.trim()) return appTiles;
+  if (!searchQuery.value.trim()) return appTiles.value;
   const q = searchQuery.value.toLowerCase().trim();
-  return appTiles.filter((tile) => {
+  return appTiles.value.filter((tile) => {
     return (
       tile.title.toLowerCase().includes(q) ||
       tile.tags.some((t) => t.toLowerCase().includes(q))
