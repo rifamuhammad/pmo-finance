@@ -325,29 +325,6 @@ onUnmounted(() => {
     <!-- Top Executive Header: 100% Full-Width, Persistent, Deep Navy across ALL Pages -->
     <header class="top-header" :class="{ 'is-launcher-header': isHomeLauncher }">
       <div class="header-left-cluster">
-        <!-- 9-Dots Odoo ERP App Launcher Grid Button (Hanya tampil saat di dalam modul, disembunyikan di home launcher) -->
-        <button
-          v-if="!isHomeLauncher"
-          type="button"
-          class="nav-icon-circle-btn nav-launcher-btn"
-          :class="{ active: appLauncherOpen }"
-          title="Menu Aplikasi ERP (Launchpad)"
-          aria-label="Menu Aplikasi ERP"
-          @click="appLauncherOpen = !appLauncherOpen"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-            <circle cx="5" cy="5" r="2.5"></circle>
-            <circle cx="12" cy="5" r="2.5"></circle>
-            <circle cx="19" cy="5" r="2.5"></circle>
-            <circle cx="5" cy="12" r="2.5"></circle>
-            <circle cx="12" cy="12" r="2.5"></circle>
-            <circle cx="19" cy="12" r="2.5"></circle>
-            <circle cx="5" cy="19" r="2.5"></circle>
-            <circle cx="12" cy="19" r="2.5"></circle>
-            <circle cx="19" cy="19" r="2.5"></circle>
-          </svg>
-        </button>
-
         <!-- Brand Identifier saat di Home Launcher Screen (Clean, Zero Text Redundancy) -->
         <div v-if="isHomeLauncher" class="nav-brand-group">
           <img :src="logoPmoEmblem" alt="PMO UTama" class="nav-brand-logo" />
