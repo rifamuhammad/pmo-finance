@@ -41,6 +41,7 @@ const appTiles: AppTile[] = [
     id: 'approvals',
     title: 'Approval Inbox',
     route: '/approvals',
+    permission: 'approval:view',
     gradient: 'linear-gradient(135deg, #d97706, #92400e)',
     icon: 'approvals',
     badge: '2 Menunggu',
@@ -66,7 +67,7 @@ const appTiles: AppTile[] = [
     id: 'expenses',
     title: 'Expenses & Klaim Biaya',
     route: '/procurement?tab=expenses',
-    permission: 'procurement:view',
+    permission: 'expense:view',
     gradient: 'linear-gradient(135deg, #e11d48, #9f1239)',
     icon: 'expenses',
   },
@@ -106,7 +107,7 @@ const appTiles: AppTile[] = [
     id: 'admin',
     title: 'Pengaturan & Audit',
     route: '/admin',
-    permission: 'audit:view',
+    permission: 'admin:view',
     gradient: 'linear-gradient(135deg, #475569, #1e293b)',
     icon: 'admin',
   },
@@ -121,16 +122,35 @@ const appTiles: AppTile[] = [
   },
 ];
 
+function isTileLocked(tile: AppTile): boolean {
+  if (!tile.permission) return false;
+  return !auth.hasPermission(tile.permission);
+}
+
 const filteredTiles = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
-  return appTiles.filter((tile) => {
-    if (tile.permission && !auth.hasPermission(tile.permission)) {
-      return false;
-    }
-    if (!query) return true;
-    return tile.title.toLowerCase().includes(query);
-  });
+  if (!query) return appTiles;
+  return appTiles.filter((tile) => tile.title.toLowerCase().includes(query));
 });
+
+const lockedShakeId = ref<string | null>(null);
+
+function handleTileClick(tile: AppTile) {
+  if (isTileLocked(tile)) {
+    lockedShakeId.value = tile.id;
+    setTimeout(() => {
+      lockedShakeId.value = null;
+    }, 450);
+    auth.triggerAccessDenied(tile.title);
+    return;
+  }
+  emit('close');
+  if (tile.action === 'ai') {
+    emit('open-ai');
+  } else if (tile.route) {
+    router.push(tile.route);
+  }
+}
 
 function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && props.isOpen) {
@@ -159,15 +179,6 @@ watch(
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown, true);
 });
-
-function handleTileClick(tile: AppTile) {
-  emit('close');
-  if (tile.action === 'ai') {
-    emit('open-ai');
-  } else if (tile.route) {
-    router.push(tile.route);
-  }
-}
 </script>
 
 <template>
@@ -227,6 +238,10 @@ function handleTileClick(tile: AppTile) {
             v-for="tile in filteredTiles"
             :key="tile.id"
             class="launchpad-app-card"
+            :class="{
+              'is-locked': isTileLocked(tile),
+              'shake-locked': lockedShakeId === tile.id
+            }"
             role="listitem"
             tabindex="0"
             @click.stop="handleTileClick(tile)"
@@ -234,8 +249,16 @@ function handleTileClick(tile: AppTile) {
           >
             <!-- Squircle Icon Container with Apple Dynamic Depth -->
             <div class="app-icon-squircle" :style="{ background: tile.gradient }">
-              <span v-if="tile.badge" class="app-badge" :style="{ background: tile.badgeColor || '#034693' }">
+              <span v-if="tile.badge && !isTileLocked(tile)" class="app-badge" :style="{ background: tile.badgeColor || '#034693' }">
                 {{ tile.badge }}
+              </span>
+
+              <!-- Lock Badge when Unauthorized -->
+              <span v-if="isTileLocked(tile)" class="app-lock-badge" title="Akses Dibatasi">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" stroke-width="2.5"></path>
+                </svg>
               </span>
 
               <!-- Dashboard Icon -->
@@ -312,6 +335,7 @@ function handleTileClick(tile: AppTile) {
             <!-- App Title Only (Nama Fitur Aja - Bersih & Zero Text Slop) -->
             <div class="app-text-block">
               <span class="app-title">{{ tile.title }}</span>
+              <span v-if="isTileLocked(tile)" class="app-lock-sub">🔒 Akses Dibatasi</span>
             </div>
           </div>
         </div>
@@ -531,6 +555,57 @@ function handleTileClick(tile: AppTile) {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
   line-height: 1.25;
   text-align: center;
+}
+
+.app-lock-sub {
+  font-size: 0.68rem;
+  color: #f87171;
+  font-weight: 600;
+  margin-top: 3px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+/* Unauthorized / Locked Launchpad Tile */
+.launchpad-app-card.is-locked {
+  cursor: not-allowed !important;
+}
+
+.launchpad-app-card.is-locked .app-icon-squircle {
+  filter: grayscale(0.85);
+  opacity: 0.38;
+  border: 1px dashed rgba(255, 255, 255, 0.3);
+  box-shadow: none !important;
+}
+
+.launchpad-app-card.is-locked:hover {
+  transform: translateY(-2px) scale(1.02) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.app-lock-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #dc2626;
+  color: #ffffff;
+  padding: 4px;
+  border-radius: 9999px;
+  border: 2px solid #061224;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+
+@keyframes lockShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.launchpad-app-card.shake-locked {
+  animation: lockShake 380ms ease !important;
 }
 
 .launchpad-empty {

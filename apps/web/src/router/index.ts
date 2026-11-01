@@ -46,25 +46,25 @@ export const router = createRouter({
           path: 'approvals',
           name: 'approvals',
           component: ApprovalsView,
-          meta: { title: 'Kotak Masuk Persetujuan (Approvals)' },
+          meta: { title: 'Kotak Masuk Persetujuan (Approvals)', permission: 'approval:view' },
         },
         {
           path: 'budgets',
           name: 'budgets',
           component: BudgetsView,
-          meta: { title: 'Perencanaan Modal & Anggaran' },
+          meta: { title: 'Perencanaan Modal & Anggaran', permission: 'budget:view' },
         },
         {
           path: 'procurement',
           name: 'procurement',
           component: ProcurementView,
-          meta: { title: 'Pengadaan, PO, Penerimaan & Beban' },
+          meta: { title: 'Pengadaan, PO, Penerimaan & Beban', permission: 'procurement:view' },
         },
         {
           path: 'revenue',
           name: 'revenue',
           component: RevenueCashierView,
-          meta: { title: 'Pelanggan, Pesanan, Invoice & Kasir' },
+          meta: { title: 'Pelanggan, Pesanan, Invoice & Kasir', permission: 'revenue:view' },
         },
         {
           path: 'cashier',
@@ -74,25 +74,25 @@ export const router = createRouter({
           path: 'reconciliation',
           name: 'reconciliation',
           component: ReconciliationView,
-          meta: { title: 'Manajemen Kas, Bank & Rekonsiliasi' },
+          meta: { title: 'Manajemen Kas, Bank & Rekonsiliasi', permission: 'reconciliation:view' },
         },
         {
           path: 'accounting',
           name: 'accounting',
           component: AccountingView,
-          meta: { title: 'Akuntansi, Buku Besar, Pajak & Aset' },
+          meta: { title: 'Akuntansi, Buku Besar, Pajak & Aset', permission: 'accounting:view' },
         },
         {
           path: 'reports',
           name: 'reports',
           component: ReportsStrategyView,
-          meta: { title: 'Laporan Keuangan & Evaluasi Strategis' },
+          meta: { title: 'Laporan Keuangan & Evaluasi Strategis', permission: 'report:view' },
         },
         {
           path: 'admin',
           name: 'admin',
           component: AdminAuditView,
-          meta: { title: 'Administrasi, Kebijakan & Audit Trail' },
+          meta: { title: 'Administrasi, Kebijakan & Audit Trail', permission: 'admin:view' },
         },
       ],
     },
@@ -117,6 +117,12 @@ router.beforeEach(async (to) => {
     if (!auth.user) {
       return { path: '/login' };
     }
+  }
+
+  const requiredPerm = to.meta.permission as string | undefined;
+  if (requiredPerm && !auth.hasPermission(requiredPerm)) {
+    auth.triggerAccessDenied(String(to.meta.title || 'Modul'));
+    return { path: '/' };
   }
 
   return true;

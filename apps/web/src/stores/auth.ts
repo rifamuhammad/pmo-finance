@@ -26,8 +26,104 @@ export const useAuthStore = defineStore('auth', () => {
   const settings = ref<Record<string, string>>({});
   const selectedBusinessUnitId = ref<string>('');
   const theme = ref<'light'>('light');
+  const simulatedRole = ref<string | null>(localStorage.getItem('pmo_simulated_role'));
+  const accessDeniedAlert = ref<{ show: boolean; moduleName: string; roleName: string } | null>(null);
+
+  const roleProfilesMap: Record<string, { roleName: string; permissions: string[] }> = {
+    SUPER_ADMIN: {
+      roleName: 'Super Admin (Pusat)',
+      permissions: ['*'],
+    },
+    GM_PMO: {
+      roleName: 'General Manager PMO',
+      permissions: [
+        'dashboard:view', 'approval:view', 'approval:action', 'budget:view', 'budget:create', 'budget:approve',
+        'budget:submit', 'procurement:view', 'procurement:create', 'procurement:approve', 'expense:view',
+        'expense:approve', 'revenue:view', 'payment:view', 'cashier:view', 'reconciliation:view',
+        'accounting:view', 'report:view', 'report:export', 'strategy:view', 'strategy:manage', 'audit:view', 'admin:view'
+      ],
+    },
+    UNIT_MANAGER: {
+      roleName: 'Manager Unit Bisnis (Divisi)',
+      permissions: [
+        'dashboard:view', 'approval:view', 'budget:view', 'budget:create', 'budget:submit',
+        'procurement:view', 'procurement:create', 'expense:view', 'expense:create', 'revenue:view',
+        'revenue:create', 'payment:view', 'report:view'
+      ],
+    },
+    FINANCE_MANAGER: {
+      roleName: 'Finance Manager / Keuangan PMO',
+      permissions: [
+        'dashboard:view', 'approval:view', 'approval:action', 'budget:view', 'budget:create', 'budget:submit',
+        'procurement:view', 'procurement:create', 'procurement:approve', 'expense:view', 'expense:create',
+        'expense:approve', 'expense:pay', 'revenue:view', 'revenue:create', 'payment:view', 'payment:create',
+        'payment:approve', 'cashier:view', 'cashier:operate', 'reconciliation:view', 'reconciliation:manage',
+        'accounting:view', 'accounting:manage', 'accounting:post', 'report:view', 'report:export',
+        'strategy:view', 'audit:view'
+      ],
+    },
+    CASHIER: {
+      roleName: 'Kasir / Petugas Loket Layanan',
+      permissions: [
+        'dashboard:view', 'revenue:view', 'payment:view', 'payment:create', 'cashier:view', 'cashier:operate'
+      ],
+    },
+    AUDITOR: {
+      roleName: 'Auditor Internal / SPI PTNBH UT',
+      permissions: [
+        'dashboard:view', 'approval:view', 'budget:view', 'procurement:view', 'expense:view', 'revenue:view',
+        'payment:view', 'cashier:view', 'reconciliation:view', 'accounting:view', 'report:view',
+        'report:export', 'strategy:view', 'audit:view'
+      ],
+    },
+  };
+
+  const effectiveRoleCode = computed(() => {
+    return simulatedRole.value || user.value?.roleCode || '';
+  });
+
+  const effectiveRoleName = computed(() => {
+    if (simulatedRole.value && roleProfilesMap[simulatedRole.value]) {
+      return roleProfilesMap[simulatedRole.value].roleName;
+    }
+    return user.value?.roleName || user.value?.roleCode || 'Pengguna';
+  });
+
+  const effectivePermissions = computed<string[]>(() => {
+    if (simulatedRole.value && roleProfilesMap[simulatedRole.value]) {
+      return roleProfilesMap[simulatedRole.value].permissions;
+    }
+    return user.value?.permissions || [];
+  });
 
   const isAuthenticated = computed(() => Boolean(token.value && user.value));
+
+  function setSimulatedRole(roleCode: string | null) {
+    simulatedRole.value = roleCode;
+    if (roleCode) {
+      localStorage.setItem('pmo_simulated_role', roleCode);
+    } else {
+      localStorage.removeItem('pmo_simulated_role');
+    }
+  }
+
+  function triggerAccessDenied(moduleName: string) {
+    accessDeniedAlert.value = {
+      show: true,
+      moduleName,
+      roleName: effectiveRoleName.value,
+    };
+    // Auto dismiss after 4 seconds
+    setTimeout(() => {
+      if (accessDeniedAlert.value?.moduleName === moduleName) {
+        accessDeniedAlert.value = null;
+      }
+    }, 4000);
+  }
+
+  function dismissAccessDenied() {
+    accessDeniedAlert.value = null;
+  }
 
   function applyTheme(_newTheme?: 'light' | 'dark') {
     theme.value = 'light';
@@ -42,13 +138,15 @@ export const useAuthStore = defineStore('auth', () => {
 
   function hasPermission(perm: string): boolean {
     if (!user.value) return false;
-    if (user.value.roleCode === 'AUDITOR' && !perm.endsWith(':view')) return false;
-    return user.value.permissions.includes(perm) || user.value.permissions.includes('*');
+    const perms = effectivePermissions.value;
+    const currentRole = effectiveRoleCode.value;
+    if (currentRole === 'AUDITOR' && !perm.endsWith(':view')) return false;
+    return perms.includes(perm) || perms.includes('*');
   }
 
   function hasAnyRole(...roles: string[]): boolean {
     if (!user.value) return false;
-    return roles.includes(user.value.roleCode);
+    return roles.includes(effectiveRoleCode.value);
   }
 
   async function login(email: string, password: string) {
@@ -112,6 +210,15 @@ export const useAuthStore = defineStore('auth', () => {
     settings,
     selectedBusinessUnitId,
     theme,
+    simulatedRole,
+    effectiveRoleCode,
+    effectiveRoleName,
+    effectivePermissions,
+    roleProfilesMap,
+    accessDeniedAlert,
+    setSimulatedRole,
+    triggerAccessDenied,
+    dismissAccessDenied,
     isAuthenticated,
     applyTheme,
     toggleTheme,

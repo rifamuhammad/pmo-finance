@@ -375,6 +375,19 @@ onUnmounted(() => {
           </select>
         </div>
 
+        <!-- Role Simulation Active Pill (Fast reset when testing) -->
+        <button
+          v-if="auth.simulatedRole"
+          type="button"
+          class="nav-role-sim-pill"
+          title="Mode Simulasi Role Aktif (Klik untuk Reset ke Akun Asli)"
+          @click="auth.setSimulatedRole(null)"
+        >
+          <span class="pill-dot-pulse"></span>
+          <span>Simulasi: <b>{{ auth.effectiveRoleName }}</b></span>
+          <span class="pill-close-tag">✕</span>
+        </button>
+
         <!-- AI Assistant Quick Trigger (Hanya tampil di dalam modul kerja) -->
         <button
           v-if="!isHomeLauncher"
@@ -418,11 +431,11 @@ onUnmounted(() => {
           >
             <div class="user-capsule-avatar">
               <span>{{ userInitials }}</span>
-              <span class="user-capsule-status"></span>
+              <span class="user-capsule-status" :class="{ 'is-simulated': auth.simulatedRole }"></span>
             </div>
             <div class="user-capsule-text">
               <span class="user-capsule-name">{{ auth.user?.fullName || 'Pengguna PMO' }}</span>
-              <span class="user-capsule-role">{{ auth.user?.roleName || auth.user?.roleCode || 'Super Admin' }}</span>
+              <span class="user-capsule-role">{{ auth.effectiveRoleName }}</span>
             </div>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="user-capsule-chevron">
               <polyline points="6 9 12 15 18 9"></polyline>
@@ -451,8 +464,38 @@ onUnmounted(() => {
                 </div>
 
                 <div class="dropdown-badges-row">
-                  <span class="dropdown-role-badge">{{ auth.user?.roleName || auth.user?.roleCode || 'Super Admin' }}</span>
+                  <span class="dropdown-role-badge">{{ auth.effectiveRoleName }}</span>
                   <span class="dropdown-unit-badge">🏢 {{ currentBusinessUnitLabel }}</span>
+                </div>
+              </div>
+
+              <!-- Quick Role Simulation Selector for Testing Permissions -->
+              <div class="dropdown-divider"></div>
+              <div class="dropdown-role-sim-section">
+                <div class="dropdown-section-title">
+                  <span>SIMULASI WEWENANG ROLE</span>
+                  <button
+                    v-if="auth.simulatedRole"
+                    type="button"
+                    class="role-reset-link"
+                    @click="auth.setSimulatedRole(null)"
+                  >
+                    Reset
+                  </button>
+                </div>
+                <p class="dropdown-section-desc">Pilih role untuk melihat fitur yang terkunci & tidak bisa diklik:</p>
+                <div class="role-sim-grid">
+                  <button
+                    v-for="(profile, code) in auth.roleProfilesMap"
+                    :key="code"
+                    type="button"
+                    class="role-sim-btn"
+                    :class="{ 'is-active': auth.effectiveRoleCode === code }"
+                    @click="auth.setSimulatedRole(auth.simulatedRole === code ? null : String(code))"
+                  >
+                    <span class="role-sim-name">{{ profile.roleName }}</span>
+                    <span v-if="auth.effectiveRoleCode === code" class="role-sim-check">✓</span>
+                  </button>
                 </div>
               </div>
 
@@ -590,6 +633,40 @@ onUnmounted(() => {
         @open-ai="aiAssistantOpen = true"
         @open-launchpad="appLauncherOpen = true"
       />
+
+      <!-- Floating Access Denied Toast Alert (Apple-Style Glass Capsule) -->
+      <transition name="toast-pop">
+        <div
+          v-if="auth.accessDeniedAlert?.show"
+          class="access-denied-glass-toast"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div class="toast-lock-circle">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" stroke-width="2.5"></path>
+            </svg>
+          </div>
+          <div class="toast-text-body">
+            <div class="toast-title-row">
+              <strong class="toast-heading">Akses Dibatasi</strong>
+              <span class="toast-role-tag">{{ auth.accessDeniedAlert.roleName }}</span>
+            </div>
+            <p class="toast-detail">
+              Peran Anda saat ini tidak memiliki wewenang untuk membuka modul <b>{{ auth.accessDeniedAlert.moduleName }}</b>.
+            </p>
+          </div>
+          <button
+            type="button"
+            class="toast-dismiss-btn"
+            title="Tutup Notifikasi"
+            @click="auth.dismissAccessDenied()"
+          >
+            ✕
+          </button>
+        </div>
+      </transition>
     </div>
   </div>
 </template>
@@ -2084,9 +2161,241 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
+.user-capsule-status.is-simulated {
+  background: #f59e0b;
+}
+
 .user-capsule-chevron {
   color: rgba(255, 255, 255, 0.5);
   margin-left: 2px;
 }
 
+/* Nav Role Simulation Active Pill */
+.nav-role-sim-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 160ms ease;
+  white-space: nowrap;
+}
+
+.nav-role-sim-pill:hover {
+  background: rgba(245, 158, 11, 0.28);
+  border-color: #f59e0b;
+  color: #ffffff;
+}
+
+.pill-dot-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+
+.pill-close-tag {
+  font-size: 0.65rem;
+  background: rgba(245, 158, 11, 0.3);
+  padding: 1px 4px;
+  border-radius: 4px;
+  margin-left: 2px;
+}
+
+/* Role Simulation Grid inside Profile Dropdown */
+.dropdown-role-sim-section {
+  padding: 10px 14px 6px;
+}
+
+.dropdown-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.role-reset-link {
+  background: none;
+  border: none;
+  color: #38bdf8;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.role-reset-link:hover {
+  text-decoration: underline;
+}
+
+.dropdown-section-desc {
+  font-size: 0.70rem;
+  color: #64748b;
+  margin-bottom: 8px;
+  line-height: 1.25;
+}
+
+.role-sim-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.role-sim-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #cbd5e1;
+  font-size: 0.75rem;
+  font-weight: 550;
+  cursor: pointer;
+  text-align: left;
+  transition: all 140ms ease;
+}
+
+.role-sim-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.role-sim-btn.is-active {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: #f59e0b;
+  color: #f59e0b;
+  font-weight: 650;
+}
+
+.role-sim-check {
+  font-weight: 800;
+  color: #f59e0b;
+}
+
+/* Floating Glass Toast Alert for Access Denied */
+.access-denied-glass-toast {
+  position: fixed;
+  bottom: 82px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 10px 12px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  box-shadow:
+    0 16px 36px -4px rgba(0, 0, 0, 0.55),
+    0 0 16px rgba(239, 68, 68, 0.25);
+  max-width: 480px;
+  width: calc(100% - 32px);
+  animation: toastPop 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-lock-circle {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.toast-text-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.toast-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast-heading {
+  font-size: 0.82rem;
+  color: #f87171;
+  font-weight: 700;
+}
+
+.toast-role-tag {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.toast-detail {
+  font-size: 0.74rem;
+  color: #cbd5e1;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.toast-dismiss-btn {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: all 140ms ease;
+  flex-shrink: 0;
+}
+
+.toast-dismiss-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+@keyframes toastPop {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(16px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+.toast-pop-enter-active,
+.toast-pop-leave-active {
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-pop-enter-from,
+.toast-pop-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(16px) scale(0.96);
+}
 </style>

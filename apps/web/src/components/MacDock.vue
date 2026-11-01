@@ -70,6 +70,7 @@ const dockItems: DockItem[] = [
     id: 'approvals',
     name: 'Approval Inbox',
     route: '/approvals',
+    permission: 'approval:view',
     gradient: 'linear-gradient(135deg, #d97706, #92400e)',
     icon: 'approvals',
     badge: '2',
@@ -95,7 +96,7 @@ const dockItems: DockItem[] = [
     id: 'expenses',
     name: 'Klaim Biaya (Expenses)',
     route: '/procurement?tab=expenses',
-    permission: 'procurement:view',
+    permission: 'expense:view',
     gradient: 'linear-gradient(135deg, #e11d48, #9f1239)',
     icon: 'expenses',
   },
@@ -136,7 +137,7 @@ const dockItems: DockItem[] = [
     id: 'admin',
     name: 'Pengaturan & Audit',
     route: '/admin',
-    permission: 'audit:view',
+    permission: 'admin:view',
     gradient: 'linear-gradient(135deg, #475569, #1e293b)',
     icon: 'admin',
   },
@@ -151,12 +152,14 @@ const dockItems: DockItem[] = [
   },
 ];
 
-const visibleItems = computed(() => {
-  return dockItems.filter((item) => {
-    if (!item.permission) return true;
-    return auth.hasPermission(item.permission);
-  });
-});
+// Show all items on the Dock so users can visually recognize what features exist,
+// while unauthorized modules are disabled, badged with 🔒, and prevented from opening.
+const visibleItems = computed(() => dockItems);
+
+function isItemLocked(item: DockItem): boolean {
+  if (!item.permission) return false;
+  return !auth.hasPermission(item.permission);
+}
 
 function isItemActive(item: DockItem): boolean {
   if (item.action === 'home') return false;
@@ -166,7 +169,17 @@ function isItemActive(item: DockItem): boolean {
   return route.path.startsWith(item.route);
 }
 
+const lockedShakeId = ref<string | null>(null);
+
 function handleItemClick(item: DockItem) {
+  if (isItemLocked(item)) {
+    lockedShakeId.value = item.id;
+    setTimeout(() => {
+      lockedShakeId.value = null;
+    }, 450);
+    auth.triggerAccessDenied(item.name);
+    return;
+  }
   if (item.action === 'ai') {
     emit('open-ai');
   } else if (item.action === 'home') {
@@ -222,24 +235,37 @@ function handleItemClick(item: DockItem) {
         <button
           type="button"
           class="dock-item"
-          :class="{ 'is-active': isItemActive(item) }"
+          :class="{
+            'is-active': isItemActive(item),
+            'is-locked': isItemLocked(item),
+            'shake-locked': lockedShakeId === item.id
+          }"
           :aria-label="item.name"
           @click="handleItemClick(item)"
         >
           <!-- macOS Native Dark Glass Popup Tooltip -->
           <div class="mac-tooltip">
             <span>{{ item.name }}</span>
+            <span v-if="isItemLocked(item)" class="mac-tooltip-lock">🔒 Terkunci (Role: {{ auth.effectiveRoleName }})</span>
           </div>
 
           <!-- Squircle App Icon with Subtle Bevel & Shadow -->
           <div class="dock-squircle" :style="{ background: item.gradient }">
-            <!-- Counter Badge -->
+            <!-- Counter Badge (hanya jika modul terbuka) -->
             <span
-              v-if="item.badge"
+              v-if="item.badge && !isItemLocked(item)"
               class="dock-badge"
               :style="{ backgroundColor: item.badgeColor || '#ef4444' }"
             >
               {{ item.badge }}
+            </span>
+
+            <!-- Lock Badge on Top-Right Corner of Squircle when Unauthorized -->
+            <span v-if="isItemLocked(item)" class="dock-lock-badge" title="Akses Dibatasi">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" stroke-width="2.5"></path>
+              </svg>
             </span>
 
             <!-- SVGs for each App -->
@@ -530,8 +556,58 @@ function handleItemClick(item: DockItem) {
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.3),
     inset 0 1px 1px rgba(255, 255, 255, 0.3);
-  transition: box-shadow 180ms ease;
+  transition: all 180ms ease;
   position: relative;
+}
+
+/* Unauthorized / Locked State on Dock Item */
+.dock-item.is-locked {
+  cursor: not-allowed !important;
+}
+
+.dock-item.is-locked .dock-squircle {
+  filter: grayscale(0.85);
+  opacity: 0.38;
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  box-shadow: none !important;
+}
+
+.dock-item.is-locked:hover {
+  transform: translateY(-2px) scale(1.04) !important;
+}
+
+.dock-lock-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #dc2626;
+  color: #ffffff;
+  padding: 3px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(14, 26, 46, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  z-index: 5;
+}
+
+.mac-tooltip-lock {
+  display: block;
+  font-size: 0.68rem;
+  color: #f87171;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+@keyframes lockShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.dock-item.shake-locked {
+  animation: lockShake 380ms ease !important;
 }
 
 .dock-item:hover .dock-squircle {
