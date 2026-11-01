@@ -122,8 +122,8 @@ async function main() {
     },
     {
       code: 'GM_PMO',
-      name: 'General Manager PMO',
-      description: 'Melihat dashboard strategis, menyetujui anggaran/revisi, PR bernilai besar, dan keputusan evaluasi strategis.',
+      name: 'General Manager PMO UTama',
+      description: 'Pimpinan tertinggi operasional bisnis PMO UTama PTNBH Universitas Terbuka. Menyetujui anggaran tahunan, revisi belanja unit, PR skala besar (> Rp 25 Juta), dan mengarahkan strategi ekspansi komersial.',
       approvalLimit: '1000000000.00',
       permissions: [
         'dashboard:view',
@@ -153,8 +153,8 @@ async function main() {
     },
     {
       code: 'FINANCE_MANAGER',
-      name: 'Finance Manager / Kabag Keuangan',
-      description: 'Verifikasi & persetujuan PR operasional, pencairan beban, kontrol likuiditas, posting jurnal, dan review selisih kasir.',
+      name: 'Finance Manager / Kepala Keuangan PMO',
+      description: 'Pengelola perbendaharaan, likuiditas rekening kas/bank, otorisasi pencairan belanja (< Rp 25 Juta), validasi 3-way matching faktur vendor, kepatuhan perpajakan, dan pelaporan akuntansi PSAK.',
       approvalLimit: '25000000.00',
       permissions: [
         'dashboard:view',
@@ -191,8 +191,8 @@ async function main() {
     },
     {
       code: 'UNIT_MANAGER',
-      name: 'Unit / Divisi Manager',
-      description: 'Kepala Unit Pelaksana (Divisi TCI, MICE, IT Solution, Klinik Pratama). Mengajukan usulan anggaran dan PR unit.',
+      name: 'Manager Unit Bisnis (IT, MICE, TCI, Klinik)',
+      description: 'Kepala Unit Pelaksana Bisnis PMO (Divisi IT Solution, Divisi MICE, Divisi TCI, Divisi Klinik Pratama). Bertanggung jawab atas pencapaian pendapatan unit, usulan Rencana Anggaran (RAB), dan belanja kegiatan proyek unit.',
       approvalLimit: '0.00',
       permissions: [
         'dashboard:view',
@@ -270,8 +270,8 @@ async function main() {
     },
     {
       code: 'AUDITOR',
-      name: 'Internal Auditor / SPI',
-      description: 'Pemeriksa independen dengan akses baca ke seluruh log audit, trace rekonsiliasi, riwayat persetujuan, dan integritas data.',
+      name: 'Auditor Internal / SPI (Satuan Pengawas Internal PTNBH UT)',
+      description: 'Pengawas independen perwakilan Satuan Pengawas Internal (SPI) PTNBH Universitas Terbuka. Bertugas memantau perkembangan bisnis, kepatuhan tata kelola, transparansi keuangan, dan audit kepatuhan anggaran PMO UTama.',
       approvalLimit: '0.00',
       permissions: [
         'dashboard:view',
