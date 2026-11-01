@@ -344,25 +344,6 @@ function handleItemClick(item: DockItem) {
         <!-- macOS Dock Section Divider Line -->
         <div v-if="item.isDividerAfter" class="dock-divider" aria-hidden="true"></div>
       </template>
-
-      <!-- Tutup Dock (Minimize Arrow) Item -->
-      <button
-        type="button"
-        class="dock-item close-toggle-item"
-        title="Tutup Navigasi Dock (Alt+D)"
-        aria-label="Tutup Dock"
-        @click="toggleDock(true)"
-      >
-        <div class="mac-tooltip">
-          <span>Tutup Dock (Sembunyikan)</span>
-        </div>
-
-        <div class="dock-squircle close-squircle">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="6 9 12 15 18 9"></polyline>
-          </svg>
-        </div>
-      </button>
     </div>
   </div>
 </template>
