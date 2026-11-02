@@ -541,7 +541,7 @@ reportsRouter.get('/approvals', async (req, res, next) => {
       }
     } else if (user.roleCode === 'GM_PMO') {
       if (scope === 'assigned') {
-        where.requiredRoleCode = 'GM_PMO';
+        where.requiredRoleCode = { in: ['GM_PMO', 'FINANCE_MANAGER'] };
         where.requestedById = { not: user.userId };
       }
     } else if (user.roleCode !== 'SUPER_ADMIN') {
@@ -566,9 +566,9 @@ reportsRouter.get('/approvals', async (req, res, next) => {
           if (user.roleCode === 'SUPER_ADMIN') {
             canApprove = true;
           } else if (user.roleCode === 'GM_PMO') {
-            canApprove = a.requiredRoleCode === 'GM_PMO' || a.requiredRoleCode === 'FINANCE_MANAGER';
+            canApprove = ['GM_PMO', 'FINANCE_MANAGER', 'UNIT_MANAGER'].includes(a.requiredRoleCode) || !a.requiredRoleCode;
           } else if (user.roleCode === 'FINANCE_MANAGER') {
-            canApprove = a.requiredRoleCode === 'FINANCE_MANAGER';
+            canApprove = ['FINANCE_MANAGER', 'UNIT_MANAGER'].includes(a.requiredRoleCode);
           } else if (user.roleCode === 'UNIT_MANAGER') {
             canApprove = a.requiredRoleCode === 'UNIT_MANAGER';
           }

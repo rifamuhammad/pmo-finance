@@ -103,6 +103,7 @@ async function confirmReject() {
     let endpoint = '';
     if (item.module === 'BUDGET') endpoint = `/budgets/${item.entityId}/reject`;
     else if (item.module === 'PURCHASE_REQUEST') endpoint = `/procurement/purchase-requests/${item.entityId}/reject`;
+    else if (item.module === 'EXPENSE') endpoint = `/procurement/expenses/${item.entityId}/reject`;
     else throw new Error('Gunakan halaman modul terkait untuk penolakan item ini.');
 
     await apiFetch(endpoint, {
@@ -291,7 +292,7 @@ onMounted(loadApprovals);
                   Setujui
                 </button>
                 <button
-                  v-if="['BUDGET', 'PURCHASE_REQUEST'].includes(item.module)"
+                  v-if="['BUDGET', 'PURCHASE_REQUEST', 'EXPENSE'].includes(item.module)"
                   type="button"
                   class="btn btn-sm btn-danger"
                   :disabled="actionBusy"
@@ -302,7 +303,7 @@ onMounted(loadApprovals);
               </div>
               <div v-else style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
                 <span v-if="item.requestedById === auth.user?.id" class="doc-code text-blue" style="font-size: 0.74rem;">
-                  Diajukan oleh Anda
+                  Diajukan oleh Anda (Separation of Duties)
                 </span>
                 <span v-else-if="item.status === 'PENDING'" class="doc-code text-amber" style="font-size: 0.74rem;">
                   Wewenang {{ item.requiredRoleCode }}

@@ -135,6 +135,8 @@ GAYA JAWABAN:
       const client = new OpenAI({
         apiKey,
         baseURL,
+        timeout: 2500,
+        maxRetries: 0,
       });
 
       const chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [

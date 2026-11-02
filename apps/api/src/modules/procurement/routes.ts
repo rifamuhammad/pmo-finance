@@ -1174,6 +1174,64 @@ procurementRouter.post('/expenses/:id/approve', requirePermission('expense:appro
   }
 });
 
+procurementRouter.post('/expenses/:id/reject', requirePermission('expense:approve'), async (req, res, next) => {
+  try {
+    const expense = await prisma.expense.findUnique({ where: { id: req.params.id } });
+    if (!expense) throw new AppError(404, 'EXPENSE_NOT_FOUND', 'Data pengeluaran tidak ditemukan.');
+    if (expense.status !== 'SUBMITTED') {
+      throw new AppError(409, 'INVALID_STATE', `Pengeluaran berstatus ${expense.status} tidak dapat ditolak.`);
+    }
+
+    const reason =
+      typeof req.body?.reason === 'string' && req.body.reason.trim()
+        ? req.body.reason.trim()
+        : 'Pengajuan pengeluaran ditolak oleh pejabat berwenang.';
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const exp = await tx.expense.update({
+        where: { id: expense.id },
+        data: {
+          status: 'REJECTED',
+          rejectionReason: reason,
+        },
+      });
+
+      await tx.approvalRequest.updateMany({
+        where: { module: 'EXPENSE', entityId: exp.id, status: 'PENDING' },
+        data: {
+          status: 'REJECTED',
+          decidedById: req.user!.userId,
+          decidedByName: req.user!.fullName,
+          decidedAt: new Date(),
+          decisionNote: reason,
+        },
+      });
+
+      await recordAuditLog(
+        {
+          actorId: req.user!.userId,
+          actorName: req.user!.fullName,
+          actorRole: req.user!.roleCode,
+          action: 'EXPENSE_REJECTED',
+          module: 'EXPENSE',
+          entityType: 'Expense',
+          entityId: exp.id,
+          entityCode: exp.docNumber,
+          summary: `Menolak pengeluaran ${exp.docNumber}: ${reason}`,
+          requestId: req.requestId,
+        },
+        tx as any
+      );
+
+      return exp;
+    });
+
+    res.json({ success: true, data: updated, meta: { requestId: req.requestId } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Pay & Auto-Post Expense to Budget Actual + General Journal
 procurementRouter.post('/expenses/:id/pay', requirePermission('expense:pay'), async (req, res, next) => {
   try {

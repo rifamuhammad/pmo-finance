@@ -830,6 +830,6 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(res.body.data.reply).toContain('Rp');
       expect(res.body.data.suggestions).toBeInstanceOf(Array);
       expect(res.body.data.contextMetrics).toBeDefined();
-    });
+    }, 15000);
   });
 });

@@ -45,3 +45,24 @@ coverage/
 .cache/
 tmp/
 temp/
+
+# AI Tooling & Local Agent Rules
+.archify/
+.agents/
+
+# Verification dumps & browser check outputs
+docs/*.json
+docs/*.html
+
+# Binary office documents & spreadsheets
+*.xlsx
+*.xls
+
+# Local automation scripts
+scripts/
+
+# Redundant docs, master prompts, and local adaptation logs
+docs/master-prompt-erp-pmo-utama.md
+docs/DBDIAGRAM-DAN-USER-JOURNEY.md
+docs/normalized-schema-dbdiagram.md
+docs/ADAPTASI-FITUR-ODOO-DAN-AI-ASSISTANT.md

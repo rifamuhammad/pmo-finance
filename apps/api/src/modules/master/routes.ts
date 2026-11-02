@@ -630,6 +630,7 @@ masterRouter.get('/menus-permissions', requirePermission('admin:view'), async (r
         { code: 'revenue:create', label: 'Buat Faktur & Sales Order', description: 'Menerbitkan tagihan ke pelanggan/mitra' },
         { code: 'payment:view', label: 'Lihat Penerimaan Kas', description: 'Melihat riwayat pembayaran pelanggan' },
         { code: 'payment:create', label: 'Catat Pembayaran', description: 'Menerima pembayaran tunai/transfer/QRIS' },
+        { code: 'payment:approve', label: 'Setujui Pengembalian & Selisih Kasir', description: 'Otorisasi persetujuan selisih register kasir dan refund pembayaran' },
         { code: 'cashier:view', label: 'Buka POS Kasir', description: 'Melihat register kasir unit' },
         { code: 'cashier:operate', label: 'Operasikan Sesi Kasir', description: 'Buka register, transaksi POS, & closeout fisik' },
       ],
