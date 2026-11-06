@@ -341,6 +341,75 @@ onMounted(loadDashboard);
     />
 
     <div v-else class="dashboard-content-grid">
+      <!-- Executive SLA & Tracking Pipeline: Penatausahaan Berkas PBI & Puslakeu -->
+      <section class="poital-card" style="margin-bottom: 1.25rem; border-left: 4px solid #034693; background: #ffffff;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.1rem;">⏱️</span>
+              <h2 style="font-size: 0.95rem; font-weight: 800; color: #034693; margin: 0;">
+                Monitoring Penatausahaan Berkas &amp; SLA Pencairan Dana (PMO · PBI · PUSLAKEU)
+              </h2>
+            </div>
+            <span style="font-size: 0.78rem; color: #64748b;">
+              Pelacakan real-time pencegah bottleneck: Cut-Off tgl 25 internal menjamin berkas masuk ke BPU PBI sebelum deadline tgl 30.
+            </span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button
+              type="button"
+              class="btn-sm"
+              style="font-size: 0.75rem; background: #f1f5f9; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px; padding: 4px 10px; cursor: pointer;"
+              @click="router.push('/hris')"
+            >
+              📋 Cek Gaji &amp; Honor (/hris)
+            </button>
+            <button
+              type="button"
+              class="btn-sm"
+              style="font-size: 0.75rem; background: #f1f5f9; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px; padding: 4px 10px; cursor: pointer;"
+              @click="router.push('/petty-cash')"
+            >
+              🧾 Cek SPJ Kas Kecil (/petty-cash)
+            </button>
+          </div>
+        </div>
+
+        <!-- 5-Step Visual Horizontal Pipeline -->
+        <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; font-size: 0.75rem;">
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 8px 10px; border-radius: 6px;">
+            <div style="color: #166534; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+              <span>✅ 1. Kunci Tgl 25</span>
+            </div>
+            <div style="color: #15803d; font-size: 0.7rem; margin-top: 2px;">Presensi &amp; Honor di /hris selesai</div>
+          </div>
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 8px 10px; border-radius: 6px;">
+            <div style="color: #166534; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+              <span>✅ 2. Serah BPU PBI</span>
+            </div>
+            <div style="color: #15803d; font-size: 0.7rem; margin-top: 2px;">SPJ &amp; Nominatif sblm Tgl 30</div>
+          </div>
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 8px 10px; border-radius: 6px;">
+            <div style="color: #1e40af; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+              <span>🔄 3. Expenditure &amp; Panutan</span>
+            </div>
+            <div style="color: #2563eb; font-size: 0.7rem; margin-top: 2px;">Format impor klop tanpa ketik ulang</div>
+          </div>
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 8px 10px; border-radius: 6px;">
+            <div style="color: #1e40af; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+              <span>📄 4. Puslakeu (SPM/SPTD)</span>
+            </div>
+            <div style="color: #2563eb; font-size: 0.7rem; margin-top: 2px;">Verifikasi pagu &amp; transfer bank</div>
+          </div>
+          <div style="background: #fefce8; border: 1px solid #fef08a; padding: 8px 10px; border-radius: 6px;">
+            <div style="color: #854d0e; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+              <span>🏦 5. Cair BRI (SPR Fisik)</span>
+            </div>
+            <div style="color: #a16207; font-size: 0.7rem; margin-top: 2px;">TTD Basah Ka. PBI &amp; Masuk ke Tim</div>
+          </div>
+        </div>
+      </section>
+
       <!-- 1. Four Metric KPI Cards -->
       <section class="kpi-metric-row" aria-label="Key Performance Indicators">
         <!-- Hero Card: PMO Royal Navy (Total Pendapatan Faktur) -->

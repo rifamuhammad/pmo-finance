@@ -22,6 +22,11 @@ Aplikasi Enterprise Resource Planning (ERP) Keuangan dan Operasional untuk **PMO
 ├── docker-compose.yml              # Konfigurasi PostgreSQL lokal
 ├── .env.example                    # Contoh variabel lingkungan
 ├── docs/
+│   ├── ARSITEKTUR-DAN-USER-FLOW-KESELURUHAN-ERP.md # Blueprint komprehensif 13 modul, Master Flowchart, dan 6 User Flow End-to-End
+│   ├── USER-FLOW-DAN-FLOWCHART-RIIL.md # User flow layar-demi-layar & flowchart operasional riil PMO vs PBI UT
+│   ├── BLUEPRINT-BATAS-SISTEM-PMO-VS-PUSAT.md # Blueprint arsitektur batas kendali PMO vs Holding Pusat (PBI & PUSLAKEU)
+│   ├── ALUR-PROSES-PENGELUARAN-LS-PMO.md # Bagan alur proses pengeluaran LS (Gaji, BPJS, Honor) PMO-PBI-PUSLAKEU
+│   ├── user-journey.md             # Peta 4 user journey end-to-end lintas peran & entitas
 │   ├── implementation-plan.md      # Rencana implementasi bertahap & keputusan arsitektur
 │   ├── data-model.md               # Dokumentasi 35 entitas database, relasi, dan siklus status
 │   └── api-conventions.md          # Standar kontrak REST API, RBAC, error envelope, dan idempotensi

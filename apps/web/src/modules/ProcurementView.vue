@@ -68,6 +68,22 @@ const expenseModalOpen = ref(false);
 const vendorModalOpen = ref(false);
 const voidModalOpen = ref(false);
 
+// Modal error & submission states (so errors appear inside modals instead of being hidden behind backdrops)
+const prModalError = ref('');
+const prSubmitting = ref(false);
+const quoteModalError = ref('');
+const quoteSubmitting = ref(false);
+const poModalError = ref('');
+const poSubmitting = ref(false);
+const receiptModalError = ref('');
+const receiptSubmitting = ref(false);
+const expenseModalError = ref('');
+const expenseSubmitting = ref(false);
+const vendorModalError = ref('');
+const vendorSubmitting = ref(false);
+const voidModalError = ref('');
+const voidSubmitting = ref(false);
+
 const prForm = ref({
   title: '',
   businessUnitId: '',
@@ -163,6 +179,21 @@ const availableBudgetLines = computed(() =>
   )
 );
 
+const selectedBudgetLine = computed(() =>
+  availableBudgetLines.value.find((l) => l.id === prForm.value.budgetLineId)
+);
+
+const prTotalEstimated = computed(() => {
+  const qty = Number(prForm.value.quantity) || 0;
+  const price = Number(prForm.value.estimatedUnitPrice) || 0;
+  return qty * price;
+});
+
+const isPrOverBudget = computed(() => {
+  if (!selectedBudgetLine.value) return false;
+  return prTotalEstimated.value > (Number(selectedBudgetLine.value.availableAmount) || 0);
+});
+
 async function loadAllProcurementData() {
   loading.value = true;
   errorMsg.value = '';
@@ -197,6 +228,8 @@ async function loadAllProcurementData() {
 
 function openCreatePr() {
   const firstLine = availableBudgetLines.value[0];
+  prModalError.value = '';
+  prSubmitting.value = false;
   prForm.value = {
     title: '',
     businessUnitId: firstLine?.businessUnitId || master.value.businessUnits[0]?.id || '',
@@ -214,37 +247,72 @@ function openCreatePr() {
 }
 
 async function submitPr() {
+  prModalError.value = '';
   errorMsg.value = '';
   feedbackMsg.value = '';
+
+  if (!prForm.value.title || prForm.value.title.trim().length < 4) {
+    prModalError.value = 'Judul kebutuhan pengadaan wajib diisi minimal 4 karakter.';
+    return;
+  }
+  if (!prForm.value.budgetLineId) {
+    prModalError.value = 'Silakan pilih pos mata anggaran sumber yang telah disetujui (APPROVED).';
+    return;
+  }
+  if (!prForm.value.purpose || prForm.value.purpose.trim().length < 5) {
+    prModalError.value = 'Tujuan dan alasan pengadaan wajib diisi minimal 5 karakter.';
+    return;
+  }
+  if (!prForm.value.itemName || prForm.value.itemName.trim().length < 2) {
+    prModalError.value = 'Nama barang / jasa wajib diisi minimal 2 karakter.';
+    return;
+  }
+  if (!prForm.value.quantity || Number(prForm.value.quantity) <= 0) {
+    prModalError.value = 'Kuantitas pengadaan harus lebih dari 0.';
+    return;
+  }
+  if (!prForm.value.estimatedUnitPrice || Number(prForm.value.estimatedUnitPrice) <= 0) {
+    prModalError.value = 'Estimasi harga satuan wajib diisi lebih dari Rp 0.';
+    return;
+  }
+  if (isPrOverBudget.value) {
+    const deficit = prTotalEstimated.value - Number(selectedBudgetLine.value?.availableAmount || 0);
+    prModalError.value = `Total pengadaan (${formatRupiah(prTotalEstimated.value)}) melebihi sisa pagu anggaran (${formatRupiah(selectedBudgetLine.value?.availableAmount || 0)}) sebesar ${formatRupiah(deficit)}. Harap kurangi kuantitas/harga atau ajukan revisi anggaran.`;
+    return;
+  }
+
+  prSubmitting.value = true;
   try {
     const selectedLine = availableBudgetLines.value.find((l) => l.id === prForm.value.budgetLineId);
     const res = await apiFetch('/procurement/purchase-requests', {
       method: 'POST',
       body: JSON.stringify({
-        title: prForm.value.title,
+        title: prForm.value.title.trim(),
         businessUnitId: selectedLine?.businessUnitId || prForm.value.businessUnitId,
         costCenterId: selectedLine?.costCenterId || prForm.value.costCenterId,
         budgetLineId: prForm.value.budgetLineId,
-        purpose: prForm.value.purpose,
-        minQuotationsRequired: prForm.value.minQuotationsRequired,
+        purpose: prForm.value.purpose.trim(),
+        minQuotationsRequired: Number(prForm.value.minQuotationsRequired) || 3,
         submitImmediately: true,
         lines: [
           {
-            itemName: prForm.value.itemName,
-            specification: prForm.value.specification,
+            itemName: prForm.value.itemName.trim(),
+            specification: prForm.value.specification?.trim() || undefined,
             quantity: Number(prForm.value.quantity),
-            unit: prForm.value.unit,
+            unit: (prForm.value.unit || 'Unit').trim(),
             estimatedUnitPrice: Number(prForm.value.estimatedUnitPrice),
           },
         ],
       }),
     });
     prModalOpen.value = false;
-    feedbackMsg.value = `Purchase Request ${res.data.docNumber} berhasil diajukan.`;
+    feedbackMsg.value = `Purchase Request ${res.data.docNumber} berhasil diajukan dan menunggu persetujuan / proses komparasi vendor.`;
     await loadAllProcurementData();
     selectedPr.value = prs.value.find((p) => p.id === res.data.id) || prs.value[0];
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal membuat PR.';
+    prModalError.value = err.message || 'Gagal mengajukan Purchase Request.';
+  } finally {
+    prSubmitting.value = false;
   }
 }
 
@@ -262,6 +330,8 @@ async function approvePr(pr: any) {
 
 function openAddQuotation(pr: any) {
   selectedPr.value = pr;
+  quoteModalError.value = '';
+  quoteSubmitting.value = false;
   quoteForm.value = {
     vendorId: vendors.value[0]?.id || '',
     quotationNumber: `QT-${Date.now().toString().slice(-5)}`,
@@ -275,8 +345,8 @@ function openAddQuotation(pr: any) {
 
 async function submitQuotation() {
   if (!selectedPr.value) return;
-  errorMsg.value = '';
-  feedbackMsg.value = '';
+  quoteModalError.value = '';
+  quoteSubmitting.value = true;
   try {
     await apiFetch(`/procurement/purchase-requests/${selectedPr.value.id}/quotations`, {
       method: 'POST',
@@ -286,12 +356,16 @@ async function submitQuotation() {
     feedbackMsg.value = `Penawaran vendor berhasil ditambahkan ke ${selectedPr.value.docNumber}.`;
     await loadAllProcurementData();
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal menambahkan penawaran.';
+    quoteModalError.value = err.message || 'Gagal menambahkan penawaran vendor.';
+  } finally {
+    quoteSubmitting.value = false;
   }
 }
 
 function openCreatePo(pr: any) {
   selectedPr.value = pr;
+  poModalError.value = '';
+  poSubmitting.value = false;
   poForm.value = {
     selectedQuotationId: pr.quotations?.[0]?.id || '',
     paymentTerms: 'NET 30',
@@ -303,8 +377,8 @@ function openCreatePo(pr: any) {
 
 async function submitCreatePo() {
   if (!selectedPr.value) return;
-  errorMsg.value = '';
-  feedbackMsg.value = '';
+  poModalError.value = '';
+  poSubmitting.value = true;
   try {
     const res = await apiFetch('/procurement/purchase-orders', {
       method: 'POST',
@@ -321,12 +395,16 @@ async function submitCreatePo() {
     await loadAllProcurementData();
     activeTab.value = 'po';
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal menerbitkan PO.';
+    poModalError.value = err.message || 'Gagal menerbitkan PO.';
+  } finally {
+    poSubmitting.value = false;
   }
 }
 
 function openGoodsReceipt(po: any) {
   selectedPoForReceipt.value = po;
+  receiptModalError.value = '';
+  receiptSubmitting.value = false;
   const firstLine = po.lines?.[0];
   const remaining = firstLine ? Math.max(1, firstLine.quantity - firstLine.receivedQuantity) : 1;
   receiptForm.value = {
@@ -339,8 +417,8 @@ function openGoodsReceipt(po: any) {
 
 async function submitGoodsReceipt() {
   if (!selectedPoForReceipt.value) return;
-  errorMsg.value = '';
-  feedbackMsg.value = '';
+  receiptModalError.value = '';
+  receiptSubmitting.value = true;
   try {
     const firstLine = selectedPoForReceipt.value.lines[0];
     const res = await apiFetch(`/procurement/purchase-orders/${selectedPoForReceipt.value.id}/goods-receipts`, {
@@ -361,12 +439,16 @@ async function submitGoodsReceipt() {
     feedbackMsg.value = `Bukti penerimaan barang ${res.data.goodsReceipt.docNumber} tercatat (Status PO: ${res.data.poStatus}).`;
     await loadAllProcurementData();
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal mencatat penerimaan barang.';
+    receiptModalError.value = err.message || 'Gagal mencatat penerimaan barang.';
+  } finally {
+    receiptSubmitting.value = false;
   }
 }
 
 function openCreateExpense() {
   const firstLine = availableBudgetLines.value[0];
+  expenseModalError.value = '';
+  expenseSubmitting.value = false;
   expenseForm.value = {
     title: '',
     businessUnitId: firstLine?.businessUnitId || master.value.businessUnits[0]?.id || '',
@@ -387,8 +469,8 @@ function openCreateExpense() {
 }
 
 async function submitExpense() {
-  errorMsg.value = '';
-  feedbackMsg.value = '';
+  expenseModalError.value = '';
+  expenseSubmitting.value = true;
   try {
     const selectedLine = availableBudgetLines.value.find((l) => l.id === expenseForm.value.budgetLineId);
     const res = await apiFetch('/procurement/expenses', {
@@ -407,7 +489,9 @@ async function submitExpense() {
     feedbackMsg.value = `Pengeluaran ${res.data.docNumber} berhasil diajukan.`;
     await loadAllProcurementData();
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal mencatat pengeluaran.';
+    expenseModalError.value = err.message || 'Gagal mencatat pengeluaran.';
+  } finally {
+    expenseSubmitting.value = false;
   }
 }
 
@@ -438,13 +522,15 @@ async function payAndPostExpense(exp: any) {
 function openVoidModal(exp: any) {
   selectedExpenseForVoid.value = exp;
   voidReason.value = '';
+  voidModalError.value = '';
+  voidSubmitting.value = false;
   voidModalOpen.value = true;
 }
 
 async function confirmVoidExpense() {
   if (!selectedExpenseForVoid.value) return;
-  errorMsg.value = '';
-  feedbackMsg.value = '';
+  voidModalError.value = '';
+  voidSubmitting.value = true;
   try {
     const res = await apiFetch(`/procurement/expenses/${selectedExpenseForVoid.value.id}/void`, {
       method: 'POST',
@@ -454,13 +540,34 @@ async function confirmVoidExpense() {
     feedbackMsg.value = `Transaksi ${res.data.docNumber} telah di-VOID beserta jurnal pembalik otomatis.`;
     await loadAllProcurementData();
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal melakukan void pengeluaran.';
+    voidModalError.value = err.message || 'Gagal melakukan void pengeluaran.';
+  } finally {
+    voidSubmitting.value = false;
   }
 }
 
+function openCreateVendor() {
+  vendorModalError.value = '';
+  vendorSubmitting.value = false;
+  vendorForm.value = {
+    name: '',
+    legalName: '',
+    taxIdNpwp: '',
+    category: 'Jasa & Peralatan Operasional',
+    contactName: '',
+    email: '',
+    phone: '',
+    address: '',
+    bankName: 'Bank Mandiri',
+    bankAccountNo: '',
+    bankAccountHolder: '',
+  };
+  vendorModalOpen.value = true;
+}
+
 async function submitVendor() {
-  errorMsg.value = '';
-  feedbackMsg.value = '';
+  vendorModalError.value = '';
+  vendorSubmitting.value = true;
   try {
     const res = await apiFetch('/procurement/vendors', {
       method: 'POST',
@@ -470,7 +577,9 @@ async function submitVendor() {
     feedbackMsg.value = `Vendor ${res.data.code} (${res.data.name}) berhasil didaftarkan.`;
     await loadAllProcurementData();
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal menyimpan vendor.';
+    vendorModalError.value = err.message || 'Gagal menyimpan vendor.';
+  } finally {
+    vendorSubmitting.value = false;
   }
 }
 
@@ -880,7 +989,7 @@ onMounted(() => {
           v-if="auth.hasPermission('procurement:create')"
           type="button"
           class="btn btn-sm btn-primary"
-          @click="vendorModalOpen = true"
+          @click="openCreateVendor"
         >
           + Daftarkan Vendor Baru
         </button>
@@ -936,15 +1045,38 @@ onMounted(() => {
 
     <!-- Modal: Create PR -->
     <ModalDialog :open="prModalOpen" title="Ajukan Purchase Request (PR) Baru" @close="prModalOpen = false">
-      <form @submit.prevent="submitPr" style="display: flex; flex-direction: column; gap: 12px">
+      <form @submit.prevent="submitPr" style="display: flex; flex-direction: column; gap: 14px">
+        <AlertBanner
+          v-if="prModalError"
+          variant="danger"
+          title="Kendala Validasi Pengajuan PR"
+          :message="prModalError"
+          @dismiss="prModalError = ''"
+        />
+
         <div class="form-field">
-          <label for="pr-title" class="form-label">Judul Kebutuhan Pengadaan</label>
-          <input id="pr-title" v-model="prForm.title" type="text" class="input" placeholder="Contoh: Pengadaan Perangkat Audio Ruang Kelas" required />
+          <label for="pr-title" class="form-label">
+            Judul Kebutuhan Pengadaan <span style="color: var(--danger-base, #dc2626)">*</span>
+          </label>
+          <input
+            id="pr-title"
+            v-model="prForm.title"
+            type="text"
+            class="input"
+            placeholder="Contoh: Pengadaan 5 Unit Laptop Developer untuk Tim PMO"
+            required
+            minlength="4"
+          />
+          <span class="input-hint" style="font-size: 0.78rem; color: var(--text-muted, #64748b)">
+            Minimal 4 karakter deskripsi umum kebutuhan.
+          </span>
         </div>
 
         <div class="form-field">
-          <label for="pr-bline" class="form-label">Pos Mata Anggaran Sumber (Hanya Anggaran Disetujui)</label>
-          <select id="pr-bline" v-model="prForm.budgetLineId" class="select" required>
+          <label for="pr-bline" class="form-label">
+            Pos Mata Anggaran Sumber <span style="color: var(--danger-base, #dc2626)">*</span>
+          </label>
+          <select id="pr-bline" v-model="prForm.budgetLineId" class="select" required @change="prModalError = ''">
             <option v-if="availableBudgetLines.length === 0" value="" disabled selected>
               Belum ada anggaran berstatus APPROVED
             </option>
@@ -959,34 +1091,154 @@ onMounted(() => {
         </div>
 
         <div class="form-field">
-          <label for="pr-purpose" class="form-label">Alasan Bisnis & Tujuan Penggunaan</label>
-          <input id="pr-purpose" v-model="prForm.purpose" type="text" class="input" placeholder="Contoh: Menunjang pelatihan sertifikasi batch berikutnya" required />
+          <label for="pr-purpose" class="form-label">
+            Alasan Bisnis & Tujuan Penggunaan <span style="color: var(--danger-base, #dc2626)">*</span>
+          </label>
+          <input
+            id="pr-purpose"
+            v-model="prForm.purpose"
+            type="text"
+            class="input"
+            placeholder="Contoh: Menunjang operasional sertifikasi batch berikutnya dan penggantian unit rusak"
+            required
+            minlength="5"
+          />
+          <span class="input-hint" style="font-size: 0.78rem; color: var(--text-muted, #64748b)">
+            Minimal 5 karakter justifikasi kebutuhan bisnis.
+          </span>
         </div>
 
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="pr-item" class="form-label">Nama Barang / Jasa</label>
-            <input id="pr-item" v-model="prForm.itemName" type="text" class="input" placeholder="Contoh: Paket Wireless Microphone" required />
+        <div style="border-top: 1px solid var(--border-color, #e2e8f0); padding-top: 12px; margin-top: 4px">
+          <h4 style="font-size: 0.88rem; font-weight: 600; margin-bottom: 8px; color: var(--text-heading, #1e293b)">
+            Rincian Item & Estimasi Biaya
+          </h4>
+
+          <div class="form-grid" style="grid-template-columns: 2fr 1fr 1fr; gap: 10px; margin-bottom: 10px">
+            <div class="form-field">
+              <label for="pr-item" class="form-label">
+                Nama Barang / Jasa <span style="color: var(--danger-base, #dc2626)">*</span>
+              </label>
+              <input
+                id="pr-item"
+                v-model="prForm.itemName"
+                type="text"
+                class="input"
+                placeholder="Contoh: Laptop ThinkPad E14"
+                required
+                minlength="2"
+              />
+            </div>
+            <div class="form-field">
+              <label for="pr-qty" class="form-label">
+                Kuantitas <span style="color: var(--danger-base, #dc2626)">*</span>
+              </label>
+              <input
+                id="pr-qty"
+                v-model.number="prForm.quantity"
+                type="number"
+                min="1"
+                class="input"
+                required
+              />
+            </div>
+            <div class="form-field">
+              <label for="pr-unit" class="form-label">
+                Satuan <span style="color: var(--danger-base, #dc2626)">*</span>
+              </label>
+              <input
+                id="pr-unit"
+                v-model="prForm.unit"
+                type="text"
+                class="input"
+                placeholder="Unit / Pcs / Paket"
+                required
+              />
+            </div>
           </div>
-          <div class="form-field">
-            <label for="pr-qty" class="form-label">Kuantitas</label>
-            <input id="pr-qty" v-model.number="prForm.quantity" type="number" min="1" class="input" required />
+
+          <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px">
+            <div class="form-field">
+              <label for="pr-spec" class="form-label">Spesifikasi Tambahan (Opsional)</label>
+              <input
+                id="pr-spec"
+                v-model="prForm.specification"
+                type="text"
+                class="input"
+                placeholder="Contoh: Core i7, RAM 16GB, SSD 512GB"
+              />
+            </div>
+            <div class="form-field">
+              <label for="pr-price" class="form-label">
+                Estimasi Harga Satuan (IDR) <span style="color: var(--danger-base, #dc2626)">*</span>
+              </label>
+              <CurrencyInput
+                id="pr-price"
+                v-model="prForm.estimatedUnitPrice"
+                :min="1"
+                placeholder="Rp 0"
+                required
+              />
+              <span class="input-hint" style="font-size: 0.78rem; color: var(--text-muted, #64748b)">
+                Wajib lebih dari Rp 0 sesuai format rupiah.
+              </span>
+            </div>
           </div>
-          <div class="form-field">
-            <label for="pr-price" class="form-label">Estimasi Harga Satuan (IDR)</label>
-            <CurrencyInput
-              id="pr-price"
-              v-model="prForm.estimatedUnitPrice"
-              :min="0"
-              placeholder="0"
+        </div>
+
+        <!-- Live Budget Card & Real-Time Calculation -->
+        <div v-if="selectedBudgetLine" style="background: var(--bg-surface-soft, #f8fafc); border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px; font-size: 0.84rem">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px">
+            <span style="color: var(--text-muted, #64748b)">Sisa Pagu Anggaran Tersedia:</span>
+            <strong style="color: var(--text-heading, #1e293b)">{{ formatRupiah(selectedBudgetLine.availableAmount) }}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px">
+            <span style="color: var(--text-muted, #64748b)">
+              Total Estimasi Pengadaan ({{ prForm.quantity || 0 }} {{ prForm.unit || 'Unit' }} x {{ formatRupiah(prForm.estimatedUnitPrice || 0) }}):
+            </span>
+            <strong :style="{ color: isPrOverBudget ? 'var(--danger-base, #dc2626)' : 'var(--primary-base, #2563eb)' }">
+              {{ formatRupiah(prTotalEstimated) }}
+            </strong>
+          </div>
+          <div style="border-top: 1px dashed var(--border-color, #cbd5e1); margin-top: 6px; padding-top: 6px; display: flex; justify-content: space-between">
+            <span style="color: var(--text-muted, #64748b)">Estimasi Sisa Pagu Setelah PR:</span>
+            <strong :style="{ color: isPrOverBudget ? 'var(--danger-base, #dc2626)' : 'var(--success-base, #16a34a)' }">
+              {{ isPrOverBudget ? 'Defisit ' + formatRupiah(prTotalEstimated - selectedBudgetLine.availableAmount) : formatRupiah(selectedBudgetLine.availableAmount - prTotalEstimated) }}
+            </strong>
+          </div>
+          <div v-if="isPrOverBudget" style="margin-top: 8px; color: var(--danger-base, #dc2626); font-weight: 500; font-size: 0.8rem">
+            ⚠️ Total estimasi pengadaan melebihi sisa pagu anggaran terpilih! Harap kurangi kuantitas/harga atau ajukan revisi anggaran.
+          </div>
+        </div>
+
+        <div class="form-field" style="margin-top: 4px">
+          <label for="pr-minquote" class="form-label">Syarat Minimal Penawaran Vendor (Kuotasi)</label>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <input
+              id="pr-minquote"
+              v-model.number="prForm.minQuotationsRequired"
+              type="number"
+              min="1"
+              max="10"
+              class="input"
+              style="max-width: 90px"
               required
             />
+            <span style="font-size: 0.8rem; color: var(--text-muted, #64748b)">
+              rekanan vendor (Standar SOP: minimal 3 penawaran harga untuk komparasi sebelum PO)
+            </span>
           </div>
         </div>
 
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="prModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Ajukan PR</button>
+        <div class="btn-row" style="justify-content: flex-end; margin-top: 8px">
+          <button type="button" class="btn btn-sm" :disabled="prSubmitting" @click="prModalOpen = false">Batal</button>
+          <button
+            type="submit"
+            class="btn btn-sm btn-primary"
+            :disabled="prSubmitting || isPrOverBudget || (prForm.estimatedUnitPrice || 0) <= 0 || !prForm.budgetLineId || !prForm.title || prForm.title.trim().length < 4"
+          >
+            <span v-if="prSubmitting">Mengajukan PR...</span>
+            <span v-else>Ajukan Purchase Request</span>
+          </button>
         </div>
       </form>
     </ModalDialog>
@@ -994,6 +1246,14 @@ onMounted(() => {
     <!-- Modal: Add Quotation -->
     <ModalDialog :open="quoteModalOpen" title="Tambah Penawaran Harga Vendor (Quotation)" @close="quoteModalOpen = false">
       <form @submit.prevent="submitQuotation" style="display: flex; flex-direction: column; gap: 12px">
+        <AlertBanner
+          v-if="quoteModalError"
+          variant="danger"
+          title="Kendala Simpan Penawaran"
+          :message="quoteModalError"
+          @dismiss="quoteModalError = ''"
+        />
+
         <div class="form-field">
           <label for="qt-vendor" class="form-label">Pilih Vendor Aktif</label>
           <select id="qt-vendor" v-model="quoteForm.vendorId" class="select" required>
@@ -1029,8 +1289,11 @@ onMounted(() => {
         </div>
 
         <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="quoteModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Simpan Penawaran</button>
+          <button type="button" class="btn btn-sm" :disabled="quoteSubmitting" @click="quoteModalOpen = false">Batal</button>
+          <button type="submit" class="btn btn-sm btn-primary" :disabled="quoteSubmitting">
+            <span v-if="quoteSubmitting">Menyimpan...</span>
+            <span v-else>Simpan Penawaran</span>
+          </button>
         </div>
       </form>
     </ModalDialog>
@@ -1038,6 +1301,14 @@ onMounted(() => {
     <!-- Modal: Convert PR to PO -->
     <ModalDialog :open="poModalOpen" title="Terbitkan Purchase Order (PO) dari PR" @close="poModalOpen = false">
       <form v-if="selectedPr" @submit.prevent="submitCreatePo" style="display: flex; flex-direction: column; gap: 12px">
+        <AlertBanner
+          v-if="poModalError"
+          variant="danger"
+          title="Kendala Penerbitan PO"
+          :message="poModalError"
+          @dismiss="poModalError = ''"
+        />
+
         <div class="form-field">
           <label for="po-quote" class="form-label">Pilih Penawaran Vendor Pemenang</label>
           <select id="po-quote" v-model="poForm.selectedQuotationId" class="select" required>
@@ -1066,8 +1337,11 @@ onMounted(() => {
         </div>
 
         <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="poModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Terbitkan Purchase Order</button>
+          <button type="button" class="btn btn-sm" :disabled="poSubmitting" @click="poModalOpen = false">Batal</button>
+          <button type="submit" class="btn btn-sm btn-primary" :disabled="poSubmitting">
+            <span v-if="poSubmitting">Menerbitkan...</span>
+            <span v-else>Terbitkan Purchase Order</span>
+          </button>
         </div>
       </form>
     </ModalDialog>
@@ -1075,6 +1349,14 @@ onMounted(() => {
     <!-- Modal: Goods Receipt -->
     <ModalDialog :open="receiptModalOpen" title="Catat Bukti Penerimaan Barang / Jasa (Goods Receipt)" @close="receiptModalOpen = false">
       <form v-if="selectedPoForReceipt" @submit.prevent="submitGoodsReceipt" style="display: flex; flex-direction: column; gap: 12px">
+        <AlertBanner
+          v-if="receiptModalError"
+          variant="danger"
+          title="Kendala Pencatatan Penerimaan"
+          :message="receiptModalError"
+          @dismiss="receiptModalError = ''"
+        />
+
         <p>PO Referensi: <strong>{{ selectedPoForReceipt.docNumber }}</strong> ({{ selectedPoForReceipt.vendor?.name }})</p>
         <div class="form-grid">
           <div class="form-field">
@@ -1091,8 +1373,11 @@ onMounted(() => {
           <input id="gr-note" v-model="receiptForm.conditionNote" type="text" class="input" required />
         </div>
         <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="receiptModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Simpan Penerimaan Barang</button>
+          <button type="button" class="btn btn-sm" :disabled="receiptSubmitting" @click="receiptModalOpen = false">Batal</button>
+          <button type="submit" class="btn btn-sm btn-primary" :disabled="receiptSubmitting">
+            <span v-if="receiptSubmitting">Menyimpan...</span>
+            <span v-else>Simpan Penerimaan Barang</span>
+          </button>
         </div>
       </form>
     </ModalDialog>
@@ -1100,6 +1385,14 @@ onMounted(() => {
     <!-- Modal: Create Expense -->
     <ModalDialog :open="expenseModalOpen" title="Catat Pengeluaran Operasional / Kas Keluar" @close="expenseModalOpen = false">
       <form @submit.prevent="submitExpense" style="display: flex; flex-direction: column; gap: 12px">
+        <AlertBanner
+          v-if="expenseModalError"
+          variant="danger"
+          title="Kendala Pengajuan Pengeluaran"
+          :message="expenseModalError"
+          @dismiss="expenseModalError = ''"
+        />
+
         <div class="form-field">
           <label for="exp-title" class="form-label">Judul Pengeluaran</label>
           <input id="exp-title" v-model="expenseForm.title" type="text" class="input" placeholder="Contoh: Biaya Konsumsi & Dokumentasi Workshop" required />
@@ -1159,8 +1452,11 @@ onMounted(() => {
         </div>
 
         <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="expenseModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Ajukan Pengeluaran</button>
+          <button type="button" class="btn btn-sm" :disabled="expenseSubmitting" @click="expenseModalOpen = false">Batal</button>
+          <button type="submit" class="btn btn-sm btn-primary" :disabled="expenseSubmitting">
+            <span v-if="expenseSubmitting">Mengajukan...</span>
+            <span v-else>Ajukan Pengeluaran</span>
+          </button>
         </div>
       </form>
     </ModalDialog>
@@ -1168,6 +1464,14 @@ onMounted(() => {
     <!-- Modal: Void Expense -->
     <ModalDialog :open="voidModalOpen" title="Void / Reversal Pengeluaran" @close="voidModalOpen = false">
       <form v-if="selectedExpenseForVoid" @submit.prevent="confirmVoidExpense" style="display: flex; flex-direction: column; gap: 12px">
+        <AlertBanner
+          v-if="voidModalError"
+          variant="danger"
+          title="Kendala Void Pengeluaran"
+          :message="voidModalError"
+          @dismiss="voidModalError = ''"
+        />
+
         <p>
           Anda akan membatalkan (VOID) pengeluaran <strong>{{ selectedExpenseForVoid.docNumber }}</strong> dan membuat jurnal pembalik otomatis.
         </p>
@@ -1176,8 +1480,11 @@ onMounted(() => {
           <textarea id="void-reason" v-model="voidReason" class="textarea" placeholder="Contoh: Koreksi salah input nominal pajak pada bukti transfer." required></textarea>
         </div>
         <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="voidModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-danger">Konfirmasi Void & Buat Jurnal Pembalik</button>
+          <button type="button" class="btn btn-sm" :disabled="voidSubmitting" @click="voidModalOpen = false">Batal</button>
+          <button type="submit" class="btn btn-sm btn-danger" :disabled="voidSubmitting">
+            <span v-if="voidSubmitting">Memproses Void...</span>
+            <span v-else>Konfirmasi Void & Buat Jurnal Pembalik</span>
+          </button>
         </div>
       </form>
     </ModalDialog>
@@ -1185,6 +1492,14 @@ onMounted(() => {
     <!-- Modal: Register Vendor -->
     <ModalDialog :open="vendorModalOpen" title="Daftarkan Vendor / Rekanan Baru" @close="vendorModalOpen = false">
       <form @submit.prevent="submitVendor" style="display: flex; flex-direction: column; gap: 12px">
+        <AlertBanner
+          v-if="vendorModalError"
+          variant="danger"
+          title="Kendala Pendaftaran Vendor"
+          :message="vendorModalError"
+          @dismiss="vendorModalError = ''"
+        />
+
         <div class="form-grid">
           <div class="form-field">
             <label for="vnd-name" class="form-label">Nama Komersial Vendor</label>
@@ -1228,8 +1543,11 @@ onMounted(() => {
           <input id="vnd-addr" v-model="vendorForm.address" type="text" class="input" required />
         </div>
         <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="vendorModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Simpan Vendor</button>
+          <button type="button" class="btn btn-sm" :disabled="vendorSubmitting" @click="vendorModalOpen = false">Batal</button>
+          <button type="submit" class="btn btn-sm btn-primary" :disabled="vendorSubmitting">
+            <span v-if="vendorSubmitting">Menyimpan...</span>
+            <span v-else>Simpan Vendor</span>
+          </button>
         </div>
       </form>
     </ModalDialog>

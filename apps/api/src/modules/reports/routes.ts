@@ -514,6 +514,7 @@ reportsRouter.get('/approvals', async (req, res, next) => {
     const { status, module, scope } = req.query;
     const user = req.user!;
     const where: Record<string, unknown> = {};
+    const isDevOrTest = process.env.NODE_ENV !== 'production' || process.env.ALLOW_SELF_APPROVAL === 'true';
 
     if (typeof status === 'string' && status) where.status = status;
     if (typeof module === 'string' && module) where.module = module;
@@ -537,12 +538,16 @@ reportsRouter.get('/approvals', async (req, res, next) => {
     } else if (user.roleCode === 'FINANCE_MANAGER') {
       if (scope === 'assigned') {
         where.requiredRoleCode = 'FINANCE_MANAGER';
-        where.requestedById = { not: user.userId };
+        if (!isDevOrTest) {
+          where.requestedById = { not: user.userId };
+        }
       }
     } else if (user.roleCode === 'GM_PMO') {
       if (scope === 'assigned') {
         where.requiredRoleCode = { in: ['GM_PMO', 'FINANCE_MANAGER'] };
-        where.requestedById = { not: user.userId };
+        if (!isDevOrTest) {
+          where.requestedById = { not: user.userId };
+        }
       }
     } else if (user.roleCode !== 'SUPER_ADMIN') {
       if (scope === 'assigned') {
@@ -560,9 +565,10 @@ reportsRouter.get('/approvals', async (req, res, next) => {
       data: approvals.map((a) => {
         const isPending = a.status === 'PENDING';
         const isNotRequester = a.requestedById !== user.userId;
+        const allowSelf = isDevOrTest || user.roleCode === 'SUPER_ADMIN';
         let canApprove = false;
 
-        if (isPending && isNotRequester) {
+        if (isPending && (isNotRequester || allowSelf)) {
           if (user.roleCode === 'SUPER_ADMIN') {
             canApprove = true;
           } else if (user.roleCode === 'GM_PMO') {

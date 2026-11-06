@@ -73,12 +73,14 @@ const appTiles = computed<AppTile[]>(() => [
   },
   {
     id: 'revenue',
-    title: 'Pendapatan & Kasir POS',
+    title: 'Penagihan & Faktur Klien',
     route: '/revenue',
     permission: 'revenue:view',
     gradient: 'linear-gradient(135deg, #ea580c, #9a3412)',
     icon: 'revenue',
-    tags: ['pendapatan', 'kasir', 'sales', 'pos', 'faktur', 'invoice', 'piutang'],
+    badge: 'Invoicing',
+    badgeColor: '#ea580c',
+    tags: ['invoice', 'faktur', 'penagihan', 'klien', 'sales order', 'piutang', 'pendapatan', 'pbi ut'],
   },
   {
     id: 'reconciliation',
@@ -97,6 +99,39 @@ const appTiles = computed<AppTile[]>(() => [
     gradient: 'linear-gradient(135deg, #4f46e5, #3730a3)',
     icon: 'accounting',
     tags: ['akuntansi', 'accounting', 'jurnal', 'coa', 'buku besar', 'neraca saldo'],
+  },
+  {
+    id: 'petty-cash',
+    title: 'Uang Persediaan & SPJ',
+    route: '/petty-cash',
+    permission: 'procurement:view',
+    gradient: 'linear-gradient(135deg, #7c3aed, #5b21b6)',
+    icon: 'petty-cash',
+    badge: 'GUP / TUP',
+    badgeColor: '#0ea5e9',
+    tags: ['uang persediaan', 'gup', 'tup', 'nihil', 'kas kecil', 'petty cash', 'spj', 'pajak', 'perbendaharaan'],
+  },
+  {
+    id: 'assets',
+    title: 'Inventaris & Aset PMO',
+    route: '/assets',
+    permission: 'accounting:view',
+    gradient: 'linear-gradient(135deg, #0284c7, #0369a1)',
+    icon: 'assets',
+    badge: 'PBI UT',
+    badgeColor: '#f59e0b',
+    tags: ['aset', 'inventaris', 'pbi', 'ut', 'pinjaman', 'depresiasi', 'penyusutan', 'mas wildan', 'logistik'],
+  },
+  {
+    id: 'hris',
+    title: 'SDM & Payroll PMO',
+    route: '/hris',
+    permission: 'admin:view',
+    gradient: 'linear-gradient(135deg, #059669, #047857)',
+    icon: 'hris',
+    badge: 'HRIS',
+    badgeColor: '#10b981',
+    tags: ['sdm', 'hris', 'pegawai', 'absensi', 'payroll', 'gaji', 'slip', 'karyawan'],
   },
   {
     id: 'reports',
@@ -294,6 +329,28 @@ function launchApp(tile: AppTile) {
             <svg v-else-if="tile.icon === 'accounting'" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+
+            <!-- Petty Cash / Uang Persediaan Icon -->
+            <svg v-else-if="tile.icon === 'petty-cash'" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="9" y1="15" x2="15" y2="15"></line>
+              <line x1="12" y1="12" x2="12" y2="18"></line>
+            </svg>
+
+            <!-- Assets Icon -->
+            <svg v-else-if="tile.icon === 'assets'" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+              <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+            </svg>
+
+            <!-- HRIS Icon -->
+            <svg v-else-if="tile.icon === 'hris'" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
             </svg>
 
             <!-- Reports Icon -->

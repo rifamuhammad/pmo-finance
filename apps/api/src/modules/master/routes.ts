@@ -687,3 +687,133 @@ masterRouter.get('/menus-permissions', requirePermission('admin:view'), async (r
 
   res.json({ success: true, data: menusRegistry });
 });
+
+// REAL OMNISEARCH API: Search across Assets (Mas Wildan/PBI), Finance Docs (SPJ/PO), HRIS, and ERP Modules
+masterRouter.get('/omnisearch', async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q || q.length < 2) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const [assets, pettyCash, purchaseOrders, employees] = await Promise.all([
+      prisma.fixedAsset.findMany({
+        where: {
+          OR: [
+            { name: { contains: q } },
+            { assetCode: { contains: q } },
+            { location: { contains: q } },
+            { brandModel: { contains: q } },
+            { picPerson: { contains: q } },
+            { category: { contains: q } },
+          ],
+        },
+        take: 6,
+        orderBy: { updatedAt: 'desc' },
+      }).catch(() => []),
+      prisma.pettyCashSubmission.findMany({
+        where: {
+          OR: [
+            { submissionNo: { contains: q } },
+            { activityDescription: { contains: q } },
+            { applicantName: { contains: q } },
+            { vendorName: { contains: q } },
+          ],
+        },
+        take: 4,
+        orderBy: { createdAt: 'desc' },
+      }).catch(() => []),
+      prisma.purchaseOrder.findMany({
+        where: {
+          OR: [
+            { docNumber: { contains: q } },
+            { selectionJustification: { contains: q } },
+            { vendor: { name: { contains: q } } },
+          ],
+        },
+        include: { vendor: { select: { name: true } } },
+        take: 4,
+        orderBy: { createdAt: 'desc' },
+      }).catch(() => []),
+      prisma.employee.findMany({
+        where: {
+          OR: [
+            { fullName: { contains: q } },
+            { nik: { contains: q } },
+            { position: { contains: q } },
+            { department: { contains: q } },
+          ],
+        },
+        take: 4,
+        orderBy: { fullName: 'asc' },
+      }).catch(() => []),
+    ]);
+
+    const results: any[] = [];
+
+    // 1. Assets
+    for (const a of assets) {
+      const isPbi = a.ownershipStatus === 'PBI_UT_LOAN';
+      results.push({
+        id: `asset-${a.id}`,
+        category: 'Aset & Inventaris',
+        icon: 'pi pi-building',
+        title: a.name,
+        subtitle: `${a.assetCode} • ${a.location || 'UT/PBI'} • PIC: ${a.picPerson || 'Mas Wildan'}`,
+        badge: isPbi ? 'PBI UT (Pinjaman)' : 'Milik PMO',
+        badgeColor: isPbi ? 'amber' : 'blue',
+        route: `/assets?q=${encodeURIComponent(a.name)}`,
+      });
+    }
+
+    // 2. Petty Cash / SPJ (GUP/TUP)
+    for (const p of pettyCash) {
+      results.push({
+        id: `pc-${p.id}`,
+        category: 'SPJ Kas Kecil (GUP/TUP)',
+        icon: 'pi pi-bolt',
+        title: `SPJ: ${p.submissionNo}`,
+        subtitle: `${p.activityDescription || 'Pengajuan Uang Persediaan'} • Pemohon: ${p.applicantName}`,
+        badge: p.status,
+        badgeColor: 'purple',
+        route: `/petty-cash`,
+      });
+    }
+
+    // 3. Purchase Orders
+    for (const po of purchaseOrders) {
+      results.push({
+        id: `po-${po.id}`,
+        category: 'Pengadaan & PO',
+        icon: 'pi pi-box',
+        title: `PO: ${po.docNumber}`,
+        subtitle: `Vendor: ${po.vendor?.name || 'Rekanan'} • Status: ${po.status}`,
+        badge: po.status,
+        badgeColor: 'emerald',
+        route: `/procurement`,
+      });
+    }
+
+    // 4. Employees / SDM
+    for (const e of employees) {
+      results.push({
+        id: `emp-${e.id}`,
+        category: 'SDM & Payroll',
+        icon: 'pi pi-user',
+        title: e.fullName,
+        subtitle: `NIK: ${e.nik} • ${e.position} • Divisi: ${e.department}`,
+        badge: e.employmentStatus || 'AKTIF',
+        badgeColor: 'cyan',
+        route: `/hris?q=${encodeURIComponent(e.fullName)}`,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: results,
+      meta: { query: q, total: results.length },
+    });
+  } catch (err) {
+    next(err);
+  }
+});

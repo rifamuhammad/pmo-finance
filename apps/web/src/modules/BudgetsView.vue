@@ -13,8 +13,6 @@ import CurrencyInput from '../components/CurrencyInput.vue';
 
 // PrimeVue official components
 import Drawer from 'primevue/drawer';
-import Button from 'primevue/button';
-import Tag from 'primevue/tag';
 import MeterGroup from 'primevue/metergroup';
 
 const auth = useAuthStore();
@@ -31,14 +29,27 @@ const master = ref<any>({ businessUnits: [], costCenters: [], fundSources: [], f
 const statusFilter = ref('');
 const searchQuery = ref('');
 
-// Setup Pagination with default 5 rows per page
+// Setup Pagination with default 6 rows per page
 const {
   currentPage,
   pageSize,
   totalItems,
   paginatedItems: paginatedBudgets,
   resetPage,
-} = usePagination(budgets, 5);
+} = usePagination(budgets, 6);
+
+// Computed status breakdown for interactive filter pills
+const statusCounts = computed(() => {
+  const list = budgets.value || [];
+  return {
+    ALL: list.length,
+    DRAFT: list.filter((b) => b.status === 'DRAFT').length,
+    SUBMITTED: list.filter((b) => b.status === 'SUBMITTED').length,
+    APPROVED: list.filter((b) => b.status === 'APPROVED').length,
+    REVISED: list.filter((b) => b.status === 'REVISED').length,
+    REJECTED: list.filter((b) => b.status === 'REJECTED').length,
+  };
+});
 
 // Computed KPI Metrics across all loaded budgets
 const summaryKpis = computed(() => {
@@ -48,12 +59,17 @@ const summaryKpis = computed(() => {
   const totalCommitted = list.reduce((sum, b) => sum + (Number(b.totalCommitted) || 0), 0);
   const totalActual = list.reduce((sum, b) => sum + (Number(b.totalActual) || 0), 0);
   const freePct = totalAllocated > 0 ? Math.round((totalAvailable / totalAllocated) * 100) : 0;
+  const committedPct = totalAllocated > 0 ? Math.round((totalCommitted / totalAllocated) * 100) : 0;
+  const actualPct = totalAllocated > 0 ? Math.round((totalActual / totalAllocated) * 100) : 0;
+  
   return {
     totalAllocated,
     totalAvailable,
     totalCommitted,
     totalActual,
     freePct,
+    committedPct,
+    actualPct,
   };
 });
 
@@ -75,12 +91,24 @@ const selectedUtilization = computed(() => {
   };
 });
 
+// Helper for budget row absorption breakdown
+function getBudgetAbsorption(b: any) {
+  const total = Number(b.totalAllocated) || 0;
+  if (total <= 0) return { actualPct: 0, committedPct: 0, freePct: 100 };
+  const actual = Number(b.totalActual) || 0;
+  const committed = Number(b.totalCommitted) || 0;
+  const actualPct = Math.min(100, Math.round((actual / total) * 100));
+  const committedPct = Math.min(100 - actualPct, Math.round((committed / total) * 100));
+  const freePct = Math.max(0, 100 - actualPct - committedPct);
+  return { actualPct, committedPct, freePct };
+}
+
 // PrimeVue MeterGroup formatted items
 const meterItems = computed(() => [
   {
     label: `Realisasi Beban (${formatRupiah(selectedBudget.value?.totalActual || 0)})`,
     value: selectedUtilization.value.actual,
-    color: '#7c3aed',
+    color: '#6366f1',
     icon: 'pi pi-chart-line',
   },
   {
@@ -134,6 +162,16 @@ function openBudgetDetail(b: any) {
   isDrawerOpen.value = true;
 }
 
+function setStatusFilter(status: string) {
+  statusFilter.value = status;
+  loadMasterAndBudgets();
+}
+
+function clearSearch() {
+  searchQuery.value = '';
+  loadMasterAndBudgets();
+}
+
 // Create Budget Modal Form
 const createOpen = ref(false);
 const createForm = ref({
@@ -154,10 +192,20 @@ const createForm = ref({
   ],
 });
 
+// Live calculated total for create modal
+const createTotalAllocated = computed(() => {
+  return createForm.value.lines.reduce((sum, l) => sum + (Number(l.allocatedAmount) || 0), 0);
+});
+
 // Revise Budget Modal
 const reviseOpen = ref(false);
 const reviseReason = ref('');
 const reviseLines = ref<Array<{ lineId: string; description: string; current: number; newAllocatedAmount: number }>>([]);
+
+// Live calculated total for revise modal
+const reviseTotalAllocated = computed(() => {
+  return reviseLines.value.reduce((sum, l) => sum + (Number(l.newAllocatedAmount) || 0), 0);
+});
 
 async function loadMasterAndBudgets() {
   loading.value = true;
@@ -266,6 +314,12 @@ function addBudgetLineRow() {
   });
 }
 
+function removeBudgetLineRow(idx: number) {
+  if (createForm.value.lines.length > 1) {
+    createForm.value.lines.splice(idx, 1);
+  }
+}
+
 async function submitCreateBudget() {
   modalError.value = '';
   errorMsg.value = '';
@@ -276,10 +330,8 @@ async function submitCreateBudget() {
       method: 'POST',
       body: JSON.stringify(createForm.value),
     });
-    // Immediately close modal!
     createOpen.value = false;
 
-    // Trigger animated checkmark success notification!
     successNotification.value = {
       show: true,
       title: 'Draft Anggaran Berhasil Dibuat!',
@@ -361,36 +413,45 @@ onMounted(loadMasterAndBudgets);
 </script>
 
 <template>
-  <div class="budgets-view animate-fade-in">
-    <!-- Header -->
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Perencanaan Anggaran & Plafon</h1>
-        <p class="page-desc">
-          Alokasi plafon belanja operasional dan kontrol realisasi per unit bisnis.
+  <div class="feature-page-container animate-fade-in">
+    <!-- Top Action Bar (Clean Header + Floating Pill Buttons) -->
+    <header class="feature-header-card">
+      <div class="header-left-col">
+        <div class="breadcrumb-chip">
+          <span class="chip-dot"></span>
+          <span>Perencanaan & Alokasi Modal</span>
+        </div>
+        <h1 class="feature-main-heading">Perencanaan Anggaran & Plafon Belanja</h1>
+        <p class="feature-sub-heading">
+          Kelola alokasi dana RKAP per unit bisnis, kontrol sisa plafon likuiditas, dan lacak komitmen pengadaan.
         </p>
       </div>
-      <div class="btn-row">
-        <Button
-          label="Muat Ulang"
-          icon="pi pi-refresh"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="loadMasterAndBudgets"
-        />
-        <Button
-          v-if="auth.hasPermission('budget:create')"
-          label="Buat Draft Anggaran Baru"
-          icon="pi pi-plus"
-          size="small"
-          severity="primary"
-          @click="openCreateBudget"
-        />
-      </div>
-    </div>
 
-    <!-- Alert / Feedback Notification -->
+      <div class="header-right-actions">
+        <button
+          type="button"
+          class="pill-btn pill-btn-ghost"
+          :disabled="loading"
+          @click="loadMasterAndBudgets"
+          title="Muat ulang data anggaran"
+        >
+          <i class="pi pi-refresh" :class="{ 'pi-spin': loading }"></i>
+          <span>Muat Ulang</span>
+        </button>
+
+        <button
+          v-if="auth.hasPermission('budget:create')"
+          type="button"
+          class="pill-btn pill-btn-primary"
+          @click="openCreateBudget"
+        >
+          <i class="pi pi-plus"></i>
+          <span>Buat Draft Anggaran Baru</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Feedback Banners -->
     <AlertBanner
       v-if="feedbackMsg"
       variant="success"
@@ -407,294 +468,407 @@ onMounted(loadMasterAndBudgets);
       @dismiss="errorMsg = ''"
     />
 
-    <!-- Colorful KPI Summary Strip -->
-    <div class="budget-kpi-grid">
-      <!-- 1. Total Plafon RKAP -->
-      <div class="kpi-card kpi-blue">
-        <div class="kpi-icon-wrap icon-blue">
-          <i class="pi pi-wallet" style="font-size: 1.25rem;"></i>
+    <!-- 4 Pastel Stat Cards (Pure Screenshot Aesthetic: Soft Pastel Icon Boxes + Bold Typography) -->
+    <section class="pastel-kpi-grid" aria-label="Ringkasan Plafon Anggaran">
+      <!-- 1. Total Plafon RKAP (Warm Amber Box $) -->
+      <div class="pastel-stat-card">
+        <div class="pastel-icon-box box-amber">
+          <span class="icon-dollar">$</span>
         </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Total Plafon RKAP Terdata</span>
-          <div class="kpi-value">{{ formatRupiah(summaryKpis.totalAllocated) }}</div>
-          <span class="kpi-sub">{{ budgets.length }} Dokumen RKAP Terdaftar</span>
-        </div>
-      </div>
-
-      <!-- 2. Sisa Plafon Bebas (Likuiditas) -->
-      <div class="kpi-card kpi-emerald">
-        <div class="kpi-icon-wrap icon-emerald">
-          <i class="pi pi-shield" style="font-size: 1.25rem;"></i>
-        </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Sisa Plafon Bebas (Tersedia)</span>
-          <div class="kpi-value text-emerald">{{ formatRupiah(summaryKpis.totalAvailable) }}</div>
-          <span class="kpi-sub text-emerald">
-            <strong>{{ summaryKpis.freePct }}%</strong> Kapasitas Belanja Tersisa
-          </span>
-        </div>
-      </div>
-
-      <!-- 3. Komitmen PO Terbit -->
-      <div class="kpi-card kpi-amber">
-        <div class="kpi-icon-wrap icon-amber">
-          <i class="pi pi-lock" style="font-size: 1.25rem;"></i>
-        </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Komitmen PO Terikat</span>
-          <div class="kpi-value text-amber">{{ formatRupiah(summaryKpis.totalCommitted) }}</div>
-          <span class="kpi-sub text-amber">PO Berjalan Belum Ditagihkan</span>
-        </div>
-      </div>
-
-      <!-- 4. Realisasi Beban Aktual -->
-      <div class="kpi-card kpi-violet">
-        <div class="kpi-icon-wrap icon-violet">
-          <i class="pi pi-chart-line" style="font-size: 1.25rem;"></i>
-        </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Realisasi Beban Aktual</span>
-          <div class="kpi-value text-violet">{{ formatRupiah(summaryKpis.totalActual) }}</div>
-          <span class="kpi-sub text-violet">Kuitansi / Tagihan Terverifikasi</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Filter Bar -->
-    <div class="filter-bar">
-      <div class="filter-item" style="flex: 2 1 260px;">
-        <label for="bdg-search" class="form-label">Cari Nomor / Judul Dokumen Anggaran</label>
-        <div class="search-input-wrap">
-          <i class="pi pi-search search-icon"></i>
-          <input
-            id="bdg-search"
-            v-model="searchQuery"
-            type="text"
-            class="input search-input"
-            placeholder="Ketik kata kunci atau nomor dokumen..."
-            @keyup.enter="loadMasterAndBudgets"
-          />
-        </div>
-      </div>
-
-      <div class="filter-item">
-        <label for="bdg-status" class="form-label">Status Anggaran</label>
-        <select id="bdg-status" v-model="statusFilter" class="select" @change="loadMasterAndBudgets">
-          <option value="">Semua Status</option>
-          <option value="DRAFT">DRAFT</option>
-          <option value="SUBMITTED">SUBMITTED (Menunggu Approval)</option>
-          <option value="APPROVED">APPROVED (Aktif Disetujui)</option>
-          <option value="REVISED">REVISED (Telah Direvisi)</option>
-          <option value="REJECTED">REJECTED</option>
-        </select>
-      </div>
-
-      <Button
-        label="Terapkan Filter"
-        icon="pi pi-filter"
-        size="small"
-        severity="primary"
-        @click="loadMasterAndBudgets"
-      />
-    </div>
-
-    <StateBanner
-      v-if="loading"
-      state="loading"
-      title="Memuat Dokumen Anggaran"
-      message="Mengambil rincian mata anggaran, alokasi plafon, komitmen aktif, dan histori versi..."
-    />
-
-    <StateBanner
-      v-else-if="budgets.length === 0"
-      state="empty"
-      title="Belum Ada Dokumen Anggaran"
-      message="Buat draft anggaran baru untuk mulai mengalokasikan plafon biaya per unit bisnis."
-      actionLabel="Buat Draft Anggaran"
-      @action="openCreateBudget"
-    />
-
-    <!-- FULL-WIDTH ELEGANT TABLE (No horizontal cut-off!) -->
-    <div v-else class="table-container-full">
-      <section class="panel table-panel" aria-label="Daftar Dokumen Anggaran">
-        <div class="panel-header">
-          <div style="display: flex; align-items: center; gap: 10px">
-            <h2>Daftar Dokumen Anggaran</h2>
-            <Tag :value="`${budgets.length} Dokumen`" severity="secondary" rounded />
+        <div class="stat-meta">
+          <div class="stat-number">{{ formatRupiah(summaryKpis.totalAllocated) }}</div>
+          <div class="stat-title">Total Plafon RKAP</div>
+          <div class="stat-badge-info badge-amber-sub">
+            <span>{{ budgets.length }} Dokumen Terdaftar</span>
           </div>
-          <small class="text-muted">
-            <i class="pi pi-info-circle" style="font-size: 0.8rem; margin-right: 4px;"></i>
-            Klik baris tabel untuk membuka rincian lengkap pos anggaran
-          </small>
         </div>
+      </div>
 
-        <div class="table-wrap">
-          <table class="erp-table budget-table">
-            <thead>
-              <tr>
-                <th style="min-width: 160px;">No. Dokumen & Unit</th>
-                <th style="min-width: 240px;">Judul Dokumen Anggaran</th>
-                <th class="money-col" style="min-width: 140px;">Plafon (Allocated)</th>
-                <th class="money-col" style="min-width: 140px;">Sisa Tersedia</th>
-                <th style="min-width: 120px;">Status</th>
-                <th style="min-width: 100px; text-align: center;">Tindakan</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="b in paginatedBudgets"
-                :key="b.id"
-                class="clickable-row"
-                :class="{ 'row-active': selectedBudget?.id === b.id }"
-                @click="openBudgetDetail(b)"
-              >
-                <td>
-                  <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start">
-                    <span class="doc-code">{{ b.docNumber }}</span>
-                    <div style="display: flex; gap: 4px; align-items: center">
-                      <span class="unit-chip" :class="getUnitBadgeClass(b.businessUnit?.code)">
-                        {{ b.businessUnit?.code || 'BU' }}
-                      </span>
-                      <span class="version-chip">v{{ b.version }}</span>
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  <strong class="budget-title-cell">{{ b.title }}</strong>
-                  <div class="text-muted" style="font-size: 0.8rem; margin-top: 3px">
-                    {{ b.fiscalPeriod?.name || 'FY2026' }} &bull; {{ b.fundSource?.name || 'Kas Operasional' }}
-                  </div>
-                </td>
-                <td class="money-col">
-                  <div class="cell-money">{{ formatRupiah(b.totalAllocated) }}</div>
-                </td>
-                <td class="money-col">
-                  <div class="cell-money text-emerald font-semibold">{{ formatRupiah(b.availableAmount) }}</div>
-                  <div class="cell-sub text-muted">
-                    {{ b.totalAllocated > 0 ? Math.round(((b.availableAmount || 0) / b.totalAllocated) * 100) : 0 }}% tersisa
-                  </div>
-                </td>
-                <td>
-                  <StatusBadge :status="b.status" />
-                </td>
-                <td style="text-align: center;">
-                  <Button
-                    label="Detail"
-                    icon="pi pi-arrow-right"
-                    iconPos="right"
-                    size="small"
-                    severity="primary"
-                    outlined
-                    @click.stop="openBudgetDetail(b)"
-                  />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+      <!-- 2. Sisa Plafon Bebas (Cyan Box Credit Card) -->
+      <div class="pastel-stat-card focal-card">
+        <div class="pastel-icon-box box-cyan">
+          <i class="pi pi-credit-card"></i>
         </div>
+        <div class="stat-meta">
+          <div class="stat-number text-emerald">{{ formatRupiah(summaryKpis.totalAvailable) }}</div>
+          <div class="stat-title">Sisa Plafon Bebas (Available)</div>
+          <div class="stat-badge-info badge-cyan-sub">
+            <i class="pi pi-check text-xs"></i>
+            <span>{{ summaryKpis.freePct }}% Kapasitas Siap Belanja</span>
+          </div>
+        </div>
+      </div>
 
-        <!-- Pagination Bar (Default 5 Rows / Page) -->
+      <!-- 3. Komitmen PO Terikat (Rose Box Lock / Payable) -->
+      <div class="pastel-stat-card">
+        <div class="pastel-icon-box box-rose">
+          <i class="pi pi-lock"></i>
+        </div>
+        <div class="stat-meta">
+          <div class="stat-number">{{ formatRupiah(summaryKpis.totalCommitted) }}</div>
+          <div class="stat-title">Komitmen PO Terikat</div>
+          <div class="stat-badge-info badge-rose-sub">
+            <span>{{ summaryKpis.committedPct }}% Terkunci Vendor</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Realisasi Beban Aktual (Lilac Box Arrow / Expense) -->
+      <div class="pastel-stat-card">
+        <div class="pastel-icon-box box-lilac">
+          <i class="pi pi-arrow-up-right"></i>
+        </div>
+        <div class="stat-meta">
+          <div class="stat-number">{{ formatRupiah(summaryKpis.totalActual) }}</div>
+          <div class="stat-title">Realisasi Beban Aktual</div>
+          <div class="stat-badge-info badge-lilac-sub">
+            <span>{{ summaryKpis.actualPct }}% Beban Terverifikasi</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filter & Search Toolbar (Floating White Card with Pill Tabs) -->
+    <section class="toolbar-pill-card">
+      <div class="toolbar-pill-group">
+        <button
+          type="button"
+          class="filter-pill-btn"
+          :class="{ active: statusFilter === '' }"
+          @click="setStatusFilter('')"
+        >
+          <span>Semua Anggaran</span>
+          <span class="pill-badge">{{ statusCounts.ALL }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="filter-pill-btn"
+          :class="{ active: statusFilter === 'APPROVED' }"
+          @click="setStatusFilter('APPROVED')"
+        >
+          <span class="status-dot dot-approved"></span>
+          <span>Disetujui (Approved)</span>
+          <span class="pill-badge">{{ statusCounts.APPROVED }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="filter-pill-btn"
+          :class="{ active: statusFilter === 'SUBMITTED' }"
+          @click="setStatusFilter('SUBMITTED')"
+        >
+          <span class="status-dot dot-submitted"></span>
+          <span>Menunggu Approval</span>
+          <span class="pill-badge">{{ statusCounts.SUBMITTED }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="filter-pill-btn"
+          :class="{ active: statusFilter === 'DRAFT' }"
+          @click="setStatusFilter('DRAFT')"
+        >
+          <span class="status-dot dot-draft"></span>
+          <span>Draft</span>
+          <span class="pill-badge">{{ statusCounts.DRAFT }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="filter-pill-btn"
+          :class="{ active: statusFilter === 'REVISED' }"
+          @click="setStatusFilter('REVISED')"
+        >
+          <span class="status-dot dot-revised"></span>
+          <span>Direvisi</span>
+          <span class="pill-badge">{{ statusCounts.REVISED }}</span>
+        </button>
+      </div>
+
+      <!-- Search Field with Pill Input -->
+      <div class="toolbar-search-wrap">
+        <i class="pi pi-search search-lens-ico"></i>
+        <input
+          id="bdg-search"
+          v-model="searchQuery"
+          type="text"
+          class="search-pill-input"
+          placeholder="Cari nomor dokumen / judul..."
+          @keyup.enter="loadMasterAndBudgets"
+        />
+        <button
+          v-if="searchQuery"
+          type="button"
+          class="search-clear-btn"
+          title="Hapus filter pencarian"
+          @click="clearSearch"
+        >
+          <i class="pi pi-times"></i>
+        </button>
+      </div>
+    </section>
+
+    <!-- Main Data Table: Aesthetic Pure White Card Container -->
+    <section class="main-table-card">
+      <div class="table-card-top">
+        <div class="table-top-left">
+          <h2 class="table-card-title">Daftar Dokumen Anggaran RKAP</h2>
+          <span class="table-card-count">{{ budgets.length }} Total Dokumen</span>
+        </div>
+        <div class="table-card-legend">
+          <span class="legend-unit"><span class="legend-color-dot dot-lilac"></span> Realisasi</span>
+          <span class="legend-unit"><span class="legend-color-dot dot-amber"></span> Komitmen PO</span>
+          <span class="legend-unit"><span class="legend-color-dot dot-emerald"></span> Sisa Bebas</span>
+        </div>
+      </div>
+
+      <!-- State Banners -->
+      <StateBanner
+        v-if="loading"
+        state="loading"
+        title="Memuat Dokumen Anggaran"
+        message="Mengambil rincian mata anggaran, alokasi plafon, komitmen aktif, dan histori versi..."
+      />
+
+      <StateBanner
+        v-else-if="budgets.length === 0"
+        state="empty"
+        title="Belum Ada Dokumen Anggaran"
+        message="Tidak ada dokumen anggaran yang cocok dengan filter aktif. Coba ubah kata kunci atau buat draft anggaran baru."
+        actionLabel="Buat Draft Anggaran"
+        @action="openCreateBudget"
+      />
+
+      <!-- Full-Width Data Table -->
+      <div v-else class="table-scroll-container">
+        <table class="aesthetic-data-table">
+          <thead>
+            <tr>
+              <th style="min-width: 170px;">Nomor Dokumen</th>
+              <th style="min-width: 250px;">Judul Anggaran & Unit Bisnis</th>
+              <th class="money-col" style="min-width: 160px;">Total Plafon (Allocated)</th>
+              <th style="min-width: 200px;">Komposisi Serapan</th>
+              <th class="money-col" style="min-width: 150px;">Sisa Bebas</th>
+              <th style="min-width: 130px; text-align: center;">Status</th>
+              <th style="min-width: 90px; text-align: center;">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="b in paginatedBudgets"
+              :key="b.id"
+              class="table-row-item"
+              :class="{ 'row-active-item': selectedBudget?.id === b.id }"
+              @click="openBudgetDetail(b)"
+            >
+              <!-- 1. Nomor Dokumen & Unit -->
+              <td>
+                <div class="cell-doc-col">
+                  <span class="doc-code-pill">{{ b.docNumber }}</span>
+                  <div class="doc-tags-row">
+                    <span class="unit-badge-pill" :class="getUnitBadgeClass(b.businessUnit?.code)">
+                      {{ b.businessUnit?.code || 'BU' }}
+                    </span>
+                    <span class="version-badge-pill">v{{ b.version }}</span>
+                  </div>
+                </div>
+              </td>
+
+              <!-- 2. Judul & Parameter -->
+              <td>
+                <div class="cell-title-col">
+                  <span class="budget-title-link">{{ b.title }}</span>
+                  <div class="budget-sub-params">
+                    <span class="param-tag">{{ b.fiscalPeriod?.name || 'FY2026' }}</span>
+                    <span class="param-divider">&bull;</span>
+                    <span class="param-tag">{{ b.fundSource?.name || 'Kas Operasional' }}</span>
+                  </div>
+                </div>
+              </td>
+
+              <!-- 3. Total Plafon (Allocated) -->
+              <td class="money-col">
+                <div class="amount-number-bold">{{ formatRupiah(b.totalAllocated) }}</div>
+                <div class="amount-target-sub">Target Rev: {{ formatRupiah(b.revenueTarget || 0) }}</div>
+              </td>
+
+              <!-- 4. Stacked Serapan Bar -->
+              <td>
+                <div class="cell-absorption-col">
+                  <div class="stacked-bar-rail" :title="`Realisasi: ${getBudgetAbsorption(b).actualPct}%, PO: ${getBudgetAbsorption(b).committedPct}%, Sisa: ${getBudgetAbsorption(b).freePct}%`">
+                    <div
+                      class="rail-fill fill-lilac"
+                      :style="{ width: getBudgetAbsorption(b).actualPct + '%' }"
+                    ></div>
+                    <div
+                      class="rail-fill fill-amber"
+                      :style="{ width: getBudgetAbsorption(b).committedPct + '%' }"
+                    ></div>
+                    <div
+                      class="rail-fill fill-emerald"
+                      :style="{ width: getBudgetAbsorption(b).freePct + '%' }"
+                    ></div>
+                  </div>
+                  <div class="absorption-text-split">
+                    <span class="text-lilac font-medium">{{ getBudgetAbsorption(b).actualPct }}% realisasi</span>
+                    <span class="text-amber font-medium">{{ getBudgetAbsorption(b).committedPct }}% PO</span>
+                  </div>
+                </div>
+              </td>
+
+              <!-- 5. Sisa Bebas -->
+              <td class="money-col">
+                <div class="amount-number-emerald">{{ formatRupiah(b.availableAmount) }}</div>
+                <div class="amount-percent-emerald">
+                  <i class="pi pi-check text-xs"></i>
+                  {{ b.totalAllocated > 0 ? Math.round(((b.availableAmount || 0) / b.totalAllocated) * 100) : 0 }}% kapasitas
+                </div>
+              </td>
+
+              <!-- 6. Status -->
+              <td style="text-align: center;">
+                <StatusBadge :status="b.status" />
+              </td>
+
+              <!-- 7. Action Button -->
+              <td style="text-align: center;">
+                <button
+                  type="button"
+                  class="action-detail-pill"
+                  title="Buka rincian lengkap pos anggaran"
+                  @click.stop="openBudgetDetail(b)"
+                >
+                  <i class="pi pi-arrow-right"></i>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="table-pagination-footer">
         <PaginationControl
           v-model:currentPage="currentPage"
           v-model:pageSize="pageSize"
           :totalItems="totalItems"
-          :pageSizeOptions="[5, 10, 25]"
+          :pageSizeOptions="[6, 12, 24]"
           itemLabel="dokumen anggaran"
         />
-      </section>
-    </div>
+      </div>
+    </section>
 
-    <!-- PRIMEVUE DRAWER: SLIDE-OVER DETAIL SHEET (NEVER CLIPPED OR CUT OFF!) -->
+    <!-- PRIMEVUE DRAWER: SLIDE-OVER DETAIL SHEET -->
     <Drawer
       v-model:visible="isDrawerOpen"
       position="right"
-      :style="{ width: '820px', maxWidth: '96vw' }"
+      :style="{ width: '840px', maxWidth: '96vw' }"
       class="budget-detail-drawer"
     >
       <template #header>
-        <div v-if="selectedBudget" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-          <span class="doc-code" style="font-size: 0.9rem;">{{ selectedBudget.docNumber }}</span>
-          <span class="version-chip">v{{ selectedBudget.version }}</span>
-          <span class="unit-chip" :class="getUnitBadgeClass(selectedBudget.businessUnit?.code)">
-            {{ selectedBudget.businessUnit?.code }} - {{ selectedBudget.businessUnit?.name }}
-          </span>
-          <StatusBadge :status="selectedBudget.status" />
+        <div v-if="selectedBudget" class="drawer-header-content">
+          <div class="drawer-header-meta">
+            <span class="doc-code-pill font-mono">{{ selectedBudget.docNumber }}</span>
+            <span class="version-badge-pill">Versi {{ selectedBudget.version }}</span>
+            <span class="unit-badge-pill" :class="getUnitBadgeClass(selectedBudget.businessUnit?.code)">
+              {{ selectedBudget.businessUnit?.code }} - {{ selectedBudget.businessUnit?.name }}
+            </span>
+            <StatusBadge :status="selectedBudget.status" />
+          </div>
         </div>
       </template>
 
       <div v-if="selectedBudget" class="drawer-inner-content">
-        <!-- Title & Subtitle -->
-        <div class="drawer-title-block">
-          <h2 class="drawer-title">{{ selectedBudget.title }}</h2>
-          <p class="text-muted" style="margin-top: 4px; font-size: 0.88rem">
-            Dibuat oleh: <strong>{{ selectedBudget.createdByName }}</strong> &bull;
-            Sumber Dana: <strong>{{ selectedBudget.fundSource?.name }}</strong> &bull;
-            Periode: <strong>{{ selectedBudget.fiscalPeriod?.name }}</strong>
-          </p>
+        <!-- Title & Executive Action Bar -->
+        <div class="drawer-hero-card">
+          <div class="drawer-hero-info">
+            <h2 class="drawer-title">{{ selectedBudget.title }}</h2>
+            <div class="drawer-meta-list">
+              <span class="meta-item">
+                <i class="pi pi-user text-xs"></i>
+                Dibuat oleh: <strong>{{ selectedBudget.createdByName }}</strong>
+              </span>
+              <span class="meta-item">
+                <i class="pi pi-database text-xs"></i>
+                Sumber: <strong>{{ selectedBudget.fundSource?.name }}</strong>
+              </span>
+              <span class="meta-item">
+                <i class="pi pi-calendar text-xs"></i>
+                Periode: <strong>{{ selectedBudget.fiscalPeriod?.name }}</strong>
+              </span>
+            </div>
+          </div>
 
           <!-- Action Buttons Bar -->
           <div class="drawer-actions-bar">
-            <Button
+            <button
               v-if="['DRAFT', 'REJECTED'].includes(selectedBudget.status) && auth.hasPermission('budget:submit')"
-              label="Ajukan Persetujuan"
-              icon="pi pi-send"
-              severity="primary"
-              size="small"
+              type="button"
+              class="btn-drawer-action btn-drawer-primary"
               @click="submitForApproval(selectedBudget)"
-            />
+            >
+              <i class="pi pi-send"></i>
+              <span>Ajukan Persetujuan</span>
+            </button>
 
-            <Button
+            <button
               v-if="selectedBudget.status === 'SUBMITTED' && auth.hasPermission('budget:approve')"
-              label="Setujui Anggaran"
-              icon="pi pi-check"
-              severity="success"
-              size="small"
+              type="button"
+              class="btn-drawer-action btn-drawer-success"
               @click="approveBudget(selectedBudget)"
-            />
+            >
+              <i class="pi pi-check"></i>
+              <span>Setujui Anggaran</span>
+            </button>
 
-            <Button
+            <button
               v-if="['APPROVED', 'REVISED'].includes(selectedBudget.status) && auth.hasPermission('budget:approve')"
-              label="Buat Revisi Plafon"
-              icon="pi pi-pencil"
-              severity="warn"
-              size="small"
+              type="button"
+              class="btn-drawer-action btn-drawer-warn"
               @click="openReviseModal(selectedBudget)"
-            />
+            >
+              <i class="pi pi-pencil"></i>
+              <span>Buat Revisi Plafon</span>
+            </button>
           </div>
         </div>
 
-        <!-- PrimeVue MeterGroup: Multi-Segment Visual Utilization -->
+        <!-- MeterGroup: Multi-Segment Visual Utilization -->
         <div class="drawer-meter-card">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <strong style="font-size: 0.92rem; color: var(--text-primary);">Visualisasi Serapan Plafon Anggaran</strong>
-            <span style="font-weight: 700; color: #034693; font-size: 0.85rem">
-              {{ Math.round((selectedUtilization.actual + selectedUtilization.committed) * 10) / 10 }}% Terpakai & Terikat
+          <div class="meter-card-header">
+            <div class="meter-title-wrap">
+              <i class="pi pi-sliders-h text-primary"></i>
+              <strong>Dekomposisi Serapan Plafon Anggaran</strong>
+            </div>
+            <span class="meter-total-stat">
+              {{ Math.round((selectedUtilization.actual + selectedUtilization.committed) * 10) / 10 }}% Total Terikat
             </span>
           </div>
           <MeterGroup :value="meterItems" />
         </div>
 
-        <!-- 4 Metric Cards in 2x2 Grid (Generous Space, Never Squeezed!) -->
+        <!-- 4 Metric Cards in 2x2 Grid -->
         <div class="drawer-kpi-grid">
-          <div class="card-kpi-box box-blue">
+          <div class="card-kpi-box box-amber-subtle">
             <span class="box-label">Plafon Disetujui (Allocated)</span>
             <div class="box-value text-blue">{{ formatRupiah(selectedBudget.totalAllocated) }}</div>
             <span class="box-sub">Target Rev: {{ formatRupiah(selectedBudget.revenueTarget) }}</span>
           </div>
 
-          <div class="card-kpi-box box-amber">
+          <div class="card-kpi-box box-rose-subtle">
             <span class="box-label">Komitmen Terikat (Encumbered PO)</span>
             <div class="box-value text-amber">{{ formatRupiah(selectedBudget.totalCommitted) }}</div>
-            <span class="box-sub">{{ selectedUtilization.committed }}% dari Plafon</span>
+            <span class="box-sub">{{ selectedUtilization.committed }}% dari Total Plafon</span>
           </div>
 
-          <div class="card-kpi-box box-violet">
+          <div class="card-kpi-box box-lilac-subtle">
             <span class="box-label">Realisasi Beban Aktual</span>
             <div class="box-value text-violet">{{ formatRupiah(selectedBudget.totalActual) }}</div>
-            <span class="box-sub">{{ selectedUtilization.actual }}% Terbayar</span>
+            <span class="box-sub">{{ selectedUtilization.actual }}% Beban Terbayar</span>
           </div>
 
-          <div class="card-kpi-box box-emerald focal">
+          <div class="card-kpi-box box-cyan-subtle focal">
             <span class="box-label">Sisa Plafon Bebas (Available)</span>
             <div class="box-value text-emerald">{{ formatRupiah(selectedBudget.availableAmount) }}</div>
             <span class="box-sub text-emerald font-semibold">{{ selectedUtilization.free }}% Siap Digunakan</span>
@@ -703,29 +877,32 @@ onMounted(loadMasterAndBudgets);
 
         <!-- Budget Lines Section -->
         <div class="drawer-section">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h3 style="font-size: 1.02rem; font-weight: 700;">Rincian Pos Mata Anggaran ({{ selectedBudget.lines?.length || 0 }} Pos)</h3>
+          <div class="section-header-custom">
+            <div class="section-title-wrap">
+              <i class="pi pi-list text-primary"></i>
+              <h3>Rincian Pos Mata Anggaran ({{ selectedBudget.lines?.length || 0 }} Pos Terdaftar)</h3>
+            </div>
           </div>
 
           <div class="table-wrap">
-            <table class="erp-table">
+            <table class="erp-table line-items-table">
               <thead>
                 <tr>
-                  <th style="min-width: 120px;">Cost Center & COA</th>
-                  <th style="min-width: 160px;">Kategori & Uraian</th>
-                  <th class="money-col" style="min-width: 105px;">Plafon</th>
-                  <th class="money-col" style="min-width: 105px;">Komitmen</th>
-                  <th class="money-col" style="min-width: 105px;">Aktual</th>
-                  <th class="money-col" style="min-width: 105px;">Tersedia</th>
-                  <th style="min-width: 80px; text-align: center;">Serapan</th>
+                  <th style="min-width: 130px;">Cost Center & COA</th>
+                  <th style="min-width: 170px;">Kategori & Uraian Pos</th>
+                  <th class="money-col" style="min-width: 110px;">Plafon</th>
+                  <th class="money-col" style="min-width: 110px;">Komitmen</th>
+                  <th class="money-col" style="min-width: 110px;">Aktual</th>
+                  <th class="money-col" style="min-width: 110px;">Tersedia</th>
+                  <th style="min-width: 90px; text-align: center;">Serapan</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="line in selectedBudget.lines" :key="line.id">
                   <td>
-                    <span class="doc-code">{{ line.costCenter?.code }}</span>
-                    <div class="text-muted" style="font-size: 0.76rem; margin-top: 3px">
-                      Akun: <strong>{{ line.accountCode }}</strong>
+                    <span class="doc-code-pill">{{ line.costCenter?.code }}</span>
+                    <div class="line-coa-text">
+                      COA: <strong>{{ line.accountCode }}</strong>
                     </div>
                   </td>
                   <td>
@@ -734,10 +911,10 @@ onMounted(loadMasterAndBudgets);
                     </span>
                     <div class="line-desc-text">{{ line.description }}</div>
                   </td>
-                  <td class="money-col">{{ formatRupiah(line.allocatedAmount) }}</td>
+                  <td class="money-col font-semibold">{{ formatRupiah(line.allocatedAmount) }}</td>
                   <td class="money-col text-amber">{{ formatRupiah(line.committedAmount) }}</td>
                   <td class="money-col text-violet">{{ formatRupiah(line.actualAmount) }}</td>
-                  <td class="money-col font-semibold text-emerald">{{ formatRupiah(line.availableAmount) }}</td>
+                  <td class="money-col font-bold text-emerald">{{ formatRupiah(line.availableAmount) }}</td>
                   <td style="text-align: center;">
                     <div class="mini-bar-wrap" :title="getLineUtilizationPct(line) + '% terserap'">
                       <div
@@ -748,7 +925,7 @@ onMounted(loadMasterAndBudgets);
                         }"
                       ></div>
                     </div>
-                    <small style="font-size: 0.72rem; color: var(--text-secondary);">{{ getLineUtilizationPct(line) }}%</small>
+                    <small class="mini-bar-label">{{ getLineUtilizationPct(line) }}%</small>
                   </td>
                 </tr>
               </tbody>
@@ -758,8 +935,11 @@ onMounted(loadMasterAndBudgets);
 
         <!-- Riwayat Versi & Revisi Plafon -->
         <div v-if="selectedBudget.revisions?.length > 0" class="drawer-section">
-          <div style="margin-bottom: 10px;">
-            <h3 style="font-size: 1.02rem; font-weight: 700;">Histori Versi & Revisi Plafon ({{ selectedBudget.revisions.length }})</h3>
+          <div class="section-header-custom">
+            <div class="section-title-wrap">
+              <i class="pi pi-history text-primary"></i>
+              <h3>Histori Revisi & Audit Trail ({{ selectedBudget.revisions.length }} Versi)</h3>
+            </div>
           </div>
 
           <div class="timeline-container">
@@ -769,17 +949,20 @@ onMounted(loadMasterAndBudgets);
               class="timeline-card"
             >
               <div class="timeline-header">
-                <div style="display: flex; gap: 8px; align-items: center">
+                <div class="rev-left">
                   <span class="rev-badge">Versi {{ rev.version }} &rarr; Versi {{ rev.version + 1 }}</span>
-                  <span class="text-muted" style="font-size: 0.8rem">&bull; {{ formatDateTime(rev.createdAt) }}</span>
+                  <span class="timeline-date">{{ formatDateTime(rev.createdAt) }}</span>
                 </div>
-                <span class="rev-author">Oleh: <strong>{{ rev.revisedByName }}</strong></span>
+                <span class="rev-author">
+                  <i class="pi pi-user-edit text-xs"></i>
+                  Oleh: <strong>{{ rev.revisedByName }}</strong>
+                </span>
               </div>
               <p class="rev-reason">"{{ rev.reason }}"</p>
               <div class="rev-diff-strip">
-                <span>Plafon Sebelumnya: <s>{{ formatRupiah(rev.previousAllocated) }}</s></span>
+                <span class="text-muted">Plafon Semula: <s>{{ formatRupiah(rev.previousAllocated) }}</s></span>
                 <span class="diff-arrow">&rarr;</span>
-                <span class="font-semibold text-emerald">Plafon Baru: {{ formatRupiah(rev.newAllocated) }}</span>
+                <span class="font-bold text-emerald">Plafon Baru: {{ formatRupiah(rev.newAllocated) }}</span>
               </div>
             </div>
           </div>
@@ -789,10 +972,21 @@ onMounted(loadMasterAndBudgets);
 
     <!-- Modal: Create Budget -->
     <ModalDialog :open="createOpen" title="Buat Draft Anggaran Baru" @close="createOpen = false">
-      <form @submit.prevent="submitCreateBudget" style="display: flex; flex-direction: column; gap: 14px">
+      <form @submit.prevent="submitCreateBudget" class="modal-form-wrap">
         <div v-if="modalError" class="modal-error-alert" role="alert">
           <i class="pi pi-exclamation-triangle"></i>
           <span>{{ modalError }}</span>
+        </div>
+
+        <!-- Live Total Counter Banner -->
+        <div class="live-total-banner">
+          <div class="live-total-left">
+            <span class="live-label">Total Plafon Direncanakan ({{ createForm.lines.length }} Pos)</span>
+            <span class="live-value text-emerald font-bold">{{ formatRupiah(createTotalAllocated) }}</span>
+          </div>
+          <div class="live-total-right">
+            <span class="live-sub">Target Rev: {{ formatRupiah(createForm.revenueTarget || 0) }}</span>
+          </div>
         </div>
 
         <div class="form-field">
@@ -801,8 +995,8 @@ onMounted(loadMasterAndBudgets);
             id="new-bdg-title"
             v-model="createForm.title"
             type="text"
-            class="input"
-            placeholder="Contoh: Anggaran Operasional Q4"
+            class="input-pill"
+            placeholder="Contoh: RKAP Operasional Unit IT & Sistem Q4"
             required
           />
         </div>
@@ -813,7 +1007,7 @@ onMounted(loadMasterAndBudgets);
             <select
               id="new-bdg-unit"
               v-model="createForm.businessUnitId"
-              class="select"
+              class="select-pill"
               required
               :disabled="auth.user?.roleCode === 'UNIT_MANAGER' && !!auth.user?.businessUnitId"
             >
@@ -828,7 +1022,7 @@ onMounted(loadMasterAndBudgets);
 
           <div class="form-field">
             <label for="new-bdg-period" class="form-label">Periode Fiskal</label>
-            <select id="new-bdg-period" v-model="createForm.fiscalPeriodId" class="select" required>
+            <select id="new-bdg-period" v-model="createForm.fiscalPeriodId" class="select-pill" required>
               <option v-for="p in master.fiscalPeriods.filter((x: any) => !x.isClosed)" :key="p.id" :value="p.id">
                 {{ p.code }} - {{ p.name }}
               </option>
@@ -837,7 +1031,7 @@ onMounted(loadMasterAndBudgets);
 
           <div class="form-field">
             <label for="new-bdg-fund" class="form-label">Sumber Dana</label>
-            <select id="new-bdg-fund" v-model="createForm.fundSourceId" class="select" required>
+            <select id="new-bdg-fund" v-model="createForm.fundSourceId" class="select-pill" required>
               <option v-for="f in master.fundSources" :key="f.id" :value="f.id">
                 {{ f.code }} - {{ f.name }}
               </option>
@@ -856,76 +1050,94 @@ onMounted(loadMasterAndBudgets);
           </div>
         </div>
 
-        <div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
-            <strong>Baris Pos Mata Anggaran</strong>
-            <button type="button" class="btn btn-sm" @click="addBudgetLineRow">+ Tambah Pos</button>
+        <div class="form-section-divider">
+          <div class="section-title-between">
+            <strong class="font-bold text-sm">Pos Rincian Mata Anggaran</strong>
+            <button type="button" class="btn-add-line-pill" @click="addBudgetLineRow">
+              <i class="pi pi-plus text-xs"></i>
+              <span>Tambah Pos</span>
+            </button>
           </div>
 
-          <div v-for="(line, idx) in createForm.lines" :key="idx" class="panel" style="margin-bottom: 10px; background: var(--bg-canvas)">
-            <div class="form-grid">
-              <div class="form-field">
-                <label :for="`line-cc-${idx}`" class="form-label">Cost Center</label>
-                <select :id="`line-cc-${idx}`" v-model="line.costCenterId" class="select" required>
-                  <option v-for="cc in availableCostCenters" :key="cc.id" :value="cc.id">
-                    {{ cc.code }} - {{ cc.name }}
-                  </option>
-                </select>
+          <div class="lines-container">
+            <div v-for="(line, idx) in createForm.lines" :key="idx" class="line-row-card">
+              <div class="line-row-header">
+                <span class="line-row-index">Pos #{{ idx + 1 }}</span>
+                <button
+                  v-if="createForm.lines.length > 1"
+                  type="button"
+                  class="btn-remove-line"
+                  title="Hapus baris ini"
+                  @click="removeBudgetLineRow(idx)"
+                >
+                  <i class="pi pi-trash"></i>
+                </button>
               </div>
 
-              <div class="form-field">
-                <label :for="`line-cat-${idx}`" class="form-label">Kategori</label>
-                <select :id="`line-cat-${idx}`" v-model="line.category" class="select" required>
-                  <option value="CAPEX">CAPEX (Investasi Modal)</option>
-                  <option value="OPEX">OPEX (Operasional)</option>
-                  <option value="PENGADAAN">PENGADAAN (Barang & Jasa)</option>
-                  <option value="PEGAWAI">PEGAWAI (Remunerasi / Diklat)</option>
-                  <option value="MODAL_KERJA">MODAL_KERJA</option>
-                  <option value="PAJAK">PAJAK (Fiskal / Retribusi)</option>
-                </select>
+              <div class="form-grid">
+                <div class="form-field">
+                  <label :for="`line-cc-${idx}`" class="form-label">Cost Center</label>
+                  <select :id="`line-cc-${idx}`" v-model="line.costCenterId" class="select-pill" required>
+                    <option v-for="cc in availableCostCenters" :key="cc.id" :value="cc.id">
+                      {{ cc.code }} - {{ cc.name }}
+                    </option>
+                  </select>
+                </div>
+
+                <div class="form-field">
+                  <label :for="`line-cat-${idx}`" class="form-label">Kategori</label>
+                  <select :id="`line-cat-${idx}`" v-model="line.category" class="select-pill" required>
+                    <option value="CAPEX">CAPEX (Investasi Modal)</option>
+                    <option value="OPEX">OPEX (Operasional)</option>
+                    <option value="PENGADAAN">PENGADAAN (Barang & Jasa)</option>
+                    <option value="PEGAWAI">PEGAWAI (Remunerasi / Diklat)</option>
+                    <option value="MODAL_KERJA">MODAL_KERJA</option>
+                    <option value="PAJAK">PAJAK (Fiskal / Retribusi)</option>
+                  </select>
+                </div>
+
+                <div class="form-field">
+                  <label :for="`line-coa-${idx}`" class="form-label">Kode Akun Beban (COA)</label>
+                  <input
+                    :id="`line-coa-${idx}`"
+                    v-model="line.accountCode"
+                    type="text"
+                    class="input-pill"
+                    placeholder="Contoh: 5-1100"
+                    required
+                  />
+                </div>
+
+                <div class="form-field">
+                  <label :for="`line-amt-${idx}`" class="form-label">Plafon Alokasi (IDR)</label>
+                  <CurrencyInput
+                    :id="`line-amt-${idx}`"
+                    v-model="line.allocatedAmount"
+                    :min="1000"
+                    placeholder="0"
+                    required
+                  />
+                </div>
               </div>
 
-              <div class="form-field">
-                <label :for="`line-coa-${idx}`" class="form-label">Kode Akun Beban (COA)</label>
+              <div class="form-field" style="margin-top: 8px">
+                <label :for="`line-desc-${idx}`" class="form-label">Uraian Pekerjaan / Mata Anggaran</label>
                 <input
-                  :id="`line-coa-${idx}`"
-                  v-model="line.accountCode"
+                  :id="`line-desc-${idx}`"
+                  v-model="line.description"
                   type="text"
-                  class="input"
-                  placeholder="Contoh: 5-1100"
+                  class="input-pill"
+                  placeholder="Contoh: Pemeliharaan infrastruktur cloud & server"
                   required
                 />
               </div>
-
-              <div class="form-field">
-                <label :for="`line-amt-${idx}`" class="form-label">Plafon Alokasi (IDR)</label>
-                <CurrencyInput
-                  :id="`line-amt-${idx}`"
-                  v-model="line.allocatedAmount"
-                  :min="1000"
-                  placeholder="0"
-                  required
-                />
-              </div>
-            </div>
-
-            <div class="form-field" style="margin-top: 8px">
-              <label :for="`line-desc-${idx}`" class="form-label">Uraian Pos Mata Anggaran</label>
-              <input
-                :id="`line-desc-${idx}`"
-                v-model="line.description"
-                type="text"
-                class="input"
-                placeholder="Contoh: Operasional program unit"
-                required
-              />
             </div>
           </div>
         </div>
 
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" :disabled="isSubmitting" @click="createOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary" :disabled="isSubmitting">
+        <div class="btn-row" style="justify-content: flex-end; margin-top: 10px;">
+          <button type="button" class="pill-btn pill-btn-ghost" :disabled="isSubmitting" @click="createOpen = false">Batal</button>
+          <button type="submit" class="pill-btn pill-btn-primary" :disabled="isSubmitting">
             <span v-if="isSubmitting" class="spinner-sm"></span>
             <span>{{ isSubmitting ? 'Menyimpan Draft...' : 'Simpan Draft Anggaran' }}</span>
           </button>
@@ -935,11 +1147,20 @@ onMounted(loadMasterAndBudgets);
 
     <!-- Modal: Revise Budget -->
     <ModalDialog :open="reviseOpen" title="Revisi Plafon Anggaran Ber-Histori" @close="reviseOpen = false">
-      <form @submit.prevent="submitRevision" style="display: flex; flex-direction: column; gap: 12px">
-        <div class="panel" style="background: rgba(3, 70, 147, 0.04); border-color: rgba(3, 70, 147, 0.15); padding: 12px 14px;">
-          <p style="font-size: 0.88rem; color: var(--text-primary);">
-            Perubahan plafon akan membuat snapshot versi saat ini ke tabel <code>BudgetRevision</code> untuk kepatuhan audit BPKP/Internal, tanpa menghapus riwayat historis.
+      <form @submit.prevent="submitRevision" class="modal-form-wrap">
+        <div class="panel audit-warning-panel">
+          <i class="pi pi-shield text-primary" style="font-size: 1.25rem;"></i>
+          <p style="font-size: 0.86rem; color: var(--text-primary); margin: 0;">
+            Penyesuaian plafon akan menyimpan snapshot versi saat ini ke tabel <code>BudgetRevision</code> untuk kepatuhan audit BPKP/Internal, tanpa menghapus riwayat historis sebelumnya.
           </p>
+        </div>
+
+        <!-- Live Total Comparison -->
+        <div class="live-total-banner">
+          <div class="live-total-left">
+            <span class="live-label">Total Plafon Baru Hasil Revisi</span>
+            <span class="live-value text-emerald font-bold">{{ formatRupiah(reviseTotalAllocated) }}</span>
+          </div>
         </div>
 
         <div class="form-field">
@@ -947,29 +1168,34 @@ onMounted(loadMasterAndBudgets);
           <textarea
             id="rev-reason"
             v-model="reviseReason"
-            class="textarea"
+            class="textarea-pill"
             placeholder="Contoh: Penyesuaian kebutuhan sertifikasi keahlian semester kedua sesuai addendum kontrak klien."
             rows="3"
             required
           ></textarea>
         </div>
 
-        <div v-for="rl in reviseLines" :key="rl.lineId" class="form-field">
-          <label :for="`rev-line-${rl.lineId}`" class="form-label">
-            {{ rl.description }} (Plafon Berjalan: {{ formatRupiah(rl.current) }})
-          </label>
-          <CurrencyInput
-            :id="`rev-line-${rl.lineId}`"
-            v-model="rl.newAllocatedAmount"
-            :min="1000"
-            placeholder="0"
-            required
-          />
+        <div class="revise-lines-list">
+          <div v-for="rl in reviseLines" :key="rl.lineId" class="revise-line-card">
+            <div class="revise-line-header">
+              <span class="font-bold text-sm">{{ rl.description }}</span>
+              <span class="text-muted text-xs">Plafon Berjalan: {{ formatRupiah(rl.current) }}</span>
+            </div>
+            <div class="form-field" style="margin-top: 6px;">
+              <CurrencyInput
+                :id="`rev-line-${rl.lineId}`"
+                v-model="rl.newAllocatedAmount"
+                :min="1000"
+                placeholder="0"
+                required
+              />
+            </div>
+          </div>
         </div>
 
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="reviseOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Simpan Versi Revisi</button>
+        <div class="btn-row" style="justify-content: flex-end; margin-top: 10px;">
+          <button type="button" class="pill-btn pill-btn-ghost" @click="reviseOpen = false">Batal</button>
+          <button type="submit" class="pill-btn pill-btn-primary">Simpan Versi Revisi</button>
         </div>
       </form>
     </ModalDialog>
@@ -1020,261 +1246,819 @@ onMounted(loadMasterAndBudgets);
 </template>
 
 <style scoped>
-/* Top KPI Grid */
-.budget-kpi-grid {
+/* Atmospheric Pastel Gradient Background Canvas (Matches Screenshot Vibe) */
+.feature-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(56, 189, 248, 0.16) 0%, transparent 40%),
+    radial-gradient(circle at 0% 100%, rgba(244, 114, 182, 0.14) 0%, transparent 40%),
+    radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 35%),
+    #edf2f7;
+  padding: 16px 20px 36px;
+  border-radius: 28px;
+  min-height: 100vh;
+}
+
+/* Feature Header Card */
+.feature-header-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: #ffffff;
+  border-radius: 22px;
+  padding: 22px 26px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+}
+
+.header-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 680px;
+}
+
+.breadcrumb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4f8eff;
+  background: #eff6ff;
+  padding: 3px 10px;
+  border-radius: 999px;
+  width: fit-content;
+}
+
+.chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4f8eff;
+}
+
+.feature-main-heading {
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.25;
+}
+
+.feature-sub-heading {
+  font-size: 0.86rem;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.header-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Floating Pill Buttons */
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 16px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  border: none;
+}
+
+.pill-btn-primary {
+  background: #4f8eff;
+  color: #ffffff;
+  box-shadow: 0 8px 22px rgba(79, 142, 255, 0.42);
+}
+
+.pill-btn-primary:hover {
+  background: #3b82f6;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(79, 142, 255, 0.52);
+}
+
+.pill-btn-ghost {
+  background: #f8fafc;
+  color: #1e293b;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03);
+}
+
+.pill-btn-ghost:hover:not(:disabled) {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+/* 4 Pastel Stat Cards (Exact Screenshot Vibe) */
+.pastel-kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  margin-bottom: 20px;
 }
 
-.kpi-card {
+.pastel-stat-card {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 18px 20px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+  gap: 16px;
   transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
-  position: relative;
-  overflow: hidden;
 }
 
-.kpi-card:hover {
+.pastel-stat-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
 }
 
-.kpi-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
+.focal-card {
+  border-color: rgba(56, 189, 248, 0.35);
 }
 
-.kpi-card.kpi-blue {
-  background: linear-gradient(135deg, rgba(3, 70, 147, 0.05) 0%, var(--bg-surface) 100%);
-  border-color: rgba(3, 70, 147, 0.18);
-}
-.kpi-card.kpi-blue::before { background: #034693; }
-
-.kpi-card.kpi-emerald {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.07) 0%, var(--bg-surface) 100%);
-  border-color: rgba(16, 185, 129, 0.22);
-}
-.kpi-card.kpi-emerald::before { background: #10b981; }
-
-.kpi-card.kpi-amber {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.07) 0%, var(--bg-surface) 100%);
-  border-color: rgba(245, 158, 11, 0.22);
-}
-.kpi-card.kpi-amber::before { background: #f59e0b; }
-
-.kpi-card.kpi-violet {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.07) 0%, var(--bg-surface) 100%);
-  border-color: rgba(139, 92, 246, 0.22);
-}
-.kpi-card.kpi-violet::before { background: #8b5cf6; }
-
-.kpi-icon-wrap {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+/* Pastel Icon Boxes (Exact Colors From Screenshot) */
+.pastel-icon-box {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 1.25rem;
   flex-shrink: 0;
 }
 
-.icon-blue { background: #eff6ff; color: #034693; }
-.icon-emerald { background: #ecfdf5; color: #059669; }
-.icon-amber { background: #fffbeb; color: #d97706; }
-.icon-violet { background: #faf5ff; color: #7c3aed; }
+.icon-dollar {
+  font-weight: 800;
+  font-size: 1.35rem;
+}
 
-.kpi-content {
+.box-amber { background: #fef3c7; color: #d97706; }
+.box-cyan { background: #e0f2fe; color: #0284c7; }
+.box-rose { background: #ffe4e6; color: #e11d48; }
+.box-lilac { background: #e0e7ff; color: #4f46e5; }
+
+.stat-meta {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.kpi-label {
-  font-size: 0.77rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.kpi-value {
-  font-size: 1.18rem;
-  font-weight: 700;
+.stat-number {
+  font-size: 1.32rem;
+  font-weight: 800;
+  color: #0f172a;
   letter-spacing: -0.02em;
-  margin-top: 2px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
-.kpi-sub {
+.stat-title {
   font-size: 0.76rem;
-  color: var(--text-secondary);
-  margin-top: 2px;
+  color: #64748b;
+  font-weight: 500;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Search input with icon */
-.search-input-wrap {
-  position: relative;
+.stat-badge-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  margin-top: 6px;
+  width: fit-content;
+}
+
+.badge-amber-sub { background: #fffbeb; color: #b45309; }
+.badge-cyan-sub { background: #ecfdf5; color: #047857; }
+.badge-rose-sub { background: #fff1f2; color: #be123c; }
+.badge-lilac-sub { background: #f5f3ff; color: #6d28d9; }
+
+/* Filter & Search Toolbar (Floating White Card) */
+.toolbar-pill-card {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 12px 18px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toolbar-pill-group {
   display: flex;
   align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.search-icon {
+.filter-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid #f1f5f9;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.filter-pill-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.filter-pill-btn.active {
+  background: #4f8eff;
+  color: #ffffff;
+  border-color: #4f8eff;
+  box-shadow: 0 6px 16px rgba(79, 142, 255, 0.35);
+}
+
+.pill-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.filter-pill-btn.active .pill-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.dot-approved { background: #10b981; }
+.dot-submitted { background: #3b82f6; }
+.dot-draft { background: #94a3b8; }
+.dot-revised { background: #f59e0b; }
+
+.toolbar-search-wrap {
+  display: flex;
+  align-items: center;
+  position: relative;
+  min-width: 260px;
+  flex: 1 1 260px;
+  max-width: 360px;
+}
+
+.search-lens-ico {
   position: absolute;
   left: 12px;
-  color: var(--text-secondary);
+  color: #94a3b8;
   pointer-events: none;
 }
 
-.search-input {
-  padding-left: 36px;
-}
-
-/* Full Width Table Layout */
-.table-container-full {
+.search-pill-input {
   width: 100%;
+  padding: 8px 34px 8px 34px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 0.82rem;
+  color: #0f172a;
+  outline: none;
+  transition: all 140ms ease;
 }
 
-.table-panel {
+.search-pill-input:focus {
+  background: #ffffff;
+  border-color: #4f8eff;
+  box-shadow: 0 0 0 3px rgba(79, 142, 255, 0.15);
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px;
+}
+
+/* Main Data Table Card */
+.main-table-card {
+  background: #ffffff;
+  border-radius: 22px;
+  padding: 22px 24px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   display: flex;
   flex-direction: column;
+  gap: 16px;
 }
 
-.budget-table th {
-  white-space: nowrap;
+.table-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
-.budget-title-cell {
-  color: var(--text-primary);
-  line-height: 1.35;
-  display: block;
+.table-top-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.version-chip {
+.table-card-title {
+  font-size: 1.08rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+}
+
+.table-card-count {
   font-size: 0.72rem;
   font-weight: 700;
-  padding: 1px 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.table-card-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.76rem;
+  color: #64748b;
+}
+
+.legend-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dot-lilac { background: #6366f1; }
+.dot-amber { background: #f59e0b; }
+.dot-emerald { background: #10b981; }
+
+.table-scroll-container {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.aesthetic-data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.aesthetic-data-table th {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fafafa;
+  text-align: left;
+}
+
+.aesthetic-data-table td {
+  padding: 14px 14px;
+  vertical-align: middle;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.table-row-item {
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.table-row-item:hover {
+  background: #f8fafc;
+}
+
+.table-row-item.row-active-item {
+  background: #eff6ff;
+}
+
+.cell-doc-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.doc-code-pill {
+  font-family: monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 2px 7px;
   border-radius: 6px;
-  background: var(--bg-subtle);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
+  background: #f1f5f9;
+  color: #1e293b;
+  border: 1px solid #e2e8f0;
 }
 
-.cell-money {
-  font-size: 0.92rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+.doc-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.cell-sub {
+.unit-badge-pill {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 5px;
+  text-transform: uppercase;
+}
+
+.unit-its { background: #eff6ff; color: #1d4ed8; }
+.unit-mice { background: #fdf4ff; color: #a21caf; }
+.unit-tci { background: #f0fdf4; color: #15803d; }
+.unit-klinik { background: #fff1f2; color: #be123c; }
+.unit-default { background: #f1f5f9; color: #64748b; }
+
+.version-badge-pill {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.cell-title-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.budget-title-link {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.budget-sub-params {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 0.74rem;
+  color: #64748b;
+}
+
+.param-divider {
+  color: #cbd5e1;
+}
+
+.amount-number-bold {
+  font-size: 0.94rem;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.amount-target-sub {
+  font-size: 0.72rem;
+  color: #94a3b8;
   margin-top: 2px;
 }
 
-/* Drawer Detail Sheet */
+.amount-number-emerald {
+  font-size: 0.94rem;
+  font-weight: 800;
+  color: #10b981;
+  font-variant-numeric: tabular-nums;
+}
+
+.amount-percent-emerald {
+  font-size: 0.72rem;
+  color: #059669;
+  font-weight: 600;
+  margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Stacked Absorption Progress Bar */
+.cell-absorption-col {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  max-width: 200px;
+}
+
+.stacked-bar-rail {
+  width: 100%;
+  height: 7px;
+  background: #f1f5f9;
+  border-radius: 999px;
+  overflow: hidden;
+  display: flex;
+}
+
+.rail-fill {
+  height: 100%;
+  transition: width 300ms ease;
+}
+
+.fill-lilac { background: #6366f1; }
+.fill-amber { background: #f59e0b; }
+.fill-emerald { background: #10b981; }
+
+.absorption-text-split {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+}
+
+.action-detail-pill {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #4f8eff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.action-detail-pill:hover {
+  background: #4f8eff;
+  color: #ffffff;
+  border-color: #4f8eff;
+  transform: translateX(2px);
+}
+
+.table-pagination-footer {
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* Slide-over Drawer Detail Sheet */
+.drawer-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-right: 12px;
+}
+
+.drawer-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .drawer-inner-content {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding-bottom: 20px;
+  padding: 10px 4px 30px;
 }
 
-.drawer-title-block {
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border-subtle);
+.drawer-hero-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .drawer-title {
   font-size: 1.35rem;
-  font-weight: 700;
-  color: var(--text-primary);
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
   line-height: 1.3;
+}
+
+.drawer-meta-list {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .drawer-actions-bar {
   display: flex;
   gap: 10px;
-  margin-top: 14px;
   flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
 }
 
+.btn-drawer-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.btn-drawer-primary { background: #4f8eff; color: #ffffff; }
+.btn-drawer-primary:hover { background: #3b82f6; }
+.btn-drawer-success { background: #10b981; color: #ffffff; }
+.btn-drawer-success:hover { background: #059669; }
+.btn-drawer-warn { background: #f59e0b; color: #ffffff; }
+.btn-drawer-warn:hover { background: #d97706; }
+
 .drawer-meter-card {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 18px 20px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 16px 20px;
+}
+
+.meter-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.meter-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+
+.meter-total-stat {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #4f8eff;
 }
 
 .drawer-kpi-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 14px;
+  gap: 12px;
 }
 
 .card-kpi-box {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
 }
 
-.card-kpi-box.focal {
-  border-color: rgba(16, 185, 129, 0.4);
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, var(--bg-surface) 100%);
-}
+.box-amber-subtle { background: #fffbeb; border-color: #fef3c7; }
+.box-rose-subtle { background: #fff1f2; border-color: #ffe4e6; }
+.box-lilac-subtle { background: #f5f3ff; border-color: #ede9fe; }
+.box-cyan-subtle { background: #ecfdf5; border-color: #d1fae5; }
 
 .box-label {
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: #64748b;
 }
 
 .box-value {
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.22rem;
+  font-weight: 800;
   letter-spacing: -0.01em;
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .box-sub {
-  font-size: 0.76rem;
-  color: var(--text-secondary);
+  font-size: 0.74rem;
+  color: #64748b;
   margin-top: 4px;
 }
 
 .drawer-section {
   display: flex;
   flex-direction: column;
+  gap: 10px;
 }
+
+.section-header-custom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.section-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title-wrap h3 {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.line-coa-text {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.cat-chip {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  display: inline-block;
+}
+
+.cat-capex { background: #eff6ff; color: #1e40af; }
+.cat-opex { background: #f0fdf4; color: #166534; }
+.cat-modal { background: #fefce8; color: #854d0e; }
+.cat-pengadaan { background: #faf5ff; color: #6b21a8; }
+.cat-pegawai { background: #fff7ed; color: #9a3412; }
+.cat-pajak { background: #fff1f2; color: #9f1239; }
+.cat-default { background: #f1f5f9; color: #64748b; }
 
 .line-desc-text {
+  font-size: 0.84rem;
   font-weight: 600;
-  font-size: 0.86rem;
-  margin-top: 4px;
-  color: var(--text-primary);
+  color: #0f172a;
+  margin-top: 3px;
 }
 
-/* Mini progress bar inside budget lines */
 .mini-bar-wrap {
-  width: 55px;
-  height: 6px;
-  background: var(--border-subtle);
+  width: 50px;
+  height: 5px;
+  background: #e2e8f0;
   border-radius: 999px;
-  margin: 0 auto 3px;
+  margin: 0 auto 2px;
   overflow: hidden;
 }
 
@@ -1284,7 +2068,13 @@ onMounted(loadMasterAndBudgets);
   transition: width 300ms ease;
 }
 
-/* Timeline Revisions */
+.mini-bar-label {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Timeline Cards */
 .timeline-container {
   display: flex;
   flex-direction: column;
@@ -1293,15 +2083,9 @@ onMounted(loadMasterAndBudgets);
 
 .timeline-card {
   padding: 14px 16px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  position: relative;
-  transition: border-color 140ms ease;
-}
-
-.timeline-card:hover {
-  border-color: var(--border-strong);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
 }
 
 .timeline-header {
@@ -1312,71 +2096,229 @@ onMounted(loadMasterAndBudgets);
   gap: 8px;
 }
 
+.rev-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .rev-badge {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 6px;
   background: #f3e8ff;
-  color: #6b21a8;
-  border: 1px solid #d8b4fe;
+  color: #7c3aed;
+}
+
+.timeline-date {
+  font-size: 0.76rem;
+  color: #64748b;
 }
 
 .rev-author {
-  font-size: 0.78rem;
-  color: var(--text-secondary);
+  font-size: 0.76rem;
+  color: #64748b;
 }
 
 .rev-reason {
-  font-size: 0.88rem;
-  margin-top: 8px;
-  color: var(--text-primary);
+  font-size: 0.84rem;
+  margin: 8px 0;
+  color: #0f172a;
   font-style: italic;
+  line-height: 1.4;
 }
 
 .rev-diff-strip {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
+  font-size: 0.78rem;
+  color: #64748b;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
 }
 
-.diff-arrow {
-  color: var(--text-secondary);
+/* Modal Form Styling */
+.modal-form-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-/* Responsive adjustments */
-@media (max-width: 1200px) {
-  .budget-kpi-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+.live-total-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ecfdf5;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 14px;
+  padding: 12px 16px;
 }
 
-@media (max-width: 768px) {
-  .budget-kpi-grid {
-    grid-template-columns: 1fr;
-  }
-  .drawer-kpi-grid {
-    grid-template-columns: 1fr;
-  }
+.live-total-left {
+  display: flex;
+  flex-direction: column;
 }
 
-/* Modal Error Alert */
+.live-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #047857;
+}
+
+.live-value {
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+}
+
+.live-sub {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.input-pill, .select-pill, .textarea-pill {
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 0.84rem;
+  color: #0f172a;
+  outline: none;
+  transition: all 140ms ease;
+}
+
+.input-pill:focus, .select-pill:focus, .textarea-pill:focus {
+  background: #ffffff;
+  border-color: #4f8eff;
+  box-shadow: 0 0 0 3px rgba(79, 142, 255, 0.15);
+}
+
+.form-section-divider {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.section-title-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-add-line-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid #4f8eff;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.btn-add-line-pill:hover {
+  background: #4f8eff;
+  color: #ffffff;
+}
+
+.lines-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.line-row-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.line-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.line-row-index {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #4f8eff;
+  text-transform: uppercase;
+}
+
+.btn-remove-line {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.btn-remove-line:hover {
+  background: #fef2f2;
+}
+
+.audit-warning-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.revise-lines-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.revise-line-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.revise-line-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .modal-error-alert {
   padding: 10px 14px;
-  border-radius: 10px;
-  background: var(--status-danger-bg);
-  color: var(--status-danger-text);
-  border: 1px solid var(--status-danger-border);
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
   font-size: 0.86rem;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* Animated Success Checkmark Modal */
+/* Success Modal */
 .success-overlay {
   position: fixed;
   inset: 0;
@@ -1384,34 +2326,20 @@ onMounted(loadMasterAndBudgets);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.75);
+  background: rgba(15, 23, 42, 0.65);
   backdrop-filter: blur(8px);
   padding: 20px;
-  animation: fadeIn 0.2s ease-out;
 }
 
 .success-card {
-  background: var(--bg-surface);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: #ffffff;
   border-radius: 24px;
   padding: 36px 32px;
   width: 100%;
   max-width: 440px;
   text-align: center;
   position: relative;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 40px rgba(16, 185, 129, 0.15);
-  animation: modalPopIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes modalPopIn {
-  from {
-    opacity: 0;
-    transform: scale(0.85) translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
 }
 
 .success-close-btn {
@@ -1421,83 +2349,37 @@ onMounted(loadMasterAndBudgets);
   background: transparent;
   border: none;
   font-size: 1.5rem;
-  color: var(--text-secondary);
+  color: #94a3b8;
   cursor: pointer;
-  line-height: 1;
-  padding: 4px 8px;
-  border-radius: 8px;
-  transition: all 140ms ease;
-}
-
-.success-close-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
 }
 
 .checkmark-animation-wrap {
-  width: 80px;
-  height: 80px;
-  margin: 0 auto 20px;
-  position: relative;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 18px;
 }
 
 .checkmark-svg {
-  width: 80px;
-  height: 80px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
-  display: block;
   stroke-width: 3.5;
   stroke: #10b981;
-  stroke-miterlimit: 10;
-  animation: scaleBounce 0.4s ease-in-out 0.85s both;
 }
 
 .checkmark-circle {
-  stroke-dasharray: 166;
-  stroke-dashoffset: 166;
-  stroke-width: 3.5;
-  stroke-miterlimit: 10;
   stroke: #10b981;
-  fill: rgba(16, 185, 129, 0.12);
-  animation: strokeCircle 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+  fill: #ecfdf5;
 }
 
 .checkmark-check {
-  transform-origin: 50% 50%;
-  stroke-dasharray: 48;
-  stroke-dashoffset: 48;
-  stroke-width: 4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
   stroke: #10b981;
-  animation: strokeCheck 0.35s cubic-bezier(0.65, 0, 0.45, 1) 0.5s forwards;
-}
-
-@keyframes strokeCircle {
-  100% {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes strokeCheck {
-  100% {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes scaleBounce {
-  0%, 100% {
-    transform: none;
-  }
-  50% {
-    transform: scale3d(1.12, 1.12, 1);
-  }
 }
 
 .success-title {
-  font-size: 1.35rem;
+  font-size: 1.3rem;
   font-weight: 800;
-  color: var(--text-primary);
+  color: #0f172a;
   margin: 0 0 8px;
 }
 
@@ -1511,13 +2393,12 @@ onMounted(loadMasterAndBudgets);
 
 .badge-code {
   font-family: monospace;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   font-weight: 700;
   padding: 4px 12px;
   border-radius: 8px;
-  background: var(--bg-hover);
-  color: var(--primary);
-  border: 1px solid var(--border-subtle);
+  background: #f1f5f9;
+  color: #4f8eff;
 }
 
 .badge-status {
@@ -1525,14 +2406,13 @@ onMounted(loadMasterAndBudgets);
   font-weight: 800;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(16, 185, 129, 0.15);
+  background: #ecfdf5;
   color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
 .success-details-box {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-subtle);
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   border-radius: 14px;
   padding: 16px;
   display: flex;
@@ -1547,16 +2427,15 @@ onMounted(loadMasterAndBudgets);
   justify-content: space-between;
   align-items: center;
   font-size: 0.86rem;
-  color: var(--text-secondary);
+  color: #64748b;
 }
 
 .detail-row strong {
-  color: var(--text-primary);
+  color: #0f172a;
 }
 
 .success-action-row {
   display: flex;
-  gap: 10px;
 }
 
 .btn-success-ack {
@@ -1564,10 +2443,33 @@ onMounted(loadMasterAndBudgets);
   padding: 12px;
   font-weight: 700;
   font-size: 0.92rem;
-  border-radius: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+  border-radius: 14px;
+  background: #4f8eff;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .pastel-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .pastel-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+  .drawer-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+  .feature-header-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .header-right-actions {
+    align-self: flex-start;
+  }
 }
 </style>

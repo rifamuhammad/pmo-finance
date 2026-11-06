@@ -56,6 +56,8 @@ export function getStatusVisual(status: string | null | undefined): StatusVisual
     case 'COMPLETE':
     case 'DELIVERED':
     case 'VERIFIED':
+    case 'TAX_VERIFIED':
+    case 'DISBURSED':
     case 'ACTIVE':
     case 'FINALIZED':
       return { label: s, symbol: 'OK', tone: 'success' };

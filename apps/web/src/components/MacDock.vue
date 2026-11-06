@@ -102,7 +102,7 @@ const dockItems = computed<DockItem[]>(() => [
   },
   {
     id: 'revenue',
-    name: 'Pendapatan & Kasir',
+    name: 'Penagihan & Faktur',
     route: '/revenue',
     permission: 'revenue:view',
     gradient: 'linear-gradient(135deg, #ea580c, #9a3412)',
@@ -123,6 +123,34 @@ const dockItems = computed<DockItem[]>(() => [
     permission: 'accounting:view',
     gradient: 'linear-gradient(135deg, #4f46e5, #3730a3)',
     icon: 'accounting',
+  },
+  {
+    id: 'petty-cash',
+    name: 'Uang Persediaan & SPJ',
+    route: '/petty-cash',
+    permission: 'procurement:view',
+    gradient: 'linear-gradient(135deg, #7c3aed, #5b21b6)',
+    icon: 'petty-cash',
+    badge: 'GUP',
+    badgeColor: '#0ea5e9',
+  },
+  {
+    id: 'assets',
+    name: 'Inventaris & Aset PMO',
+    route: '/assets',
+    permission: 'accounting:view',
+    gradient: 'linear-gradient(135deg, #0284c7, #0369a1)',
+    icon: 'assets',
+    badge: 'PBI UT',
+    badgeColor: '#f59e0b',
+  },
+  {
+    id: 'hris',
+    name: 'SDM & Payroll PMO',
+    route: '/hris',
+    permission: 'admin:view',
+    gradient: 'linear-gradient(135deg, #059669, #047857)',
+    icon: 'hris',
   },
   {
     id: 'reports',
@@ -338,6 +366,28 @@ function handleItemClick(item: DockItem) {
               <path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path>
               <path d="M7 21h10"></path>
               <path d="M12 3v18"></path>
+            </svg>
+
+            <!-- 8b. Petty Cash & Uang Persediaan -->
+            <svg v-else-if="item.icon === 'petty-cash'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="9" y1="15" x2="15" y2="15"></line>
+              <line x1="12" y1="12" x2="12" y2="18"></line>
+            </svg>
+
+            <!-- 8c. Assets PMO & PBI UT -->
+            <svg v-else-if="item.icon === 'assets'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+              <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+            </svg>
+
+            <!-- 8d. HRIS & SDM PMO -->
+            <svg v-else-if="item.icon === 'hris'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
             </svg>
 
             <!-- 9. Reports -->

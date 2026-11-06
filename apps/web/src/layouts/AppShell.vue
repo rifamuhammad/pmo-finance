@@ -8,6 +8,7 @@ import logoPmoEmblem from '../assets/logo-pmo-emblem.png';
 import AiAssistantWidget from '../components/AiAssistantWidget.vue';
 import AppLauncherModal from '../components/AppLauncherModal.vue';
 import MacDock from '../components/MacDock.vue';
+import OmnisearchModal from '../components/OmnisearchModal.vue';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -45,6 +46,15 @@ const currentModuleContext = computed(() => {
   if (path.startsWith('/accounting')) {
     return { section: 'Finansial', title: 'Akuntansi & Jurnal Umum' };
   }
+  if (path.startsWith('/petty-cash') || path.startsWith('/tax-submission') || path.startsWith('/gup')) {
+    return { section: 'Perbendaharaan', title: 'Uang Persediaan & SPJ (GUP/TUP)' };
+  }
+  if (path.startsWith('/assets') || path.startsWith('/inventaris')) {
+    return { section: 'Logistik', title: 'Inventaris & Aset PMO (Milik & PBI UT)' };
+  }
+  if (path.startsWith('/hris') || path.startsWith('/payroll') || path.startsWith('/sdm')) {
+    return { section: 'Kepegawaian', title: 'Database SDM, Presensi & Payroll' };
+  }
   if (path.startsWith('/reports')) {
     return { section: 'Laporan', title: 'Laporan & Strategis' };
   }
@@ -62,6 +72,7 @@ const notifDrawerOpen = ref(false);
 const profileMenuOpen = ref(false);
 const aiAssistantOpen = ref(false);
 const appLauncherOpen = ref(false);
+const unitDropdownOpen = ref(false);
 const notifications = ref<any[]>([]);
 const businessUnits = ref<any[]>([]);
 
@@ -82,6 +93,7 @@ watch(() => route.path, () => {
   mobileNavOpen.value = false;
   notifDrawerOpen.value = false;
   profileMenuOpen.value = false;
+  unitDropdownOpen.value = false;
 });
 
 // Prevent body scroll when mobile drawer is open
@@ -91,9 +103,8 @@ watch(mobileNavOpen, (isOpen) => {
   }
 });
 
-// Fast Command Palette / Quick Search (100% Real Navigation - Zero AI Slop)
+// Fast Command Palette / Omnisearch Modal
 const cmdPaletteOpen = ref(false);
-const searchQuery = ref('');
 
 interface NavItem {
   id: string;
@@ -187,51 +198,10 @@ function isItemActive(item: NavItem): boolean {
   return route.path === item.to;
 }
 
-const quickActions = [
-  { title: 'Menu Aplikasi ERP (Home Launchpad)', category: 'Navigasi', route: '/', shortcut: 'G M' },
-  { title: 'Dashboard Ringkasan Eksekutif', category: 'Navigasi', route: '/dashboard', shortcut: 'G D' },
-  { title: 'AI Assistant Copilot (Analisis Cerdas ERP)', category: 'Asisten', route: '#ai', action: 'ai', shortcut: 'G Q' },
-  { title: 'Expenses & Reimbursement (Klaim Staf)', category: 'Beban', route: '/procurement?tab=expenses', shortcut: 'G E' },
-  { title: 'Aplikasi ERP (Launcher Modul Odoo)', category: 'Navigasi', route: '#apps', action: 'apps', shortcut: 'G L' },
-  { title: 'Dashboard Ringkasan Eksekutif', category: 'Navigasi', route: '/', shortcut: 'G D' },
-  { title: 'Kasir & Point of Sales (POS)', category: 'Kasir & Kas', route: '/revenue', shortcut: 'G P' },
-  { title: 'Sales Order & Faktur Penjualan', category: 'Pendapatan', route: '/revenue', shortcut: 'G S' },
-  { title: 'Pengadaan, Quotation 3 Vendor & PO', category: 'Pengadaan', route: '/procurement', shortcut: 'G B' },
-  { title: 'Perencanaan Plafon & Revisi Anggaran', category: 'Anggaran', route: '/budgets', shortcut: 'G A' },
-  { title: 'Bagan Akun (CoA) & Jurnal Umum', category: 'Akuntansi', route: '/accounting', shortcut: 'G J' },
-  { title: 'Rekonsiliasi Mutasi Rekening Koran Bank', category: 'Perbankan', route: '/reconciliation', shortcut: 'G R' },
-  { title: 'Laporan Keuangan & Evaluasi Strategis', category: 'Laporan', route: '/reports', shortcut: 'G L' },
-  { title: 'Kotak Masuk Persetujuan Berjenjang', category: 'Otorisasi', route: '/approvals', shortcut: 'G O' },
-  { title: 'Manajemen Pengguna & Audit Trail', category: 'Sistem', route: '/admin', shortcut: 'G U' },
-];
-
-const filteredActions = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return quickActions;
-  return quickActions.filter(
-    (a) => a.title.toLowerCase().includes(q) || a.category.toLowerCase().includes(q)
-  );
-});
-
-function jumpToAction(act: (typeof quickActions)[0]) {
-  cmdPaletteOpen.value = false;
-  searchQuery.value = '';
-  if (act.action === 'ai') {
-    aiAssistantOpen.value = true;
-  } else if (act.action === 'apps') {
-    appLauncherOpen.value = true;
-  } else if (act.route) {
-    router.push(act.route);
-  }
-}
-
 function handleKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
     cmdPaletteOpen.value = !cmdPaletteOpen.value;
-    if (cmdPaletteOpen.value) {
-      searchQuery.value = '';
-    }
   } else if (e.key === 'Escape') {
     if (profileMenuOpen.value) {
       profileMenuOpen.value = false;
@@ -247,6 +217,22 @@ function handleClickOutside(e: MouseEvent) {
   if (!target.closest('.nav-user-profile-wrap')) {
     profileMenuOpen.value = false;
   }
+  if (!target.closest('.custom-unit-wrap')) {
+    unitDropdownOpen.value = false;
+  }
+}
+
+const selectedUnitDisplayName = computed(() => {
+  if (auth.selectedBusinessUnitId) {
+    const found = businessUnits.value.find((u) => u.id === auth.selectedBusinessUnitId);
+    return found ? found.name || found.code : 'PMO UTama (Pusat)';
+  }
+  return 'PMO UTama (Pusat)';
+});
+
+function selectUnit(unitId: string) {
+  auth.selectedBusinessUnitId = unitId;
+  unitDropdownOpen.value = false;
 }
 
 const currentBusinessUnitLabel = computed(() => {
@@ -268,6 +254,11 @@ const userInitials = computed(() => {
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() || '')
     .join('');
+});
+
+const userFirstName = computed(() => {
+  const fullName = auth.user?.fullName || 'Pengguna PMO';
+  return fullName.split(' ')[0] || fullName;
 });
 
 async function loadMasterContext() {
@@ -322,71 +313,147 @@ onUnmounted(() => {
   <div class="poital-shell" :class="{ 'is-odoo-launcher': isHomeLauncher }">
     <a href="#main-workspace" class="skip-link">Lewati ke Konten Utama</a>
 
-    <!-- Top Executive Header: 100% Full-Width, Persistent, Deep Navy across ALL Pages -->
+    <!-- Top Modern Adaptive Glass Navbar (Linear / Stripe Style) -->
     <header class="top-header" :class="{ 'is-launcher-header': isHomeLauncher }">
       <div class="header-left-cluster">
-        <!-- Brand Identifier saat di Home Launcher Screen (Clean, Zero Text Redundancy) -->
+        <!-- Mobile Sidebar Hamburger Toggle (< 900px) -->
+        <button
+          type="button"
+          class="mobile-menu-toggle-btn"
+          aria-label="Buka Menu Navigasi"
+          @click="mobileNavOpen = true"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <!-- Brand Identifier saat di Home Launcher Screen -->
         <div v-if="isHomeLauncher" class="nav-brand-group">
           <img :src="logoPmoEmblem" alt="PMO UTama" class="nav-brand-logo" />
           <span class="nav-brand-text">PMO UTama</span>
+          <span class="nav-brand-pill desktop-only">FINANCE</span>
         </div>
 
         <!-- Dynamic Breadcrumb Navigation saat di dalam Modul Kerja -->
         <nav v-else class="nav-breadcrumb-trail" aria-label="Breadcrumb Navigasi">
           <router-link to="/" class="bc-crumb-link" title="Kembali ke Menu Aplikasi">
             <img :src="logoPmoEmblem" alt="PMO UTama" class="bc-crumb-logo" />
-            <span class="bc-crumb-text">PMO UTama</span>
+            <span class="bc-crumb-text hide-on-mobile">PMO UTama</span>
           </router-link>
-          <span class="bc-sep">/</span>
-          <span class="bc-section">{{ currentModuleContext.section }}</span>
-          <span v-if="currentModuleContext.title !== currentModuleContext.section" class="bc-sep">/</span>
-          <span v-if="currentModuleContext.title !== currentModuleContext.section" class="bc-title">{{ currentModuleContext.title }}</span>
+          <span class="bc-sep hide-on-mobile">/</span>
+          <span class="bc-section hide-on-tablet">{{ currentModuleContext.section }}</span>
+          <span v-if="currentModuleContext.title !== currentModuleContext.section" class="bc-sep hide-on-tablet">/</span>
+          <span class="bc-title">{{ currentModuleContext.title }}</span>
         </nav>
       </div>
 
-      <!-- Center Global Search / Fast Command Palette (Hanya tampil di dalam modul kerja) -->
-      <div v-if="!isHomeLauncher" class="header-center-cluster">
+      <!-- Center Global Search (Desktop >= 1024px) -->
+      <div v-if="!isHomeLauncher" class="header-center-cluster desktop-search">
         <div
           class="nav-search-pill"
           role="button"
           tabindex="0"
-          title="Cari modul, transaksi, atau dokumen (⌘K)"
+          title="Cari transaksi, modul, atau tekan ⌘K"
           @click="cmdPaletteOpen = true"
           @keydown.enter="cmdPaletteOpen = true"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="nav-search-svg">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="nav-search-svg">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <span class="nav-search-text">Cari transaksi atau tekan ⌘K...</span>
+          <span class="nav-search-text">Cari aset, SPJ, PO, staf (⌘K)...</span>
           <kbd class="nav-search-kbd">⌘K</kbd>
         </div>
       </div>
 
       <!-- Right Corporate Utilities -->
       <div class="header-right-actions">
-        <!-- Multi-Unit Selector (Hanya tampil di dalam modul kerja, disembunyikan di Menu Aplikasi) -->
-        <div v-if="!isHomeLauncher && !auth.user?.businessUnitId && businessUnits.length > 0" class="clean-unit-wrap">
-          <select v-model="auth.selectedBusinessUnitId" class="clean-unit-select" title="Pilih Unit Bisnis">
-            <option value="">PMO UTama (Pusat)</option>
-            <option v-for="u in businessUnits" :key="u.id" :value="u.id">
-              {{ u.name || u.code }}
-            </option>
-          </select>
-        </div>
-
-        <!-- AI Assistant Quick Trigger (Hanya tampil di dalam modul kerja) -->
+        <!-- Compact Search Icon Trigger on Mobile/Tablet (< 1024px) -->
         <button
           v-if="!isHomeLauncher"
           type="button"
-          class="nav-icon-circle-btn"
-          title="AI Financial Assistant"
-          aria-label="AI Assistant"
+          class="nav-icon-circle-btn mobile-search-btn"
+          title="Cari Modul &amp; Transaksi (⌘K)"
+          aria-label="Cari"
+          @click="cmdPaletteOpen = true"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </button>
+
+        <!-- Custom Business Unit Selector -->
+        <div v-if="!isHomeLauncher && !auth.user?.businessUnitId && businessUnits.length > 0" class="custom-unit-wrap">
+          <button
+            type="button"
+            class="custom-unit-btn"
+            :class="{ 'is-active': unitDropdownOpen }"
+            title="Ganti Lingkup Unit Bisnis"
+            @click.stop="unitDropdownOpen = !unitDropdownOpen; profileMenuOpen = false"
+          >
+            <span class="unit-icon">🏢</span>
+            <span class="unit-text hide-on-tablet">{{ selectedUnitDisplayName }}</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="unit-chevron">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <!-- Custom Unit Dropdown Popover -->
+          <transition name="dropdown-slide">
+            <div v-if="unitDropdownOpen" class="custom-unit-dropdown" @click.stop>
+              <div class="unit-dropdown-header">
+                <strong>LINGKUP UNIT BISNIS</strong>
+                <span>Filter transaksi data per unit kerja</span>
+              </div>
+              <div class="unit-dropdown-list">
+                <button
+                  type="button"
+                  class="unit-option-btn"
+                  :class="{ 'is-selected': !auth.selectedBusinessUnitId }"
+                  @click="selectUnit('')"
+                >
+                  <span class="unit-opt-icon">🏛️</span>
+                  <div class="unit-opt-text">
+                    <strong>PMO UTama (Pusat)</strong>
+                    <span>Konsolidasi seluruh unit</span>
+                  </div>
+                  <span v-if="!auth.selectedBusinessUnitId" class="unit-check">✓</span>
+                </button>
+                <button
+                  v-for="u in businessUnits"
+                  :key="u.id"
+                  type="button"
+                  class="unit-option-btn"
+                  :class="{ 'is-selected': auth.selectedBusinessUnitId === u.id }"
+                  @click="selectUnit(u.id)"
+                >
+                  <span class="unit-opt-icon">🏢</span>
+                  <div class="unit-opt-text">
+                    <strong>{{ u.name || u.code }}</strong>
+                    <span>Kode: {{ u.code }}</span>
+                  </div>
+                  <span v-if="auth.selectedBusinessUnitId === u.id" class="unit-check">✓</span>
+                </button>
+              </div>
+            </div>
+          </transition>
+        </div>
+
+        <!-- AI Assistant Copilot Trigger with Sparkle Badge (Visible on screens >= 1200px) -->
+        <button
+          v-if="!isHomeLauncher"
+          type="button"
+          class="nav-ai-pill-btn hide-on-tablet"
+          title="Buka AI Financial Copilot (Qwen)"
+          aria-label="AI Copilot"
           @click="aiAssistantOpen = true"
         >
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
-          </svg>
+          <span class="ai-sparkle-icon">✨</span>
+          <span class="ai-btn-text">Qwen AI</span>
         </button>
 
         <!-- Notification Bell -->
@@ -395,7 +462,7 @@ onUnmounted(() => {
           class="nav-icon-circle-btn"
           :class="{ active: notifDrawerOpen }"
           aria-label="Pusat Notifikasi"
-          title="Pusat Notifikasi & Peringatan Keuangan"
+          title="Pusat Notifikasi &amp; Peringatan Keuangan"
           @click="openNotifications"
         >
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -411,20 +478,19 @@ onUnmounted(() => {
             type="button"
             class="nav-user-capsule"
             :class="{ 'is-active': profileMenuOpen }"
-            aria-label="Menu Profil & Pengaturan Akun"
+            aria-label="Menu Profil &amp; Pengaturan Akun"
             aria-haspopup="true"
             :aria-expanded="profileMenuOpen"
-            @click.stop="profileMenuOpen = !profileMenuOpen"
+            @click.stop="profileMenuOpen = !profileMenuOpen; unitDropdownOpen = false"
           >
             <div class="user-capsule-avatar">
               <span>{{ userInitials }}</span>
               <span class="user-capsule-status"></span>
             </div>
-            <div class="user-capsule-text">
-              <span class="user-capsule-name">{{ auth.user?.fullName || 'Pengguna PMO' }}</span>
-              <span class="user-capsule-role">{{ auth.effectiveRoleName }}</span>
+            <div class="user-capsule-text hide-on-tablet">
+              <span class="user-capsule-name">{{ userFirstName }}</span>
             </div>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="user-capsule-chevron">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="user-capsule-chevron hide-on-tablet">
               <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
           </button>
@@ -535,39 +601,13 @@ onUnmounted(() => {
         </ul>
       </div>
 
-      <!-- Command Palette / Quick Document Finder Modal (0% AI Slop) -->
-      <div v-if="cmdPaletteOpen" class="cmd-palette-overlay" @click.self="cmdPaletteOpen = false">
-        <div class="cmd-palette-box" role="dialog" aria-modal="true" aria-label="Quick Navigation">
-          <div class="cmd-palette-header">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="cmd-search-icon">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-            <input
-              v-model="searchQuery"
-              type="text"
-              class="cmd-palette-input"
-              placeholder="Cari modul, transaksi, atau dokumen ERP..."
-              autofocus
-            />
-            <button type="button" class="btn btn-sm btn-ghost" @click="cmdPaletteOpen = false">Esc</button>
-          </div>
-
-          <div class="cmd-palette-body">
-            <div class="cmd-section-title">Pintasan Cepat</div>
-            <button
-              v-for="act in filteredActions"
-              :key="act.title"
-              type="button"
-              class="cmd-item"
-              @click="jumpToAction(act)"
-            >
-              <span>{{ act.title }}</span>
-              <span class="cmd-item-shortcut">{{ act.category }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <!-- Omnisearch Spotlight Modal (Real Assets, Documents, HRIS, and ERP Navigation) -->
+      <OmnisearchModal
+        :is-open="cmdPaletteOpen"
+        @close="cmdPaletteOpen = false"
+        @open-ai="aiAssistantOpen = true"
+        @open-launcher="appLauncherOpen = true"
+      />
 
       <!-- Main Workspace Views -->
       <main id="main-workspace" class="content-canvas">
@@ -646,13 +686,69 @@ onUnmounted(() => {
 }
 
 .poital-shell.is-odoo-launcher .top-header {
-  background: rgba(8, 20, 38, 0.90);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(8, 20, 38, 0.55);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0;
   padding: 10px 24px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme='dark'] .poital-shell.is-odoo-launcher .top-header {
+  background: rgba(6, 16, 32, 0.7);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.poital-shell.is-odoo-launcher .nav-brand-text {
+  color: #ffffff !important;
+}
+
+.poital-shell.is-odoo-launcher .nav-brand-pill {
+  background: rgba(3, 70, 147, 0.5) !important;
+  color: #93c5fd !important;
+  border: 1px solid rgba(147, 197, 253, 0.35) !important;
+}
+
+.poital-shell.is-odoo-launcher .nav-icon-circle-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #e2e8f0 !important;
+  box-shadow: none !important;
+}
+
+.poital-shell.is-odoo-launcher .nav-icon-circle-btn:hover {
+  background: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
+}
+
+.poital-shell.is-odoo-launcher .nav-user-capsule {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.poital-shell.is-odoo-launcher .nav-user-capsule:hover,
+.poital-shell.is-odoo-launcher .nav-user-capsule.is-active {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+.poital-shell.is-odoo-launcher .user-capsule-name {
+  color: #ffffff !important;
+}
+
+.poital-shell.is-odoo-launcher .user-capsule-chevron {
+  color: rgba(255, 255, 255, 0.65) !important;
+}
+
+.poital-shell.is-odoo-launcher .mobile-menu-toggle-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
 }
 
 .poital-shell.is-odoo-launcher .mobile-toggle-btn {
@@ -1128,23 +1224,30 @@ onUnmounted(() => {
   padding: 24px 32px 96px;
 }
 
-/* Top Search & Profile Bar (Sticky with Canvas Background) */
+/* Top Modern Adaptive Glass Navbar (Linear / Stripe Style) */
 .top-header {
   position: sticky;
   top: 0;
   z-index: 50;
   width: 100%;
-  background: rgba(8, 20, 38, 0.95);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--border-subtle);
   padding: 10px 24px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03), 0 4px 16px -2px rgba(15, 23, 42, 0.02);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 16px;
   box-sizing: border-box;
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+
+[data-theme='dark'] .top-header {
+  background: rgba(11, 17, 32, 0.86);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
 }
 
 .header-left-cluster {
@@ -1201,7 +1304,7 @@ onUnmounted(() => {
 .nav-brand-text {
   font-weight: 800;
   font-size: 1.05rem;
-  color: #ffffff !important;
+  color: var(--text-primary);
   letter-spacing: -0.02em;
 }
 
@@ -1850,51 +1953,104 @@ onUnmounted(() => {
     display: flex;
   }
 
-  .search-container {
+}
+
+/* Responsive Navbar & Shell Reflow */
+@media (max-width: 1279px) {
+  .desktop-xl-only {
+    display: none !important;
+  }
+  .nav-search-pill {
+    width: 200px;
+  }
+}
+
+@media (max-width: 1099px) {
+  .hide-on-tablet {
+    display: none !important;
+  }
+  .custom-unit-btn {
+    padding: 6px 8px;
+  }
+  .nav-user-capsule {
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+  }
+  .nav-user-capsule:hover,
+  .nav-user-capsule.is-active {
+    background: transparent;
+    border: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .desktop-search {
+    display: none !important;
+  }
+  .header-center-cluster {
+    display: none !important;
+  }
+  .mobile-search-btn {
+    display: flex !important;
+  }
+  .top-header {
+    padding: 8px 18px;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 899px) {
+  .mobile-menu-toggle-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .hide-on-mobile {
+    display: none !important;
+  }
+  .top-header {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .header-left-cluster {
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .header-right-actions {
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .bc-title {
     max-width: 170px;
-  }
-
-  .search-placeholder {
-    display: none;
-  }
-
-  .search-kbd {
-    display: none;
-  }
-
-  .search-pill {
-    padding: 8px 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
 @media (max-width: 600px) {
   .top-header {
-    gap: 8px;
+    padding: 8px 10px;
+    gap: 6px;
   }
-
-  .header-left-cluster {
-    gap: 8px;
+  .bc-title {
+    max-width: 130px;
+    font-size: 0.8rem;
   }
-
-  .mobile-brand-name {
-    display: none;
-  }
-
-  .search-container {
-    display: none;
-  }
-
-  .unit-dropdown-wrap .unit-select {
-    max-width: 110px;
-    font-size: 0.74rem;
-    padding: 5px 8px;
-  }
-
-  .icon-circle-btn,
-  .user-profile-circle,
-  .mobile-toggle-btn {
-    width: 36px;
-    height: 36px;
+  .nav-icon-circle-btn {
+    width: 34px;
+    height: 34px;
   }
 }
 
@@ -1903,7 +2059,19 @@ onUnmounted(() => {
   to { opacity: 1; }
 }
 
-/* Unified Executive Deep Navy Header Elements */
+/* Modern Adaptive Glass Header Elements (Linear / Stripe Style) */
+.nav-brand-pill {
+  font-size: 0.62rem;
+  font-weight: 800;
+  background: var(--primary-soft);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(3, 70, 147, 0.2);
+  margin-left: 6px;
+  letter-spacing: 0.04em;
+}
+
 .nav-icon-circle-btn {
   position: relative;
   display: flex;
@@ -1912,54 +2080,59 @@ onUnmounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
   cursor: pointer;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
   transition: all 140ms ease;
   flex-shrink: 0;
 }
 
 .nav-icon-circle-btn:hover,
 .nav-icon-circle-btn.active {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: #f59e0b;
-  color: #f59e0b;
-}
-
-.nav-launcher-btn.active {
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.2);
-  border-color: #f59e0b;
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+  color: var(--primary);
+  transform: translateY(-1px);
 }
 
 .nav-search-pill {
-  width: 100%;
+  width: 260px;
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 9999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
   padding: 6px 14px;
   cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
   transition: all 140ms ease;
 }
 
+.mobile-search-btn {
+  display: none;
+}
+
+.mobile-menu-toggle-btn {
+  display: none;
+}
+
 .nav-search-pill:hover {
-  border-color: rgba(245, 158, 11, 0.5);
-  background: rgba(255, 255, 255, 0.13);
+  border-color: var(--primary);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 3px rgba(3, 70, 147, 0.08);
 }
 
 .nav-search-svg {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
 .nav-search-text {
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1969,42 +2142,181 @@ onUnmounted(() => {
 .nav-search-kbd {
   font-size: 0.68rem;
   font-weight: 700;
-  background: rgba(255, 255, 255, 0.14);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
   padding: 1px 6px;
   border-radius: 4px;
   flex-shrink: 0;
 }
 
-.clean-unit-wrap .clean-unit-select {
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff !important;
+/* Custom Business Unit Selector */
+.custom-unit-wrap {
+  position: relative;
+}
+
+.custom-unit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
   font-size: 0.8rem;
-  font-weight: 550;
+  font-weight: 600;
   cursor: pointer;
-  outline: none;
   transition: all 140ms ease;
-  max-width: 185px;
-  text-overflow: ellipsis;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  max-width: 190px;
+}
+
+.custom-unit-btn:hover,
+.custom-unit-btn.is-active {
+  border-color: var(--border-strong);
+  background: var(--bg-subtle);
+}
+
+.unit-icon {
+  font-size: 0.88rem;
+  flex-shrink: 0;
+}
+
+.unit-text {
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
 }
 
-.clean-unit-wrap .clean-unit-select:hover,
-.clean-unit-wrap .clean-unit-select:focus {
+.unit-chevron {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: transform 140ms ease;
+}
+
+.custom-unit-btn.is-active .unit-chevron {
+  transform: rotate(180deg);
+}
+
+.custom-unit-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 32px -4px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.04);
+  padding: 8px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.unit-dropdown-header {
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unit-dropdown-header strong {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.unit-dropdown-header span {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.unit-dropdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unit-option-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: all 120ms ease;
+  width: 100%;
+}
+
+.unit-option-btn:hover {
+  background: var(--bg-subtle);
+}
+
+.unit-option-btn.is-selected {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.unit-opt-icon {
+  font-size: 1rem;
+}
+
+.unit-opt-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.unit-opt-text strong {
+  font-size: 0.8rem;
+  color: inherit;
+}
+
+.unit-opt-text span {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.unit-check {
+  font-weight: 700;
+  color: var(--primary);
+}
+
+/* AI Copilot Badge Button */
+.nav-ai-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(3, 70, 147, 0.08));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #b45309;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.nav-ai-pill-btn:hover {
   border-color: #f59e0b;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(245, 158, 11, 0.2);
+  transform: translateY(-1px);
 }
 
-.clean-unit-wrap .clean-unit-select option {
-  background: #0b1a30;
-  color: #ffffff;
+.ai-sparkle-icon {
+  font-size: 0.85rem;
 }
 
+/* Breadcrumb Trail */
 .nav-breadcrumb-trail {
   display: flex;
   align-items: center;
@@ -2018,8 +2330,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   text-decoration: none;
-  color: #ffffff;
-  font-weight: 700;
+  color: var(--text-primary);
+  font-weight: 750;
   letter-spacing: -0.01em;
   transition: opacity 140ms ease;
 }
@@ -2035,44 +2347,49 @@ onUnmounted(() => {
 }
 
 .bc-crumb-text {
-  color: #ffffff;
+  color: var(--text-primary);
   font-weight: 750;
   font-size: 0.88rem;
 }
 
 .bc-sep {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-secondary);
+  opacity: 0.45;
   font-size: 0.8rem;
 }
 
 .bc-section {
-  color: rgba(255, 255, 255, 0.65);
-  font-weight: 500;
+  color: var(--text-secondary);
+  font-weight: 550;
+  font-size: 0.84rem;
 }
 
 .bc-title {
-  color: #f59e0b;
-  font-weight: 650;
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 0.84rem;
 }
 
+/* User Capsule */
 .nav-user-capsule {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 3px 12px 3px 3px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   cursor: pointer;
   transition: all 140ms ease;
   flex-shrink: 0;
   outline: none;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .nav-user-capsule:hover,
 .nav-user-capsule.is-active {
-  border-color: #f59e0b;
-  background: rgba(255, 255, 255, 0.14);
+  border-color: var(--primary);
+  background: var(--bg-subtle);
 }
 
 .user-capsule-avatar {
@@ -2098,7 +2415,7 @@ onUnmounted(() => {
   height: 8px;
   border-radius: 50%;
   background: #10b981;
-  border: 1.5px solid #081426;
+  border: 1.5px solid var(--bg-surface);
 }
 
 .user-capsule-text {
@@ -2111,17 +2428,17 @@ onUnmounted(() => {
 .user-capsule-name {
   font-size: 0.78rem;
   font-weight: 650;
-  color: #ffffff;
+  color: var(--text-primary);
 }
 
 .user-capsule-role {
   font-size: 0.66rem;
-  color: #f59e0b;
+  color: var(--primary);
   font-weight: 600;
 }
 
 .user-capsule-chevron {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-secondary);
   margin-left: 2px;
 }
 

@@ -47,7 +47,7 @@ async function loadApprovals() {
     const params = new URLSearchParams();
     if (statusFilter.value) params.set('status', statusFilter.value);
     if (moduleFilter.value) params.set('module', moduleFilter.value);
-    params.set('scope', scopeFilter.value === 'assigned' ? 'assigned' : 'my_requests');
+    params.set('scope', scopeFilter.value === 'assigned' ? 'assigned' : (isUnitManager.value ? 'my_requests' : 'all'));
     const res = await apiFetch(`/reports/approvals?${params.toString()}`);
     approvals.value = res.data || [];
     auth.pendingApprovalsCount = approvals.value.filter(

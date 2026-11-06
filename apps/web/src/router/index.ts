@@ -12,6 +12,9 @@ import ReconciliationView from '../modules/ReconciliationView.vue';
 import AccountingView from '../modules/AccountingView.vue';
 import ReportsStrategyView from '../modules/ReportsStrategyView.vue';
 import AdminAuditView from '../modules/AdminAuditView.vue';
+import PettyCashView from '../modules/PettyCashView.vue';
+import AssetsView from '../modules/AssetsView.vue';
+import HrisView from '../modules/HrisView.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -64,7 +67,7 @@ export const router = createRouter({
           path: 'revenue',
           name: 'revenue',
           component: RevenueCashierView,
-          meta: { title: 'Pelanggan, Pesanan, Invoice & Kasir', permission: 'revenue:view' },
+          meta: { title: 'Penagihan Layanan, Pesanan & Faktur Invoice', permission: 'revenue:view' },
         },
         {
           path: 'cashier',
@@ -81,6 +84,52 @@ export const router = createRouter({
           name: 'accounting',
           component: AccountingView,
           meta: { title: 'Akuntansi, Buku Besar, Pajak & Aset', permission: 'accounting:view' },
+        },
+        {
+          path: 'petty-cash',
+          name: 'petty-cash',
+          component: PettyCashView,
+          meta: { title: 'Uang Persediaan & SPJ (GUP/TUP)', permission: 'procurement:view' },
+        },
+        {
+          path: 'assets',
+          name: 'assets',
+          component: AssetsView,
+          meta: { title: 'Inventaris & Aset PMO (Milik & Pinjaman PBI UT)', permission: 'accounting:view' },
+        },
+        {
+          path: 'inventaris',
+          redirect: '/assets',
+        },
+        {
+          path: 'fixed-assets',
+          redirect: '/assets',
+        },
+        {
+          path: 'hris',
+          name: 'hris',
+          component: HrisView,
+          meta: { title: 'Database SDM, Presensi & Payroll PMO', permission: 'admin:view' },
+        },
+        {
+          path: 'payroll',
+          redirect: '/hris',
+        },
+        {
+          path: 'sdm',
+          redirect: '/hris',
+        },
+        {
+          path: 'tax-submission',
+          redirect: '/petty-cash',
+        },
+        {
+          path: 'uang-persediaan',
+          redirect: '/petty-cash',
+        },
+        {
+          path: 'gup',
+          redirect: '/petty-cash',
         },
         {
           path: 'reports',

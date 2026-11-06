@@ -10,6 +10,9 @@ import { revenueRouter } from './modules/revenue/routes.js';
 import { reconciliationRouter } from './modules/reconciliation/routes.js';
 import { accountingRouter } from './modules/accounting/routes.js';
 import { reportsRouter } from './modules/reports/routes.js';
+import { pettyCashRouter } from './modules/pettycash/routes.js';
+import { assetRouter } from './modules/assets/routes.js';
+import { hrisRouter } from './modules/hris/routes.js';
 
 export const app = express();
 
@@ -121,5 +124,8 @@ app.use('/api/v1/revenue', revenueRouter);
 app.use('/api/v1/reconciliation', reconciliationRouter);
 app.use('/api/v1/accounting', accountingRouter);
 app.use('/api/v1/reports', reportsRouter);
+app.use('/api/v1/petty-cash', pettyCashRouter);
+app.use('/api/v1/assets', assetRouter);
+app.use('/api/v1/hris', hrisRouter);
 
 app.use(errorHandler);

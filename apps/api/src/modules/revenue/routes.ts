@@ -347,6 +347,7 @@ const createSalesOrderSchema = z.object({
   businessUnitId: z.string().min(1),
   terms: z.string().default('NET 14'),
   dueInDays: z.number().int().positive().default(14),
+  serviceChargePercent: z.number().min(0).max(100).default(0),
   notes: z.string().optional(),
   issueInvoiceImmediately: z.boolean().default(true),
   lines: z
@@ -394,8 +395,15 @@ revenueRouter.post('/sales-orders', requirePermission('revenue:create'), async (
 
     const subtotal = addMoney(...computedLines.map((l) => mulMoney(l.unitPrice, l.quantity)));
     const discountAmount = addMoney(...computedLines.map((l) => l.discountAmount));
+    const serviceChargePercent = parsed.serviceChargePercent || 0;
+    const baseForServiceCharge = subMoney(subtotal, discountAmount);
+    const serviceChargeAmount =
+      serviceChargePercent > 0 ? calcPercentage(baseForServiceCharge, serviceChargePercent) : '0.00';
     const taxAmount = addMoney(...computedLines.map((l) => l.taxAmount));
-    const totalAmount = addMoney(...computedLines.map((l) => l.lineTotal));
+    const totalAmount = addMoney(
+      addMoney(...computedLines.map((l) => l.lineTotal)),
+      serviceChargeAmount
+    );
     const dueDate = new Date(Date.now() + parsed.dueInDays * 86400000);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -411,6 +419,8 @@ revenueRouter.post('/sales-orders', requirePermission('revenue:create'), async (
           terms: parsed.terms,
           subtotal,
           discountAmount,
+          serviceChargePercent,
+          serviceChargeAmount,
           taxAmount,
           totalAmount,
           status: parsed.issueInvoiceImmediately ? 'INVOICED' : 'CONFIRMED',
@@ -446,6 +456,8 @@ revenueRouter.post('/sales-orders', requirePermission('revenue:create'), async (
             dueDate,
             subtotal,
             discountAmount,
+            serviceChargePercent,
+            serviceChargeAmount,
             taxAmount,
             totalAmount,
             paidAmount: '0.00',
@@ -485,6 +497,14 @@ revenueRouter.post('/sales-orders', requirePermission('revenue:create'), async (
             credit: netRevenue,
           },
         ];
+        if (toCents(serviceChargeAmount) > 0n) {
+          journalLines.push({
+            accountCode: '4-1200', // Pendapatan Jasa & Layanan Lainnya / Service Charge
+            description: `Service Charge MICE atas ${invoice.docNumber}`,
+            debit: '0.00',
+            credit: serviceChargeAmount,
+          });
+        }
         if (toCents(taxAmount) > 0n) {
           journalLines.push({
             accountCode: '2-1210', // Utang PPN Keluaran

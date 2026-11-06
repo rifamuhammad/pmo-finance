@@ -40,6 +40,17 @@ const refundModalOpen = ref(false);
 const closeSessionModalOpen = ref(false);
 const depositModalOpen = ref(false);
 const priceModalOpen = ref(false);
+const printModalOpen = ref(false);
+const selectedInvoiceForPrint = ref<any>(null);
+
+function openPrintModal(inv: any) {
+  selectedInvoiceForPrint.value = inv;
+  printModalOpen.value = true;
+}
+
+function triggerPrint() {
+  window.print();
+}
 
 const orderForm = ref({
   customerId: '',
@@ -47,6 +58,7 @@ const orderForm = ref({
   productServiceId: '',
   quantity: 1,
   discountAmount: 0,
+  serviceChargePercent: 0,
   taxRatePercent: 11,
   terms: 'NET 14',
   notes: '',
@@ -119,12 +131,16 @@ async function loadRevenueAndCashier() {
 
 function openCreateOrder() {
   const firstProd = products.value[0];
+  const defaultUnit = firstProd?.businessUnitId || auth.user?.businessUnitId || '';
+  const isMice = products.value.some((p) => p.businessUnit?.code === 'BU-MICE' && p.id === firstProd?.id);
+
   orderForm.value = {
     customerId: customers.value[0]?.id || '',
-    businessUnitId: firstProd?.businessUnitId || auth.user?.businessUnitId || '',
+    businessUnitId: defaultUnit,
     productServiceId: firstProd?.id || '',
     quantity: 1,
     discountAmount: 0,
+    serviceChargePercent: isMice ? 10 : 0,
     taxRatePercent: 11,
     terms: 'NET 14',
     notes: '',
@@ -143,6 +159,7 @@ async function submitOrder() {
         customerId: orderForm.value.customerId,
         businessUnitId: prod?.businessUnitId || orderForm.value.businessUnitId,
         terms: orderForm.value.terms,
+        serviceChargePercent: Number(orderForm.value.serviceChargePercent || 0),
         notes: orderForm.value.notes,
         issueInvoiceImmediately: true,
         lines: [
@@ -359,9 +376,9 @@ onMounted(loadRevenueAndCashier);
   <div class="revenue-cashier-view">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Pendapatan, Faktur & Kasir</h1>
+        <h1 class="page-title">Penagihan Layanan & Faktur Invoice Klien</h1>
         <p class="page-desc">
-          Penerbitan faktur tagihan pelanggan, pembayaran piutang, dan sesi kasir.
+          Penerbitan faktur tagihan resmi PMO ke klien korporat/instansi mitra, pelacakan piutang layanan, dan verifikasi pelunasan rekening Bank PBI UT.
         </p>
       </div>
       <div class="btn-row">
@@ -407,11 +424,11 @@ onMounted(loadRevenueAndCashier);
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'orders' }" @click="activeTab = 'orders'">
         Pesanan Layanan ({{ salesOrders.length }})
       </button>
-      <button type="button" class="tab-btn" :class="{ active: activeTab === 'cashier' }" @click="activeTab = 'cashier'">
-        Sesi Kasir & Setoran ({{ cashierData.sessions?.length || 0 }})
-      </button>
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'catalog' }" @click="activeTab = 'catalog'">
         Katalog Layanan & Tarif ({{ products.length }})
+      </button>
+      <button type="button" class="tab-btn" :class="{ active: activeTab === 'cashier' }" @click="activeTab = 'cashier'">
+        Sesi Kasir Loket (Opsional) ({{ cashierData.sessions?.length || 0 }})
       </button>
     </div>
 
@@ -456,7 +473,12 @@ onMounted(loadRevenueAndCashier);
                   <strong>{{ inv.customer?.name }}</strong>
                   <div class="text-muted" style="font-size: 0.78rem">{{ inv.businessUnit?.code }}</div>
                 </td>
-                <td class="money-col">{{ formatRupiah(inv.totalAmount) }}</td>
+                <td class="money-col">
+                  {{ formatRupiah(inv.totalAmount) }}
+                  <div v-if="Number(inv.serviceChargeAmount) > 0" style="font-size: 0.72rem; color: #b45309; font-weight: 600">
+                    + SC {{ inv.serviceChargePercent }}% ({{ formatRupiah(inv.serviceChargeAmount) }})
+                  </div>
+                </td>
                 <td class="money-col">{{ formatRupiah(inv.paidAmount) }}</td>
                 <td class="money-col"><strong>{{ formatRupiah(inv.balanceDue) }}</strong></td>
                 <td>
@@ -464,15 +486,30 @@ onMounted(loadRevenueAndCashier);
                 </td>
                 <td><StatusBadge :status="inv.status" /></td>
                 <td>
-                  <button
-                    v-if="inv.balanceDue > 0 && auth.hasPermission('payment:create')"
-                    type="button"
-                    class="btn btn-sm btn-primary"
-                    @click="openPaymentModal(inv)"
-                  >
-                    Terima Pembayaran
-                  </button>
-                  <span v-else class="text-muted">Selesai</span>
+                  <div style="display: flex; gap: 6px; align-items: center">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-secondary"
+                      title="Lihat lembar faktur resmi siap cetak / PDF"
+                      @click="openPrintModal(inv)"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9V2h12v7"></path>
+                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                        <rect x="6" y="14" width="12" height="8"></rect>
+                      </svg>
+                      Faktur
+                    </button>
+                    <button
+                      v-if="inv.balanceDue > 0 && auth.hasPermission('payment:create')"
+                      type="button"
+                      class="btn btn-sm btn-primary"
+                      @click="openPaymentModal(inv)"
+                    >
+                      Terima Bayar
+                    </button>
+                    <span v-else class="text-muted" style="font-size: 0.8rem; font-weight: 600; color: #059669">Lunas</span>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -845,6 +882,14 @@ onMounted(loadRevenueAndCashier);
             />
           </div>
           <div class="form-field">
+            <label for="so-service" class="form-label">Service Charge MICE (%)</label>
+            <select id="so-service" v-model.number="orderForm.serviceChargePercent" class="select">
+              <option :value="0">0% (Tanpa Service Charge)</option>
+              <option :value="5">5% (Event Standar / Ruang Rapat)</option>
+              <option :value="10">10% (Banquet / Catering / VIP MICE)</option>
+            </select>
+          </div>
+          <div class="form-field">
             <label for="so-tax" class="form-label">Tarif PPN (%)</label>
             <input id="so-tax" v-model.number="orderForm.taxRatePercent" type="number" min="0" max="100" class="input" required />
           </div>
@@ -1034,5 +1079,471 @@ onMounted(loadRevenueAndCashier);
         </div>
       </form>
     </ModalDialog>
+
+    <!-- Modal: Pratinjau & Cetak Lembar Invoice Resmi -->
+    <ModalDialog :open="printModalOpen" title="Faktur Tagihan Resmi (Customer Invoice)" @close="printModalOpen = false">
+      <div v-if="selectedInvoiceForPrint" class="invoice-printable-card">
+        <!-- Header Dokumen -->
+        <div class="inv-header">
+          <div class="inv-brand">
+            <div class="inv-logo-badge">UT</div>
+            <div>
+              <h3 class="inv-inst-name">UNIVERSITAS TERBUKA</h3>
+              <div class="inv-inst-sub">Pusat Bisnis dan Investasi (PBI UT) · PMO UTama</div>
+              <div class="inv-inst-addr">Jl. Cabe Raya, Pondok Cabe, Pamulang, Tangerang Selatan 15418</div>
+            </div>
+          </div>
+          <div class="inv-title-box">
+            <div class="inv-badge-type">OFFICIAL INVOICE</div>
+            <div class="inv-number">{{ selectedInvoiceForPrint.docNumber }}</div>
+            <div class="inv-status-pill" :class="selectedInvoiceForPrint.status.toLowerCase()">
+              {{ selectedInvoiceForPrint.status === 'PAID' ? 'LUNAS / PAID' : (selectedInvoiceForPrint.status === 'PARTIALLY_PAID' ? 'SEBAGIAN / PARTIAL' : 'BELUM LUNAS / UNPAID') }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Meta Klien & Tagihan -->
+        <div class="inv-meta-grid">
+          <div class="inv-meta-col">
+            <span class="meta-label">DITUJUKAN KEPADA (KLIEN):</span>
+            <div class="meta-val-primary">{{ selectedInvoiceForPrint.customer?.name }}</div>
+            <div class="meta-val-sub">NPWP: {{ selectedInvoiceForPrint.customer?.taxId || '00.000.000.0-000.000' }}</div>
+            <div class="meta-val-sub">{{ selectedInvoiceForPrint.customer?.address || 'Jakarta, Indonesia' }}</div>
+            <div class="meta-val-sub">Kontak: {{ selectedInvoiceForPrint.customer?.phone || selectedInvoiceForPrint.customer?.email || '-' }}</div>
+          </div>
+          <div class="inv-meta-col inv-meta-right">
+            <div class="meta-row">
+              <span class="meta-label">Unit Pengelola:</span>
+              <span class="meta-val"><strong>{{ selectedInvoiceForPrint.businessUnit?.name }}</strong> ({{ selectedInvoiceForPrint.businessUnit?.code }})</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Tanggal Terbit:</span>
+              <span class="meta-val">{{ formatDate(selectedInvoiceForPrint.issueDate) }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Jatuh Tempo:</span>
+              <span class="meta-val" style="color: #dc2626; font-weight: 600">{{ formatDate(selectedInvoiceForPrint.dueDate) }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Ref. Pesanan:</span>
+              <span class="meta-val">{{ selectedInvoiceForPrint.salesOrder?.docNumber || '-' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabel Rincian Layanan -->
+        <table class="inv-items-table">
+          <thead>
+            <tr>
+              <th style="width: 36px">No</th>
+              <th>Deskripsi Layanan / Pekerjaan</th>
+              <th class="money-col" style="width: 60px">Qty</th>
+              <th class="money-col">Tarif Satuan</th>
+              <th class="money-col">Diskon</th>
+              <th class="money-col">Jumlah Netto</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="selectedInvoiceForPrint.lines && selectedInvoiceForPrint.lines.length > 0" v-for="(line, idx) in selectedInvoiceForPrint.lines" :key="line.id">
+              <td>{{ idx + 1 }}</td>
+              <td><strong>{{ line.description }}</strong></td>
+              <td class="money-col">{{ line.quantity }}</td>
+              <td class="money-col">{{ formatRupiah(line.unitPrice) }}</td>
+              <td class="money-col">{{ formatRupiah(line.discountAmount) }}</td>
+              <td class="money-col"><strong>{{ formatRupiah(line.lineTotal) }}</strong></td>
+            </tr>
+            <tr v-else>
+              <td>1</td>
+              <td><strong>{{ selectedInvoiceForPrint.salesOrder?.docNumber || 'Penyediaan Jasa & Operasional Unit' }}</strong></td>
+              <td class="money-col">1</td>
+              <td class="money-col">{{ formatRupiah(selectedInvoiceForPrint.subtotal) }}</td>
+              <td class="money-col">Rp 0</td>
+              <td class="money-col"><strong>{{ formatRupiah(selectedInvoiceForPrint.subtotal) }}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Ringkasan & Instruksi Pembayaran -->
+        <div class="inv-summary-wrapper">
+          <div class="inv-payment-instruction">
+            <h4 class="pay-title">INSTRUKSI PEMBAYARAN:</h4>
+            <p class="pay-desc">Seluruh pembayaran sah wajib ditransfer melalui rekening penampung resmi:</p>
+            <div class="bank-box">
+              <div>Bank Mitra: <strong>Bank Rakyat Indonesia (BRI)</strong></div>
+              <div>Nomor Rekening: <strong>0382-01-000456-30-8</strong></div>
+              <div>Atas Nama: <strong>PBI UNIVERSITAS TERBUKA - PMO</strong></div>
+              <div style="font-size: 0.76rem; color: #64748b; margin-top: 4px;">Berita Transfer: <em>{{ selectedInvoiceForPrint.docNumber }}</em></div>
+            </div>
+          </div>
+
+          <div class="inv-totals-box">
+            <div class="total-row">
+              <span>Subtotal Layanan:</span>
+              <span>{{ formatRupiah(selectedInvoiceForPrint.subtotal) }}</span>
+            </div>
+            <div v-if="Number(selectedInvoiceForPrint.discountAmount) > 0" class="total-row">
+              <span>Potongan Diskon:</span>
+              <span>-{{ formatRupiah(selectedInvoiceForPrint.discountAmount) }}</span>
+            </div>
+            <div v-if="Number(selectedInvoiceForPrint.serviceChargeAmount) > 0" class="total-row">
+              <span>Service Charge ({{ selectedInvoiceForPrint.serviceChargePercent }}%):</span>
+              <span>{{ formatRupiah(selectedInvoiceForPrint.serviceChargeAmount) }}</span>
+            </div>
+            <div class="total-row">
+              <span>PPN (11%):</span>
+              <span>{{ formatRupiah(selectedInvoiceForPrint.taxAmount) }}</span>
+            </div>
+            <div class="total-row grand-total">
+              <span>TOTAL FAKTUR:</span>
+              <span class="grand-total-val">{{ formatRupiah(selectedInvoiceForPrint.totalAmount) }}</span>
+            </div>
+            <div class="total-row">
+              <span>Telah Dibayar:</span>
+              <span style="color: #059669; font-weight: 600">{{ formatRupiah(selectedInvoiceForPrint.paidAmount) }}</span>
+            </div>
+            <div class="total-row sisa-total">
+              <span>SISA PIUTANG:</span>
+              <span style="color: #dc2626; font-weight: 700">{{ formatRupiah(selectedInvoiceForPrint.balanceDue) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tanda Tangan & Pengesahan -->
+        <div class="inv-signatures">
+          <div class="sig-box">
+            <div class="sig-title">Diterima & Disetujui Klien,</div>
+            <div class="sig-space"></div>
+            <div class="sig-name">{{ selectedInvoiceForPrint.customer?.name }}</div>
+            <div class="sig-role">Tanda Tangan & Cap Perusahaan</div>
+          </div>
+          <div class="sig-box">
+            <div class="sig-title">Pusat Bisnis dan Investasi - PMO UTama,</div>
+            <div class="sig-space">
+              <span class="sig-stamp">TERVERIFIKASI SISTEM ERP</span>
+            </div>
+            <div class="sig-name">Finance Manager / GM PMO</div>
+            <div class="sig-role">Pengelola Keuangan & Penatausahaan</div>
+          </div>
+        </div>
+
+        <!-- Tombol Tindakan -->
+        <div class="btn-row no-print" style="justify-content: flex-end; margin-top: 18px">
+          <button type="button" class="btn btn-sm" @click="printModalOpen = false">Tutup</button>
+          <button type="button" class="btn btn-sm btn-primary" @click="triggerPrint">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9V2h12v7"></path>
+              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+              <rect x="6" y="14" width="12" height="8"></rect>
+            </svg>
+            Cetak Faktur (Print / Simpan PDF)
+          </button>
+        </div>
+      </div>
+    </ModalDialog>
   </div>
 </template>
+
+<style scoped>
+.invoice-printable-card {
+  background: #ffffff;
+  color: #1e293b;
+  padding: 16px 12px;
+  border-radius: 8px;
+  font-family: inherit;
+}
+
+.inv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #034693;
+  margin-bottom: 18px;
+}
+
+.inv-brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.inv-logo-badge {
+  width: 44px;
+  height: 44px;
+  background: #034693;
+  color: #ffffff;
+  font-weight: 800;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  letter-spacing: 1px;
+}
+
+.inv-inst-name {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #034693;
+  letter-spacing: 0.5px;
+}
+
+.inv-inst-sub {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.inv-inst-addr {
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.inv-title-box {
+  text-align: right;
+}
+
+.inv-badge-type {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #034693;
+}
+
+.inv-number {
+  font-size: 1.15rem;
+  font-weight: 800;
+  font-family: monospace;
+  color: #0f172a;
+}
+
+.inv-status-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-top: 4px;
+}
+
+.inv-status-pill.paid {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.inv-status-pill.partially_paid {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.inv-status-pill.unpaid,
+.inv-status-pill.issued,
+.inv-status-pill.draft {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.inv-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 18px;
+  background: #f8fafc;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.meta-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 700;
+  display: block;
+}
+
+.meta-val-primary {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 2px;
+}
+
+.meta-val-sub {
+  font-size: 0.8rem;
+  color: #475569;
+  margin-top: 2px;
+}
+
+.inv-meta-right {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+}
+
+.inv-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-bottom: 16px;
+}
+
+.inv-items-table th {
+  background: #034693;
+  color: #ffffff;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.inv-items-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b;
+}
+
+.inv-summary-wrapper {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.inv-payment-instruction {
+  background: #f1f5f9;
+  padding: 12px;
+  border-radius: 6px;
+  border-left: 4px solid #034693;
+}
+
+.pay-title {
+  margin: 0 0 4px 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #034693;
+}
+
+.pay-desc {
+  margin: 0 0 8px 0;
+  font-size: 0.76rem;
+  color: #475569;
+}
+
+.bank-box {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #0f172a;
+}
+
+.inv-totals-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  padding: 2px 0;
+  color: #334155;
+}
+
+.total-row.grand-total {
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: #034693;
+  border-top: 2px solid #cbd5e1;
+  border-bottom: 2px solid #cbd5e1;
+  padding: 6px 0;
+  margin: 4px 0;
+}
+
+.grand-total-val {
+  font-family: monospace;
+}
+
+.total-row.sisa-total {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.inv-signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.sig-box {
+  text-align: center;
+}
+
+.sig-title {
+  font-size: 0.78rem;
+  color: #64748b;
+  margin-bottom: 40px;
+}
+
+.sig-space {
+  height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sig-stamp {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #034693;
+  border: 2px solid #034693;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transform: rotate(-5deg);
+  letter-spacing: 0.5px;
+}
+
+.sig-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+  border-top: 1px solid #94a3b8;
+  display: inline-block;
+  padding-top: 4px;
+  min-width: 170px;
+}
+
+.sig-role {
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .invoice-printable-card,
+  .invoice-printable-card * {
+    visibility: visible;
+  }
+  .invoice-printable-card {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+</style>

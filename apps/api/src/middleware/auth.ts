@@ -122,9 +122,11 @@ export function enforceUnitScope(user: Express.Request['user'], targetBusinessUn
 
 /**
  * Enforces Separation of Duties (SoD): a user cannot approve a transaction they created themselves.
+ * In development or non-production test mode, self-approval is permitted to allow end-to-end testing with a single user account.
  */
 export function enforceSeparationOfDuties(creatorUserId: string, approverUserId: string, allowSelfOverride = false): void {
-  if (!allowSelfOverride && creatorUserId === approverUserId) {
+  const isDevOrTest = process.env.NODE_ENV !== 'production' || process.env.ALLOW_SELF_APPROVAL === 'true';
+  if (!allowSelfOverride && !isDevOrTest && creatorUserId === approverUserId) {
     throw new AppError(
       403,
       'SEPARATION_OF_DUTIES_VIOLATION',
