@@ -426,28 +426,52 @@ async function main() {
     ],
   });
 
-  // Fiscal Periods
-  await prisma.fiscalPeriod.create({
-    data: {
-      code: 'FY-2025',
-      name: 'Tahun Buku 2025 (Tertutup)',
-      startDate: new Date('2025-01-01T00:00:00.000Z'),
-      endDate: new Date('2025-12-31T23:59:59.000Z'),
-      status: 'CLOSED',
-      isClosed: true,
-      closedAt: new Date('2026-01-15T10:00:00.000Z'),
-    },
-  });
-
-  await prisma.fiscalPeriod.create({
-    data: {
-      code: 'FY-2026',
-      name: 'Tahun Buku 2026 (Aktif)',
-      startDate: new Date('2026-01-01T00:00:00.000Z'),
-      endDate: new Date('2026-12-31T23:59:59.000Z'),
-      status: 'OPEN',
-      isClosed: false,
-    },
+  // Fiscal Periods (Tahunan 2025-2027 & Bulanan 2026 dengan Status OPEN, LOCKED, CLOSED)
+  await prisma.fiscalPeriod.createMany({
+    data: [
+      // Periode Tahunan
+      {
+        code: 'FY-2025',
+        name: 'Tahun Buku 2025 (Tertutup)',
+        startDate: new Date('2025-01-01T00:00:00.000Z'),
+        endDate: new Date('2025-12-31T23:59:59.000Z'),
+        status: 'CLOSED',
+        isClosed: true,
+        closedAt: new Date('2026-01-15T10:00:00.000Z'),
+      },
+      {
+        code: 'FY-2026',
+        name: 'Tahun Buku 2026 (Aktif)',
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+        endDate: new Date('2026-12-31T23:59:59.000Z'),
+        status: 'OPEN',
+        isClosed: false,
+      },
+      {
+        code: 'FY-2027',
+        name: 'Tahun Anggaran 2027 (Perencanaan RKAP PMO)',
+        startDate: new Date('2027-01-01T00:00:00.000Z'),
+        endDate: new Date('2027-12-31T23:59:59.000Z'),
+        status: 'OPEN',
+        isClosed: false,
+      },
+      // Periode Bulanan 2026 (Q1 - Q3 CLOSED)
+      { code: 'FP-2026-01', name: 'Periode Januari 2026 (Closed)', startDate: new Date('2026-01-01T00:00:00.000Z'), endDate: new Date('2026-01-31T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-02-05T10:00:00.000Z') },
+      { code: 'FP-2026-02', name: 'Periode Februari 2026 (Closed)', startDate: new Date('2026-02-01T00:00:00.000Z'), endDate: new Date('2026-02-28T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-03-05T10:00:00.000Z') },
+      { code: 'FP-2026-03', name: 'Periode Maret 2026 (Closed)', startDate: new Date('2026-03-01T00:00:00.000Z'), endDate: new Date('2026-03-31T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-04-05T10:00:00.000Z') },
+      { code: 'FP-2026-04', name: 'Periode April 2026 (Closed)', startDate: new Date('2026-04-01T00:00:00.000Z'), endDate: new Date('2026-04-30T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-05-05T10:00:00.000Z') },
+      { code: 'FP-2026-05', name: 'Periode Mei 2026 (Closed)', startDate: new Date('2026-05-01T00:00:00.000Z'), endDate: new Date('2026-05-31T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-06-05T10:00:00.000Z') },
+      { code: 'FP-2026-06', name: 'Periode Juni 2026 (Closed)', startDate: new Date('2026-06-01T00:00:00.000Z'), endDate: new Date('2026-06-30T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-07-05T10:00:00.000Z') },
+      { code: 'FP-2026-07', name: 'Periode Juli 2026 (Closed)', startDate: new Date('2026-07-01T00:00:00.000Z'), endDate: new Date('2026-07-31T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-08-05T10:00:00.000Z') },
+      { code: 'FP-2026-08', name: 'Periode Agustus 2026 (Closed)', startDate: new Date('2026-08-01T00:00:00.000Z'), endDate: new Date('2026-08-31T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-09-05T10:00:00.000Z') },
+      { code: 'FP-2026-09', name: 'Periode September 2026 (Closed)', startDate: new Date('2026-09-01T00:00:00.000Z'), endDate: new Date('2026-09-30T23:59:59.000Z'), status: 'CLOSED', isClosed: true, closedAt: new Date('2026-10-05T10:00:00.000Z') },
+      // Periode Oktober (LOCKED - Rekonsiliasi Tutup Buku)
+      { code: 'FP-2026-10', name: 'Periode Oktober 2026 (Locked Rekonsiliasi)', startDate: new Date('2026-10-01T00:00:00.000Z'), endDate: new Date('2026-10-31T23:59:59.000Z'), status: 'LOCKED', isClosed: false },
+      // Periode November (OPEN - Aktif Berjalan)
+      { code: 'FP-2026-11', name: 'Periode November 2026 (Aktif Berjalan)', startDate: new Date('2026-11-01T00:00:00.000Z'), endDate: new Date('2026-11-30T23:59:59.000Z'), status: 'OPEN', isClosed: false },
+      // Periode Desember (OPEN - Mendatang)
+      { code: 'FP-2026-12', name: 'Periode Desember 2026 (Mendatang)', startDate: new Date('2026-12-01T00:00:00.000Z'), endDate: new Date('2026-12-31T23:59:59.000Z'), status: 'OPEN', isClosed: false },
+    ],
   });
 
   // 4. Users for All 9 Roles (1 Akun per Role, Password: DemoErp!2026)

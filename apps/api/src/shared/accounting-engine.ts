@@ -82,11 +82,19 @@ export async function createOrGetBalancedJournal(
     throw new AppError(400, 'NO_OPEN_FISCAL_PERIOD', 'Tidak ditemukan periode fiskal aktif untuk memposting jurnal.');
   }
 
-  if (period.isClosed) {
+  if (period.isClosed || period.status === 'CLOSED') {
     throw new AppError(
       409,
       'FISCAL_PERIOD_CLOSED',
       `Periode akuntansi ${period.code} (${period.name}) telah ditutup. Buka kembali periode melalui prosedur otorisasi jika diperlukan koreksi.`
+    );
+  }
+
+  if (period.status === 'LOCKED') {
+    throw new AppError(
+      409,
+      'FISCAL_PERIOD_LOCKED',
+      `Periode akuntansi ${period.code} (${period.name}) sedang dikunci sementara (LOCKED) untuk proses rekonsiliasi dan tutup buku. Transaksi baru tidak diperkenankan.`
     );
   }
 

@@ -774,6 +774,29 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(res.body.error.code).toBe('FISCAL_PERIOD_CLOSED');
     });
 
+    it('blocks posting journals into a LOCKED fiscal period (FP-2026-10)', async () => {
+      const periodsRes = await request(app)
+        .get('/api/v1/master/overview')
+        .set('Authorization', `Bearer ${accountingToken}`);
+      const fpOct = periodsRes.body.data.fiscalPeriods.find((p: any) => p.code === 'FP-2026-10');
+      expect(fpOct).toBeDefined();
+
+      const res = await request(app)
+        .post('/api/v1/accounting/journals')
+        .set('Authorization', `Bearer ${accountingToken}`)
+        .send({
+          fiscalPeriodId: fpOct.id,
+          businessUnitId: unitDiklatId,
+          description: 'Posting ke Periode Locked Rekonsiliasi',
+          lines: [
+            { accountCode: '5-1400', description: 'Beban', debit: 1000000, credit: 0 },
+            { accountCode: '1-1120', description: 'Bank', debit: 0, credit: 1000000 },
+          ],
+        });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('FISCAL_PERIOD_LOCKED');
+    });
+
     it('posts balanced manual journal, forbids direct deletion, and creates linked reversal journal', async () => {
       const postRes = await request(app)
         .post('/api/v1/accounting/journals')
