@@ -22,7 +22,7 @@ async function ensureHrisSeedData() {
     const buTci = units.find((u) => u.code === 'BU-TCI') || units[0];
     const buIts = units.find((u) => u.code === 'BU-ITS') || units[0];
     const buKlinik = units.find((u) => u.code === 'BU-KLINIK') || units[0];
-    const buPmo = units.find((u) => u.code === 'BU-CORP') || units[0];
+    const buPmo = units.find((u) => u.code === 'PMO-MGMT') || units.find((u) => u.code === 'BU-PUSAT') || units.find((u) => u.code === 'BU-CORP') || units[0];
 
     const employees = [
       {

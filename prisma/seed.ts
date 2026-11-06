@@ -331,7 +331,7 @@ async function main() {
     });
   }
 
-  // 3. Business Units (4 Divisi PMO UTama + Kantor Pusat), Cost Centers, Fund Sources & Fiscal Periods
+  // 3. Business Units (4 Divisi Operasional PMO UTama + Divisi Manajemen/Pusat)
   const unitItSolution = await prisma.businessUnit.create({
     data: {
       code: 'BU-ITS',
@@ -370,8 +370,8 @@ async function main() {
 
   const unitPusat = await prisma.businessUnit.create({
     data: {
-      code: 'BU-PUSAT',
-      name: 'Operasional & Kantor Pusat PMO',
+      code: 'PMO-MGMT',
+      name: 'Operasional, Manajemen, Keuangan & Umum PMO',
       type: 'COST_CENTER',
       managerName: 'Darmawan Setiadi',
     },
@@ -381,7 +381,7 @@ async function main() {
   const allCreatedUnits = await prisma.businessUnit.findMany();
   const unitIdByCode = new Map(allCreatedUnits.map((bu) => [bu.code, bu.id]));
   for (const [userId, buCode] of userUnitCodes.entries()) {
-    const targetBuId = unitIdByCode.get(buCode);
+    const targetBuId = unitIdByCode.get(buCode) || (buCode === 'BU-PUSAT' ? unitIdByCode.get('PMO-MGMT') : undefined);
     if (targetBuId) {
       await prisma.user.update({
         where: { id: userId },
@@ -390,18 +390,21 @@ async function main() {
     }
   }
 
-  // Cost Centers per Division
+  // Cost Centers per Division (Berdasarkan Tabel Kerja Anggaran PMO 2027)
   await prisma.costCenter.createMany({
     data: [
-      { code: 'CC-ITS-01', name: 'Software Engineering & Cloud Hosting', businessUnitId: unitItSolution.id },
-      { code: 'CC-ITS-02', name: 'IT Infrastructure & Cyber Security', businessUnitId: unitItSolution.id },
-      { code: 'CC-MICE-01', name: 'Wisma, Kamar & Front Office', businessUnitId: unitMice.id },
-      { code: 'CC-MICE-02', name: 'Ballroom, Banquet & Catering Event', businessUnitId: unitMice.id },
-      { code: 'CC-TCI-01', name: 'Penyelenggaraan Workshop & Sertifikasi', businessUnitId: unitTci.id },
-      { code: 'CC-TCI-02', name: 'Infrastruktur Kelas & Modul Digital', businessUnitId: unitTci.id },
-      { code: 'CC-KLN-01', name: 'Poli Umum & Layanan Medis', businessUnitId: unitKlinik.id },
+      { code: 'CC-ITS-01', name: 'Software Engineering, Promise & Cloud Hosting', businessUnitId: unitItSolution.id },
+      { code: 'CC-ITS-02', name: 'IT Infrastructure, Security & Network Operations', businessUnitId: unitItSolution.id },
+      { code: 'CC-MICE-01', name: 'Wisma UT, Penginapan & Front Desk', businessUnitId: unitMice.id },
+      { code: 'CC-MICE-02', name: 'Gedung Pertemuan, Ballroom UTCC & Fasilitas Audio Visual', businessUnitId: unitMice.id },
+      { code: 'CC-MICE-03', name: 'F&B, Jamuan Makan & Catering Acara', businessUnitId: unitMice.id },
+      { code: 'CC-TCI-01', name: 'Penyelenggaraan Workshop & Sertifikasi BNSP', businessUnitId: unitTci.id },
+      { code: 'CC-TCI-02', name: 'Infrastruktur Ujian Berbasis Komputer & Modul Digital', businessUnitId: unitTci.id },
+      { code: 'CC-KLN-01', name: 'Poli Umum, Poli Gigi & Pelayanan Medis', businessUnitId: unitKlinik.id },
       { code: 'CC-KLN-02', name: 'Instalasi Farmasi, Obat & Laboratorium', businessUnitId: unitKlinik.id },
-      { code: 'CC-OPS-01', name: 'Administrasi & Dukungan PMO Pusat', businessUnitId: unitPusat.id },
+      { code: 'CC-OPS-01', name: 'Tata Usaha, Administrasi Kantor & SDM', businessUnitId: unitPusat.id },
+      { code: 'CC-OPS-02', name: 'Akuntansi, Keuangan, Perpajakan & Kasir Terpusat', businessUnitId: unitPusat.id },
+      { code: 'CC-OPS-03', name: 'Pengadaan Barang/Jasa & Manajemen Logistik', businessUnitId: unitPusat.id },
     ],
   });
 
@@ -834,7 +837,7 @@ async function main() {
     ],
   });
 
-  // 10. Product & Service Catalog
+  // 10. Product & Service Catalog (Pemetaan Akun Pendapatan Resmi 12-Digit)
   await prisma.productService.createMany({
     data: [
       {
@@ -845,7 +848,7 @@ async function main() {
         unitPrice: '85000000.00',
         unit: 'Batch',
         taxCode: 'PPN-11',
-        revenueAccountCode: '4-1100',
+        revenueAccountCode: '420301010200', // Pendapatan Pelatihan (Diklat) Profesional
       },
       {
         sku: 'SRV-DKL-002',
@@ -855,27 +858,27 @@ async function main() {
         unitPrice: '15000000.00',
         unit: 'Paket',
         taxCode: 'PPN-11',
-        revenueAccountCode: '4-1100',
+        revenueAccountCode: '420301010100', // Pendapatan Kursus & Workshop
       },
       {
         sku: 'SRV-KNS-001',
-        name: 'Jasa Konsultansi Penyusunan Maturity Model PMO & Evaluasi Portofolio',
+        name: 'Jasa Konsultansi Implementasi Sistem Aplikasi Promise & PMO',
         category: 'Konsultansi',
         businessUnitId: unitItSolution.id,
         unitPrice: '110000000.00',
         unit: 'Proyek',
         taxCode: 'PPN-11',
-        revenueAccountCode: '4-1200',
+        revenueAccountCode: '420301040200', // Pendapatan Aplikasi Promise & Software Solution
       },
       {
         sku: 'SRV-MICE-001',
-        name: 'Paket Meeting Fullboard Ballroom MICE (100 Pax, Sound & Banquet)',
+        name: 'Paket Meeting Fullboard Ballroom UTCC MICE (100 Pax, Sound & Banquet)',
         category: 'MICE & Event',
         businessUnitId: unitMice.id,
         unitPrice: '45000000.00',
         unit: 'Event',
         taxCode: 'PB1-10',
-        revenueAccountCode: '4-1100',
+        revenueAccountCode: '420301070202', // Pendapatan Sewa Ballroom & Gedung UTCC
       },
       {
         sku: 'SRV-MICE-002',
@@ -885,7 +888,7 @@ async function main() {
         unitPrice: '650000.00',
         unit: 'Malam',
         taxCode: 'PB1-10',
-        revenueAccountCode: '4-1100',
+        revenueAccountCode: '420301070201', // Pendapatan Sewa Kamar Wisma UT
       },
       {
         sku: 'SRV-ITS-001',
@@ -895,7 +898,7 @@ async function main() {
         unitPrice: '60000000.00',
         unit: 'Tahun',
         taxCode: 'PPN-11',
-        revenueAccountCode: '4-1200',
+        revenueAccountCode: '420301040100', // Pendapatan Layanan Hosting & Cloud Service
       },
       {
         sku: 'SRV-KLN-001',
@@ -905,7 +908,7 @@ async function main() {
         unitPrice: '1250000.00',
         unit: 'Orang',
         taxCode: 'BEBAS',
-        revenueAccountCode: '4-1100',
+        revenueAccountCode: '420301060400', // Pendapatan Tindakan Medis & Keperawatan
       },
       {
         sku: 'SRV-KLN-002',
@@ -915,7 +918,7 @@ async function main() {
         unitPrice: '250000.00',
         unit: 'Pasien',
         taxCode: 'BEBAS',
-        revenueAccountCode: '4-1100',
+        revenueAccountCode: '420301060100', // Pendapatan Jasa Dokter Umum
       },
     ],
   });
@@ -925,18 +928,27 @@ async function main() {
     data: [
       {
         code: 'BNK-MDR-01',
-        bankName: 'Bank Mandiri - Cabang Jakarta Sudirman',
+        bankName: 'Bank Mandiri (Persero) Tbk - Kantor Kas UT',
         accountNumberMasked: '124-00-****-8891',
-        accountHolder: 'PMO UTama - Operasional & Pengeluaran',
+        accountHolder: 'PMO UTama - Rekening Operasional & Pengeluaran',
         businessUnitId: unitPusat.id,
-        glAccountCode: '1-1120',
+        glAccountCode: '110101020100',
+        currentBalance: '0.00',
+      },
+      {
+        code: 'BNK-BRI-01',
+        bankName: 'Bank BRI (Persero) Tbk - Kantor Kas UT',
+        accountNumberMasked: '088-41-****-2209',
+        accountHolder: 'PMO UTama - Rekening Penerimaan Komersial Unit',
+        businessUnitId: unitPusat.id,
+        glAccountCode: '110101020200',
         currentBalance: '0.00',
       },
       {
         code: 'BNK-BNI-01',
-        bankName: 'Bank BNI - Cabang Kampus Utama',
+        bankName: 'Bank BNI - Cabang Kampus Utama (Legacy)',
         accountNumberMasked: '088-41-****-2209',
-        accountHolder: 'PMO UTama - Penerimaan Layanan',
+        accountHolder: 'PMO UTama - Penerimaan Layanan (Legacy)',
         businessUnitId: unitTci.id,
         glAccountCode: '1-1130',
         currentBalance: '0.00',
@@ -953,13 +965,23 @@ async function main() {
       },
       {
         code: 'REG-MICE-01',
-        name: 'Kasir Front Office & Wisma MICE',
+        name: 'Kasir Front Office Wisma & UTCC MICE',
         businessUnitId: unitMice.id,
       },
       {
         code: 'REG-KLN-01',
         name: 'Loket Kasir & Farmasi Klinik Pratama',
         businessUnitId: unitKlinik.id,
+      },
+      {
+        code: 'REG-ITS-01',
+        name: 'Loket Kasir Layanan & Billing IT Solution',
+        businessUnitId: unitItSolution.id,
+      },
+      {
+        code: 'REG-HO-01',
+        name: 'Kasir Pusat & Pengelolaan Kas Kecil PMO',
+        businessUnitId: unitPusat.id,
       },
     ],
   });

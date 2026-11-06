@@ -232,7 +232,7 @@ const displayProducts = computed(() => {
 // Kinerja 4 Divisi PMO UTama (IT Solution, MICE, TCI, Klinik Pratama)
 const divisionPerformance = computed(() => {
   if (dashboard.value?.unitPerformance?.length) {
-    return dashboard.value.unitPerformance.filter((u: any) => u.unitCode !== 'BU-PUSAT');
+    return dashboard.value.unitPerformance.filter((u: any) => u.unitCode !== 'BU-PUSAT' && u.unitCode !== 'PMO-MGMT');
   }
   return [
     { unitCode: 'BU-ITS', unitName: 'IT Solution', invoicedRevenue: 170000000, actualExpense: 95000000, utilizationPercent: 68 },
