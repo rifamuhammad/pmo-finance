@@ -130,6 +130,45 @@ masterRouter.post(
   }
 );
 
+masterRouter.post(
+  '/fiscal-periods/:id/lock',
+  requireRoles('ACCOUNTING', 'FINANCE_MANAGER', 'GM_PMO'),
+  async (req, res, next) => {
+    try {
+      const period = await prisma.fiscalPeriod.findUnique({ where: { id: req.params.id } });
+      if (!period) throw new AppError(404, 'NOT_FOUND', 'Periode fiskal tidak ditemukan.');
+      if (period.isClosed || period.status === 'CLOSED') throw new AppError(409, 'ALREADY_CLOSED', 'Periode fiskal sudah ditutup permanen.');
+      if (period.status === 'LOCKED') throw new AppError(409, 'ALREADY_LOCKED', 'Periode fiskal sudah dalam status terkunci.');
+
+      const updated = await prisma.fiscalPeriod.update({
+        where: { id: period.id },
+        data: {
+          status: 'LOCKED',
+        },
+      });
+
+      await recordAuditLog({
+        actorId: req.user!.userId,
+        actorName: req.user!.fullName,
+        actorRole: req.user!.roleCode,
+        action: 'FISCAL_PERIOD_LOCKED',
+        module: 'ACCOUNTING',
+        entityType: 'FiscalPeriod',
+        entityId: updated.id,
+        entityCode: updated.code,
+        summary: `Mengunci sementara (LOCKED) periode fiskal ${updated.code} (${updated.name}) untuk rekonsiliasi tutup buku`,
+        beforeData: period,
+        afterData: updated,
+        requestId: req.requestId,
+      });
+
+      res.json({ success: true, data: updated, meta: { requestId: req.requestId } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 const reopenSchema = z.object({
   reason: z.string().min(5, 'Alasan pembukaan kembali periode wajib diisi minimal 5 karakter.'),
 });

@@ -75,10 +75,26 @@ Sistem **tidak** memuat 1.063 akun umum universitas yang tidak relevan dengan ak
 
 ## 🔒 4. Tiket KOI-87 (PMO-033): Skema Penguncian Periode Fiskal (Tutup Buku)
 
-Untuk menjaga akuntabilitas angka dan mencegah mutasi tanggal mundur:
-- **`OPEN`**: Seluruh transaksi berjalan normal di bulan aktif.
-- **`LOCKED`**: Penguncian sementara saat tim accounting melakukan rekonsiliasi akhir bulan (transaksi operasional baru diblokir).
-- **`CLOSED`**: Penguncian permanen setelah laporan dikirim ke Rektorat. Mutasi data otomatis ditolak (`409 FISCAL_PERIOD_CLOSED`).
+- **Status Jira:** `In Review` (Subtask: `Testing`)
+- **Branch GitHub:** `feature/KOI-87-master-periode-fiskal-locking`
+
+### Inti Fitur & Proteksi Keamanan Transaksi
+Untuk menjaga integritas angka pembukuan dan mematuhi standar audit SPI & BPK, sistem menerapkan proteksi periode berjenjang:
+1. **15 Periode Terdaftar di PostgreSQL:**
+   - `FY-2025`: Tahun buku 2025 (`CLOSED` permanen).
+   - `FY-2026`: Tahun buku aktif 2026 (`OPEN`).
+   - `FY-2027`: Tahun anggaran mendatang 2027 (`OPEN` untuk perencanaan RKAP).
+   - `FP-2026-01` s/d `FP-2026-09`: Periode bulanan lampau (`CLOSED`).
+   - `FP-2026-10`: Periode Oktober 2026 (`LOCKED` - fase rekonsiliasi akhir bulan oleh tim akuntansi).
+   - `FP-2026-11`: Periode November 2026 (`OPEN` - bulan berjalan operasional aktif).
+   - `FP-2026-12`: Periode Desember 2026 (`OPEN` - bulan mendatang).
+2. **Proteksi Mesin Akuntansi (`accounting-engine.ts`):**
+   - Transaksi atau jurnal pada periode `CLOSED` otomatis ditolak dengan kode error `409 FISCAL_PERIOD_CLOSED`.
+   - Transaksi atau jurnal pada periode `LOCKED` otomatis ditolak dengan kode error `409 FISCAL_PERIOD_LOCKED` (hanya otorisasi penyesuaian yang diperkenankan).
+3. **Endpoint Kontrol Otorisasi Periode (`/api/v1/master/fiscal-periods`):**
+   - `POST /:id/lock`: Mengunci sementara periode berjalan untuk rekonsiliasi tutup buku (Khusus `ACCOUNTING`, `FINANCE_MANAGER`, `GM_PMO`).
+   - `POST /:id/close`: Menutup permanen buku periode setelah laporan audit terbit.
+   - `POST /:id/reopen`: Membuka kembali periode dengan kewajiban mencantumkan alasan formal (`reopenReason`) dan dicatat permanen di jejak audit (`AuditLog`).
 
 ---
 
