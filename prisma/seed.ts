@@ -1,6 +1,12 @@
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../apps/api/src/shared/security.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const prisma = new PrismaClient();
 
@@ -573,33 +579,100 @@ async function main() {
     ],
   });
 
-  // 6. Chart of Accounts (COA) & Account Mappings
-  const coaList = [
-    { code: '1-1110', name: 'Kas Operasional & Kasir (On-Hand)', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '1-1120', name: 'Bank Mandiri Operasional PMO', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '1-1130', name: 'Bank BNI Penerimaan Pelanggan', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '1-1210', name: 'Piutang Usaha Pelanggan (AR Control)', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: true },
-    { code: '1-1310', name: 'PPN Masukan Dapat Dikreditkan', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '1-2110', name: 'Aset Tetap - Peralatan TI & Multimedia', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '2-1110', name: 'Utang Usaha Vendor (AP Control)', type: 'LIABILITY', normalBalance: 'CREDIT', isControlAccount: true },
-    { code: '2-1210', name: 'Utang PPN Keluaran', type: 'LIABILITY', normalBalance: 'CREDIT', isControlAccount: false },
-    { code: '2-1220', name: 'Utang PPh Pasal 23 / 21', type: 'LIABILITY', normalBalance: 'CREDIT', isControlAccount: false },
-    { code: '3-1100', name: 'Modal Kerja Awal & Dana Cadangan PMO', type: 'EQUITY', normalBalance: 'CREDIT', isControlAccount: false },
-    { code: '4-1100', name: 'Pendapatan Pelatihan & Sertifikasi', type: 'REVENUE', normalBalance: 'CREDIT', isControlAccount: false },
-    { code: '4-1200', name: 'Pendapatan Konsultansi & Riset Terapan', type: 'REVENUE', normalBalance: 'CREDIT', isControlAccount: false },
-    { code: '5-1100', name: 'Beban Penyelenggaraan Program & Modul', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '5-1200', name: 'Beban Pengadaan Lisensi & Infrastruktur TI', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '5-1300', name: 'Beban Honorarium Instruktur & Tenaga Ahli', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '5-1400', name: 'Beban Operasional Kantor & Utilitas PMO', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
-    { code: '5-1500', name: 'Beban Administrasi Bank & Payment Gateway', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
-  ];
+  // 6. Chart of Accounts (COA) - Official PMO UTama (~70 Akun Operasional Riil)
+  const officialCoaPath = path.resolve(__dirname, 'seeds/coa-pmo-official.json');
+  let officialCoaList: Array<{
+    code: string;
+    name: string;
+    type: string;
+    normalBalance: string;
+    isControlAccount: boolean;
+  }> = [];
 
-  for (const c of coaList) {
-    await prisma.chartOfAccount.create({ data: c });
+  if (fs.existsSync(officialCoaPath)) {
+    officialCoaList = JSON.parse(fs.readFileSync(officialCoaPath, 'utf-8'));
   }
 
+  // Seed official 12-digit accounts
+  for (const c of officialCoaList) {
+    await prisma.chartOfAccount.upsert({
+      where: { code: c.code },
+      update: {
+        name: c.name,
+        type: c.type,
+        normalBalance: c.normalBalance,
+        isControlAccount: c.isControlAccount,
+        isActive: true,
+      },
+      create: {
+        code: c.code,
+        name: c.name,
+        type: c.type,
+        normalBalance: c.normalBalance,
+        isControlAccount: c.isControlAccount,
+        isActive: true,
+      },
+    });
+  }
+
+  // Legacy test compatibility accounts (agar suite test integrasi & route fallback tetap lulus)
+  const legacyCoaList = [
+    { code: '1-1110', name: '[LEGACY] Kas Operasional & Kasir (On-Hand)', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '1-1120', name: '[LEGACY] Bank Mandiri Operasional PMO', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '1-1130', name: '[LEGACY] Bank BNI Penerimaan Pelanggan', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '1-1210', name: '[LEGACY] Piutang Usaha Pelanggan (AR Control)', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: true },
+    { code: '1-1310', name: '[LEGACY] PPN Masukan Dapat Dikreditkan', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '1-2110', name: '[LEGACY] Aset Tetap - Peralatan TI & Multimedia', type: 'ASSET', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '2-1110', name: '[LEGACY] Utang Usaha Vendor (AP Control)', type: 'LIABILITY', normalBalance: 'CREDIT', isControlAccount: true },
+    { code: '2-1210', name: '[LEGACY] Utang PPN Keluaran', type: 'LIABILITY', normalBalance: 'CREDIT', isControlAccount: false },
+    { code: '2-1220', name: '[LEGACY] Utang PPh Pasal 23 / 21', type: 'LIABILITY', normalBalance: 'CREDIT', isControlAccount: false },
+    { code: '3-1100', name: '[LEGACY] Modal Kerja Awal & Dana Cadangan PMO', type: 'EQUITY', normalBalance: 'CREDIT', isControlAccount: false },
+    { code: '4-1100', name: '[LEGACY] Pendapatan Pelatihan & Sertifikasi', type: 'REVENUE', normalBalance: 'CREDIT', isControlAccount: false },
+    { code: '4-1200', name: '[LEGACY] Pendapatan Konsultansi & Riset Terapan', type: 'REVENUE', normalBalance: 'CREDIT', isControlAccount: false },
+    { code: '5-1100', name: '[LEGACY] Beban Penyelenggaraan Program & Modul', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '5-1200', name: '[LEGACY] Beban Pengadaan Lisensi & Infrastruktur TI', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '5-1300', name: '[LEGACY] Beban Honorarium Instruktur & Tenaga Ahli', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '5-1400', name: '[LEGACY] Beban Operasional Kantor & Utilitas PMO', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
+    { code: '5-1500', name: '[LEGACY] Beban Administrasi Bank & Payment Gateway', type: 'EXPENSE', normalBalance: 'DEBIT', isControlAccount: false },
+  ];
+
+  for (const c of legacyCoaList) {
+    await prisma.chartOfAccount.upsert({
+      where: { code: c.code },
+      update: { name: c.name },
+      create: c,
+    });
+  }
+
+  // Account Mappings (Termasuk pemetaan resmi 12-digit & fallback legacy)
   await prisma.accountMapping.createMany({
     data: [
+      // Pemetaan Resmi 12-digit Pertor 310 / PMO
+      {
+        transactionType: 'OFFICIAL_INVOICE_ISSUED',
+        description: 'Pengakuan piutang komersial dan pendapatan unit bisnis resmi',
+        debitAccountCode: '110301010100',
+        creditAccountCode: '420301010200',
+      },
+      {
+        transactionType: 'OFFICIAL_PAYMENT_RECEIVED',
+        description: 'Penerimaan kas bank operasional atas pelunasan piutang komersial resmi',
+        debitAccountCode: '110101020100',
+        creditAccountCode: '110301010100',
+      },
+      {
+        transactionType: 'OFFICIAL_EXPENSE_PAID',
+        description: 'Pencairan beban operasional riil dari rekening bank operasional resmi',
+        debitAccountCode: '520201010100',
+        creditAccountCode: '110101020100',
+      },
+      {
+        transactionType: 'OFFICIAL_CASHIER_DEPOSIT',
+        description: 'Setoran fisik uang kasir unit ke rekening bank operasional resmi',
+        debitAccountCode: '110101020100',
+        creditAccountCode: '110101010100',
+      },
+      // Pemetaan Legacy (untuk kelangsungan modul yang belum dimigrasi)
       {
         transactionType: 'CUSTOMER_INVOICE_ISSUED',
         description: 'Pengakuan piutang dan pendapatan saat invoice pelanggan diterbitkan',

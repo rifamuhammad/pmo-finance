@@ -1,0 +1,632 @@
+[
+  {
+    "code": "110101010100",
+    "name": "Kas Operasional & Kasir Unit",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Kas dan Setara Kas",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "110101020100",
+    "name": "Bank Mandiri Operasional PMO",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Kas dan Setara Kas",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "110101020200",
+    "name": "Bank BRI Penerimaan Komersial PMO",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Kas dan Setara Kas",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "110301010100",
+    "name": "Piutang Usaha Layanan Pelanggan (AR Control)",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": true,
+    "category": "Piutang Usaha",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "110501010100",
+    "name": "Uang Muka Kerja (UMK) / Kas Kecil Unit",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Uang Muka Operasional",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "110502010100",
+    "name": "PPN Masukan Dapat Dikreditkan",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Pajak Dibayar di Muka",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "110604010100",
+    "name": "Persediaan Obat & Bahan Medis Habis Pakai",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Persediaan",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "110605010100",
+    "name": "Persediaan Barang Perlengkapan & Amenitas",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Persediaan",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "120301010100",
+    "name": "Aset Tetap - Peralatan & Mesin Kantor",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Aset Tetap",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "120301020100",
+    "name": "Akumulasi Penyusutan Peralatan & Mesin",
+    "type": "ASSET",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Akumulasi Penyusutan",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "120402010100",
+    "name": "Aset Tak Berwujud - Software & Lisensi TI",
+    "type": "ASSET",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Aset Lainnya",
+    "businessUnit": "BU-ITS"
+  },
+  {
+    "code": "210101010100",
+    "name": "Utang Pengadaan Barang dan Jasa Rekanan (AP Control)",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": true,
+    "category": "Utang Usaha",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "210201010100",
+    "name": "Utang Pajak PPh Pasal 21",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Utang Pajak",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "210201010200",
+    "name": "Utang Pajak PPh Pasal 22",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Utang Pajak",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "210201010300",
+    "name": "Utang Pajak PPh Pasal 23",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Utang Pajak",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "210201010400",
+    "name": "Utang Pajak PPh Final Pasal 4 ayat 2",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Utang Pajak",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "210202010100",
+    "name": "Utang Pajak PPN Keluaran",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Utang Pajak",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "210301010100",
+    "name": "Beban Akrual / Yang Masih Harus Dibayar",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Beban Akrual",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "210401020500",
+    "name": "Pendapatan Diterima di Muka - Layanan TI & Hosting",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Diterima di Muka",
+    "businessUnit": "BU-ITS"
+  },
+  {
+    "code": "210401020700",
+    "name": "Pendapatan Diterima di Muka - Sewa Wisma & Hall Event",
+    "type": "LIABILITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Diterima di Muka",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "310101010100",
+    "name": "Modal Kerja RKAP PMO UTama",
+    "type": "EQUITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Aset Neto Tanpa Pembatasan",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "310201010100",
+    "name": "Sisa Lebih Pembiayaan Anggaran (SiLPA) / Saldo Laba",
+    "type": "EQUITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Aset Neto Tanpa Pembatasan",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "420301010100",
+    "name": "Pendapatan Kursus & Workshop",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan TCI",
+    "businessUnit": "BU-TCI"
+  },
+  {
+    "code": "420301010200",
+    "name": "Pendapatan Pelatihan (Diklat) Profesional",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan TCI",
+    "businessUnit": "BU-TCI"
+  },
+  {
+    "code": "420301030100",
+    "name": "Pendapatan Uji Sertifikasi Profesi & Lisensi",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan TCI",
+    "businessUnit": "BU-TCI"
+  },
+  {
+    "code": "420301040100",
+    "name": "Pendapatan Layanan Hosting & Cloud Service",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan IT Solution",
+    "businessUnit": "BU-ITS"
+  },
+  {
+    "code": "420301040200",
+    "name": "Pendapatan Aplikasi Promise & Software Solution",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan IT Solution",
+    "businessUnit": "BU-ITS"
+  },
+  {
+    "code": "420301050200",
+    "name": "Pendapatan Jasa Multimedia & Konten Digital",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan IT Solution",
+    "businessUnit": "BU-ITS"
+  },
+  {
+    "code": "420301060100",
+    "name": "Pendapatan Jasa Dokter Umum",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Poliklinik",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "420301060200",
+    "name": "Pendapatan Jasa Dokter Gigi",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Poliklinik",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "420301060300",
+    "name": "Pendapatan Layanan Laboratorium Medis",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Poliklinik",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "420301060400",
+    "name": "Pendapatan Tindakan Medis & Keperawatan",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Poliklinik",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "420301060500",
+    "name": "Pendapatan Instalasi Farmasi & Penjualan Obat",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Poliklinik",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "420301060600",
+    "name": "Pendapatan Kapitasi BPJS Kesehatan",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Poliklinik",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "420301060700",
+    "name": "Pendapatan Kapitasi Inhouse Mandiri Inhealth",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan Poliklinik",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "420301070100",
+    "name": "Pendapatan Sewa Lahan & Booth Komersial",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan MICE",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "420301070201",
+    "name": "Pendapatan Sewa Kamar Wisma UT",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan MICE",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "420301070202",
+    "name": "Pendapatan Sewa Ballroom & Gedung UTCC",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan MICE",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "420301070203",
+    "name": "Pendapatan Sewa Ruang Sidang & Meeting Room",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan MICE",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "420301070204",
+    "name": "Pendapatan Fasilitas Olahraga & Kebugaran",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan MICE",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "420301070300",
+    "name": "Pendapatan Sewa Perlengkapan, Audio & Properti Event",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan MICE",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "420301090100",
+    "name": "Pendapatan Usaha Pendukung (Laundry & Kafe)",
+    "type": "REVENUE",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Pendapatan MICE",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "510201010300",
+    "name": "Beban Barang Habis Pakai Wisuda",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Penyelenggaraan Wisuda",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "510201020300",
+    "name": "Beban Konsumsi Wisuda",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Penyelenggaraan Wisuda",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "510201020400",
+    "name": "Beban Konsumsi Kemahasiswaan",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Kemahasiswaan",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "510201029900",
+    "name": "Beban Konsumsi Lainnya",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Operasional Umum",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "510601010400",
+    "name": "Beban Perjalanan Dinas Penyelenggaraan Wisuda",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Perjalanan Dinas",
+    "businessUnit": "BU-MICE"
+  },
+  {
+    "code": "510601010600",
+    "name": "Beban Perjalanan Dinas Kemahasiswaan",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Perjalanan Dinas",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "520101030100",
+    "name": "Beban Gaji Tenaga Kependidikan PUT PK",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Pegawai",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520101050100",
+    "name": "Beban Lembur Pendukung Kegiatan Operasional - PNS",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Pegawai",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "520101050200",
+    "name": "Beban Lembur Pendukung Kegiatan Operasional - Non PNS",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Pegawai",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520101060200",
+    "name": "Beban Uang Makan Tenaga Kependidikan - Non PNS",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Pegawai",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520201010100",
+    "name": "Beban Barang Habis Pakai Pendukung Operasional",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Barang & Jasa",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520201030100",
+    "name": "Beban Konsumsi Pendukung Operasional",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Barang & Jasa",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520301030100",
+    "name": "Beban Pembelian Persediaan Obat",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Bahan Medis",
+    "businessUnit": "BU-KLINIK"
+  },
+  {
+    "code": "520401010100",
+    "name": "Beban Jasa Kompensasi Pendukung Operasional",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Jasa",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520401020100",
+    "name": "Beban Jasa Tenaga Ahli",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Jasa",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520401029900",
+    "name": "Beban Jasa Konsultan Lainnya",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Jasa",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "520401039900",
+    "name": "Beban Jasa Lainnya",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Jasa",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520501020200",
+    "name": "Beban Pemeliharaan Kendaraan Bermotor",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Pemeliharaan",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
+    "code": "520601010100",
+    "name": "Beban Perjalanan Dinas Dalam Negeri",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Perjalanan Dinas",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520701030100",
+    "name": "Beban Jasa - Peningkatan SDM Tenaga Kependidikan",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Pelatihan & SDM",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520701040100",
+    "name": "Beban Perjalanan - Peningkatan SDM Tenaga Kependidikan",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Pelatihan & SDM",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520901020100",
+    "name": "Beban Barang dan Perlengkapan Unit Usaha",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Operasional Unit Usaha",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520901050100",
+    "name": "Beban Jasa Unit Usaha",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Operasional Unit Usaha",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520901060100",
+    "name": "Beban Pemeliharaan Unit Usaha",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Operasional Unit Usaha",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520901070100",
+    "name": "Beban Perjalanan Dinas Unit Usaha",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Operasional Unit Usaha",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "520901080100",
+    "name": "Beban Pemasaran Unit Usaha",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Operasional Unit Usaha",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "530103030100",
+    "name": "Beban Belanja Investasi Peralatan Kantor Unit Usaha",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Investasi Peralatan",
+    "businessUnit": "ALL"
+  },
+  {
+    "code": "590101010100",
+    "name": "Beban Administrasi Bank & Payment Gateway",
+    "type": "EXPENSE",
+    "normalBalance": "DEBIT",
+    "isControlAccount": false,
+    "category": "Beban Keuangan & Bank",
+    "businessUnit": "PMO-MGMT"
+  }
+]

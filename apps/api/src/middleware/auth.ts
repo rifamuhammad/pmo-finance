@@ -125,8 +125,8 @@ export function enforceUnitScope(user: Express.Request['user'], targetBusinessUn
  * In development or non-production test mode, self-approval is permitted to allow end-to-end testing with a single user account.
  */
 export function enforceSeparationOfDuties(creatorUserId: string, approverUserId: string, allowSelfOverride = false): void {
-  const isDevOrTest = process.env.NODE_ENV !== 'production' || process.env.ALLOW_SELF_APPROVAL === 'true';
-  if (!allowSelfOverride && !isDevOrTest && creatorUserId === approverUserId) {
+  const allowSelf = process.env.ALLOW_SELF_APPROVAL === 'true';
+  if (!allowSelfOverride && !allowSelf && creatorUserId === approverUserId) {
     throw new AppError(
       403,
       'SEPARATION_OF_DUTIES_VIOLATION',
