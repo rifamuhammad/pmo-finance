@@ -7,7 +7,8 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-80` | Injeksi Master COA Spesifik PMO UTama | `feature/KOI-80-injeksi-master-coa-pmo` | `Done` (Merged) | [KOI-80-injeksi-master-coa-pmo.md](./KOI-80-injeksi-master-coa-pmo.md) |
 | `KOI-84` | Setup Master Data 5 Unit Bisnis PMO & Cost Center | `feature/KOI-84-setup-master-unit-bisnis-cost-center` | `Done` (Merged) | [KOI-84-setup-master-unit-bisnis-cost-center.md](./KOI-84-setup-master-unit-bisnis-cost-center.md) |
 | `KOI-87` | Master Periode Fiskal & Skema Locking Tutup Buku | `feature/KOI-87-master-periode-fiskal-locking` | `In Review` | [KOI-87-master-periode-fiskal-locking.md](./KOI-87-master-periode-fiskal-locking.md) |
-| `KOI-90` | Integration Testing DB & Smoke Test Sesi RBAC | `feature/KOI-90-integration-testing-db-rbac` | `In Review` | [KOI-90-integration-testing-db-rbac.md](./KOI-90-integration-testing-db-rbac.md) |
+| `KOI-90` | Integration Testing DB & Smoke Test Sesi RBAC | `feature/KOI-90-integration-testing-db-rbac` | `Done` (Merged) | [KOI-90-integration-testing-db-rbac.md](./KOI-90-integration-testing-db-rbac.md) |
+| `KOI-94` | [PMO-041] Penyesuaian Skema Prisma BudgetLine Multi-Volume & Pagu Pergeseran | `feature/KOI-94-budget-line-multi-volume-semula-menjadi` | `In Review` | [KOI-94-budget-line-multi-volume-semula-menjadi.md](./KOI-94-budget-line-multi-volume-semula-menjadi.md) |
 
 ---
 

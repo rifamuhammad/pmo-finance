@@ -275,6 +275,80 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(revRes.body.data.totalAllocated).toBe(60000000);
       expect(revRes.body.data.revisions.length).toBeGreaterThanOrEqual(1);
     });
+
+    it('supports 4-level volume (V1 x V2 x V3 x V4) and Semula-Menjadi pergeseran calculations', async () => {
+      const bRes = await request(app)
+        .post('/api/v1/budgets')
+        .set('Authorization', `Bearer ${unitMgrToken}`)
+        .send({
+          title: 'Anggaran Multi-Volume & Semula Menjadi [DATA DEMO]',
+          businessUnitId: unitDiklatId,
+          fiscalPeriodId: period2026OpenId,
+          fundSourceId: fundInternalId,
+          lines: [
+            {
+              costCenterId: ccDiklatLabId,
+              accountCode: '5-1100',
+              category: 'PEGAWAI',
+              description: 'Honorarium Narasumber Ahli Promise',
+              activityCode: '26.1.1.1.1',
+              activityName: 'Pengembangan usaha',
+              subActivity: 'Proyek Implementasi Promise',
+              detailDescription: 'Honorarium Narasumber Luar',
+              kelompokPagu: 'Layanan Dasar',
+              vol1: 2,
+              satuan1: 'Orang',
+              vol2: 3,
+              satuan2: 'Hari',
+              vol3: 2,
+              satuan3: 'Sesi',
+              vol4: 1,
+              satuan4: 'Paket',
+              unitPrice: 1500000,
+              semulaAmount: 18000000,
+              pergeseranAmount: 0,
+              allocatedAmount: 18000000,
+            },
+          ],
+        });
+
+      expect(bRes.status).toBe(201);
+      const line = bRes.body.data.lines[0];
+      expect(line.totalVolume).toBe(12);
+      expect(line.unitPrice).toBe(1500000);
+      expect(line.semulaAmount).toBe(18000000);
+      expect(line.pergeseranAmount).toBe(0);
+      expect(line.menjadiAmount).toBe(18000000);
+      expect(line.selisihAmount).toBe(0);
+
+      const bdgId = bRes.body.data.id;
+      await request(app).post(`/api/v1/budgets/${bdgId}/submit`).set('Authorization', `Bearer ${unitMgrToken}`);
+      await request(app).post(`/api/v1/budgets/${bdgId}/approve`).set('Authorization', `Bearer ${gmToken}`).send({ note: 'Setuju' });
+
+      // Revise with Pergeseran (+ Rp 6.000.000)
+      const rev = await request(app)
+        .post(`/api/v1/budgets/${bdgId}/revise`)
+        .set('Authorization', `Bearer ${gmToken}`)
+        .send({
+          reason: 'Pergeseran volume narasumber dari 3 hari menjadi 4 hari',
+          lineUpdates: [
+            {
+              lineId: line.id,
+              vol2: 4,
+              newAllocatedAmount: 24000000,
+              pergeseranAmount: 6000000,
+            },
+          ],
+        });
+
+      expect(rev.status).toBe(200);
+      const revLine = rev.body.data.lines[0];
+      expect(revLine.totalVolume).toBe(16); // 2 * 4 * 2 * 1
+      expect(revLine.semulaAmount).toBe(18000000);
+      expect(revLine.pergeseranAmount).toBe(6000000);
+      expect(revLine.menjadiAmount).toBe(24000000);
+      expect(revLine.selisihAmount).toBe(-6000000);
+    });
   });
 
   describe('3. Procurement (PR -> Quotations -> PO -> Goods Receipt -> 3-Way Match -> Expense -> Void)', () => {

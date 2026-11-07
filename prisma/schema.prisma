@@ -260,6 +260,28 @@ model BudgetLine {
   committedAmount Decimal    @default(0) @db.Decimal(18, 2)
   actualAmount    Decimal    @default(0) @db.Decimal(18, 2)
 
+  // Multi-Volume & Semula-Menjadi Pergeseran Fields (Pertor 310 & Format Rektorat)
+  activityCode      String?
+  activityName      String?
+  subActivity       String?
+  detailDescription String?
+  kelompokPagu      String?    @default("Layanan Dasar")
+  fte               String?
+  vol1              Decimal?   @default(1) @db.Decimal(10, 2)
+  satuan1           String?    @default("Unit")
+  vol2              Decimal?   @default(1) @db.Decimal(10, 2)
+  satuan2           String?
+  vol3              Decimal?   @default(1) @db.Decimal(10, 2)
+  satuan3           String?
+  vol4              Decimal?   @default(1) @db.Decimal(10, 2)
+  satuan4           String?
+  totalVolume       Decimal?   @default(1) @db.Decimal(12, 2)
+  unitPrice         Decimal?   @default(0) @db.Decimal(18, 2)
+  semulaAmount      Decimal?   @default(0) @db.Decimal(18, 2)
+  pergeseranAmount  Decimal?   @default(0) @db.Decimal(18, 2)
+  menjadiAmount     Decimal?   @default(0) @db.Decimal(18, 2)
+  alasanRevisi      String?
+
   commitments      BudgetCommitment[]
   purchaseRequests PurchaseRequest[]
   expenses         Expense[]

@@ -32,8 +32,35 @@ function enrichBudget(b: any) {
       const lComm = fromCents(toCents(l.committedAmount));
       const lAct = fromCents(toCents(l.actualAmount));
       const lAvail = subMoney(subMoney(lAlloc, lComm), lAct);
+      const v1 = Number(l.vol1 ?? 1);
+      const v2 = Number(l.vol2 ?? 1);
+      const v3 = Number(l.vol3 ?? 1);
+      const v4 = Number(l.vol4 ?? 1);
+      const totalVol = Number(l.totalVolume ?? (v1 * v2 * v3 * v4));
+      const unitPrice = Number(l.unitPrice ?? 0);
+      const semula = Number(l.semulaAmount ?? lAlloc);
+      const pergeseran = Number(l.pergeseranAmount ?? 0);
+      const menjadi = Number(l.menjadiAmount ?? (semula + pergeseran));
+      const selisih = semula - menjadi;
+      const serapanPct = Number(lAlloc) > 0 ? Number(((Number(lAct) / Number(lAlloc)) * 100).toFixed(2)) : 0;
+
       return {
         ...l,
+        vol1: v1,
+        satuan1: l.satuan1 ?? 'Unit',
+        vol2: v2,
+        satuan2: l.satuan2 ?? '',
+        vol3: v3,
+        satuan3: l.satuan3 ?? '',
+        vol4: v4,
+        satuan4: l.satuan4 ?? '',
+        totalVolume: totalVol,
+        unitPrice,
+        semulaAmount: semula,
+        pergeseranAmount: pergeseran,
+        menjadiAmount: menjadi,
+        selisihAmount: selisih,
+        serapanPercent: serapanPct,
         allocatedAmount: Number(lAlloc),
         committedAmount: Number(lComm),
         actualAmount: Number(lAct),
@@ -142,6 +169,25 @@ const createBudgetSchema = z.object({
         category: z.enum(['CAPEX', 'OPEX', 'MODAL_KERJA', 'PENGADAAN', 'PEGAWAI', 'PAJAK']),
         description: z.string().min(3),
         allocatedAmount: z.number().positive('Alokasi baris anggaran wajib lebih besar dari 0.'),
+        activityCode: z.string().optional(),
+        activityName: z.string().optional(),
+        subActivity: z.string().optional(),
+        detailDescription: z.string().optional(),
+        kelompokPagu: z.string().optional(),
+        fte: z.string().optional(),
+        vol1: z.number().optional(),
+        satuan1: z.string().optional(),
+        vol2: z.number().optional(),
+        satuan2: z.string().optional(),
+        vol3: z.number().optional(),
+        satuan3: z.string().optional(),
+        vol4: z.number().optional(),
+        satuan4: z.string().optional(),
+        unitPrice: z.number().optional(),
+        semulaAmount: z.number().optional(),
+        pergeseranAmount: z.number().optional(),
+        menjadiAmount: z.number().optional(),
+        alasanRevisi: z.string().optional(),
       })
     )
     .min(1, 'Anggaran wajib memiliki minimal 1 baris mata anggaran.'),
@@ -179,13 +225,45 @@ budgetRouter.post('/', requirePermission('budget:create'), async (req, res, next
         createdById: req.user!.userId,
         createdByName: req.user!.fullName,
         lines: {
-          create: parsed.lines.map((l) => ({
-            costCenterId: l.costCenterId,
-            accountCode: l.accountCode,
-            category: l.category,
-            description: l.description.trim(),
-            allocatedAmount: fromCents(toCents(l.allocatedAmount)),
-          })),
+          create: parsed.lines.map((l) => {
+            const v1 = l.vol1 ?? 1;
+            const v2 = l.vol2 ?? 1;
+            const v3 = l.vol3 ?? 1;
+            const v4 = l.vol4 ?? 1;
+            const totalVol = v1 * v2 * v3 * v4;
+            const unitPrice = l.unitPrice ?? 0;
+            const semula = l.semulaAmount ?? l.allocatedAmount;
+            const pergeseran = l.pergeseranAmount ?? 0;
+            const menjadi = l.menjadiAmount ?? (semula + pergeseran);
+
+            return {
+              costCenterId: l.costCenterId,
+              accountCode: l.accountCode,
+              category: l.category,
+              description: l.description.trim(),
+              activityCode: l.activityCode?.trim() ?? null,
+              activityName: l.activityName?.trim() ?? null,
+              subActivity: l.subActivity?.trim() ?? null,
+              detailDescription: l.detailDescription?.trim() ?? null,
+              kelompokPagu: l.kelompokPagu?.trim() ?? 'Layanan Dasar',
+              fte: l.fte?.trim() ?? null,
+              vol1: v1,
+              satuan1: l.satuan1?.trim() ?? 'Unit',
+              vol2: v2,
+              satuan2: l.satuan2?.trim() ?? null,
+              vol3: v3,
+              satuan3: l.satuan3?.trim() ?? null,
+              vol4: v4,
+              satuan4: l.satuan4?.trim() ?? null,
+              totalVolume: totalVol,
+              unitPrice: fromCents(toCents(unitPrice)),
+              semulaAmount: fromCents(toCents(semula)),
+              pergeseranAmount: fromCents(toCents(pergeseran)),
+              menjadiAmount: fromCents(toCents(menjadi)),
+              allocatedAmount: fromCents(toCents(l.allocatedAmount)),
+              alasanRevisi: l.alasanRevisi?.trim() ?? null,
+            };
+          }),
         },
       },
       include: {
@@ -430,6 +508,17 @@ const reviseSchema = z.object({
       z.object({
         lineId: z.string(),
         newAllocatedAmount: z.number().positive(),
+        vol1: z.number().optional(),
+        satuan1: z.string().optional(),
+        vol2: z.number().optional(),
+        satuan2: z.string().optional(),
+        vol3: z.number().optional(),
+        satuan3: z.string().optional(),
+        vol4: z.number().optional(),
+        satuan4: z.string().optional(),
+        unitPrice: z.number().optional(),
+        pergeseranAmount: z.number().optional(),
+        alasanRevisi: z.string().optional(),
       })
     )
     .min(1),
@@ -476,9 +565,34 @@ budgetRouter.post('/:id/revise', requirePermission('budget:approve'), async (req
             `Plafon revisi baris "${line.description}" tidak boleh lebih kecil dari total komitmen + aktual yang sudah terpakai (${fromCents(usedCents)}).`
           );
         }
+
+        const semula = Number(line.semulaAmount && Number(line.semulaAmount) > 0 ? line.semulaAmount : line.allocatedAmount);
+        const pergeseran = upd.pergeseranAmount !== undefined ? upd.pergeseranAmount : (upd.newAllocatedAmount - semula);
+        const v1 = upd.vol1 ?? Number(line.vol1 ?? 1);
+        const v2 = upd.vol2 ?? Number(line.vol2 ?? 1);
+        const v3 = upd.vol3 ?? Number(line.vol3 ?? 1);
+        const v4 = upd.vol4 ?? Number(line.vol4 ?? 1);
+        const totalVol = v1 * v2 * v3 * v4;
+
         await tx.budgetLine.update({
           where: { id: line.id },
-          data: { allocatedAmount: fromCents(newAllocCents) },
+          data: {
+            allocatedAmount: fromCents(newAllocCents),
+            menjadiAmount: fromCents(newAllocCents),
+            semulaAmount: fromCents(toCents(semula)),
+            pergeseranAmount: fromCents(toCents(pergeseran)),
+            totalVolume: totalVol,
+            vol1: v1,
+            vol2: v2,
+            vol3: v3,
+            vol4: v4,
+            satuan1: upd.satuan1 ?? line.satuan1,
+            satuan2: upd.satuan2 ?? line.satuan2,
+            satuan3: upd.satuan3 ?? line.satuan3,
+            satuan4: upd.satuan4 ?? line.satuan4,
+            unitPrice: upd.unitPrice !== undefined ? fromCents(toCents(upd.unitPrice)) : line.unitPrice,
+            alasanRevisi: upd.alasanRevisi?.trim() ?? line.alasanRevisi,
+          },
         });
       }
 
