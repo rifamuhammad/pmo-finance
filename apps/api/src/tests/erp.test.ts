@@ -122,6 +122,35 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('CROSS_UNIT_FORBIDDEN');
     });
+
+    it('authenticates and retrieves active profile for all 9 demo roles (Smoke Test RBAC)', async () => {
+      const demoAccounts = [
+        'admin@pmoutama.demo.id',
+        'gm@pmoutama.demo.id',
+        'finance@pmoutama.demo.id',
+        'unit.manager@pmoutama.demo.id',
+        'procurement@pmoutama.demo.id',
+        'accounting@pmoutama.demo.id',
+        'kasir@pmoutama.demo.id',
+        'tax@pmoutama.demo.id',
+        'auditor@pmoutama.demo.id',
+      ];
+
+      for (const email of demoAccounts) {
+        const loginRes = await request(app)
+          .post('/api/v1/auth/login')
+          .send({ email, password: 'DemoErp!2026' });
+        expect(loginRes.status).toBe(200);
+        expect(loginRes.body.data.token).toBeDefined();
+
+        const meRes = await request(app)
+          .get('/api/v1/auth/me')
+          .set('Authorization', `Bearer ${loginRes.body.data.token}`);
+        expect(meRes.status).toBe(200);
+        expect(meRes.body.data.user.email).toBe(email);
+        expect(meRes.body.data.user.roleCode).toBeDefined();
+      }
+    });
   });
 
   describe('2. Budget Planning, Separation of Duties & Revision History', () => {

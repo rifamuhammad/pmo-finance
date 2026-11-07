@@ -16,11 +16,10 @@ Kebutuhan nyata di lapangan:
 
 ---
 
-## 🎯 2. Tiket KOI-80 (PMO-031): Strategi Master COA Operasional PMO (~70 Akun)
-
-- **Status Jira:** `Done` (Approved oleh Boss Dell)
-- **Branch GitHub:** `feature/KOI-80-injeksi-master-coa-pmo` *(Merged ke `main` - Commit `fdae0a0`)*
-- **Dataset File:** `prisma/seeds/coa-pmo-official.json`
+| `KOI-80` | Injeksi Master COA Spesifik PMO UTama | `Done` | [Repo Doc](./tasks/KOI-80-injeksi-master-coa-pmo.md) | [Confluence](https://itsolutionpmoutama.atlassian.net/wiki/spaces/PMO/pages/2261023) |
+| `KOI-84` | Setup Master Data 5 Unit Bisnis PMO & Cost Center | `Done` | [Repo Doc](./tasks/KOI-84-setup-master-unit-bisnis-cost-center.md) | [Confluence](https://itsolutionpmoutama.atlassian.net/wiki/spaces/PMO/pages/2162733) |
+| `KOI-87` | Master Periode Fiskal & Skema Locking Tutup Buku | `Done` | [Repo Doc](./tasks/KOI-87-master-periode-fiskal-locking.md) | [Confluence](https://itsolutionpmoutama.atlassian.net/wiki/spaces/PMO/pages/2293783) |
+| `KOI-90` | Integration Testing DB & Smoke Test Sesi RBAC | `In Review` | [Repo Doc](./tasks/KOI-90-integration-testing-db-rbac.md) | [Confluence](https://itsolutionpmoutama.atlassian.net/wiki/spaces/PMO/pages/2261043) |
 
 ### Inti Keputusan Teknis
 Sistem **tidak** memuat 1.063 akun umum universitas yang tidak relevan dengan aktivitas bisnis unit. Sebagai gantinya, diterapkan **70 Akun Operasional Terkurasi** yang bersumber dari:
