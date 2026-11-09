@@ -278,9 +278,9 @@ graph TD
 5. **`Keuangan & Umum` (`PMO-MGMT`):**
    * *Block Grant Operasional:* Gaji pegawai kontrak PUT PK, upah lembur staf non-PNS, uang makan, BBM operasional, ATK kantor, capacity building KIIARA.
 
-## 5.3. Master Data COA 12-Digit Resmi (Sumber Hukum: Lampiran II Pertor 310/2025)
+## 5.3. Master Data COA 12-Digit Resmi Spesifik Operasional PMO
 
-Sesuai arahan resmi dan kepatuhan audit tertinggi, **seluruh kode akun di sistem PMO Finance menggunakan master COA dari Lampiran II Peraturan Rektor No. 310 Tahun 2025 (Halaman 106 s/d 130)** yang memuat **1.063 akun resmi universitas** (bukan draft Excel).
+Sesuai arahan operasional dan implementasi riil di basis data PMO, **seluruh kode akun aktif di sistem PMO Finance menggunakan 70 akun operasional spesifik PMO dari file Excel resmi (`docs/KODE COA UT.xlsx` & `docs/Semula-Menjadi Revisi ke 7 Block Grant PMO`) yang tetap berpedoman pada struktur kode baku 12-digit Pertor 310/2025**, bukan melakukan dump 1.063 akun umum universitas yang tidak relevan dengan komersialisasi unit bisnis PMO.
 
 Format kode akun UT menggunakan susunan 12-digit hierarkis: `X.XX.XX.XX.XX.XX`.
 

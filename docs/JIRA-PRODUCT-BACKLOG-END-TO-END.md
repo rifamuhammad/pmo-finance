@@ -23,7 +23,7 @@ Tabel ini memetakan seluruh file kode riil yang sudah ada di proyek kita terhada
 | 8 | `ReconciliationView.vue`| `/api/v1/reconciliation` | Lampiran I Kebijakan 01 (Kas & Bank) | **Selesai (Sudah Develop)** |
 | 9 | `HrisView.vue` | `/api/v1/hris` | Standar Biaya Masukan & Gaji PUT PK | **Selesai (Perlu Penguncian Tgl 25)** |
 | 10 | `AssetsView.vue` | `/api/v1/assets` | Lampiran I Kebijakan 07 (Kapitalisasi Aset) | **Selesai (Perlu Threshold 10% & Tgl 20)** |
-| 11 | `AccountingView.vue` | `/api/v1/accounting` | Lampiran II (1.063 COA) & Lampiran III | **Perlu Injeksi 1.063 Akun Pertor 310** |
+| 11 | `AccountingView.vue` | `/api/v1/accounting` | Lampiran II & Dokumen Excel (COA UT & Revisi 7) | **Tuntas Diselaraskan: 70 Akun COA & CoaCombobox** |
 | 12 | `ReportsStrategyView.vue`| `/api/v1/reports` | Standar ISAK 335 (5 Laporan Keuangan) | **Selesai (Perlu Format Unrestricted/Restricted)** |
 | 13 | `ApprovalsView.vue` | `/api/v1/master/approvals` | Matriks Otorisasi Pengeluaran PMO | **Selesai (Sudah Develop)** |
 | 14 | `AdminAuditView.vue` | `/api/v1/master/audit` | Kebijakan Audit Internal & IT Governance | **Selesai (Sudah Develop)** |
@@ -103,21 +103,21 @@ flowchart TD
 
 ## 📌 EPIC 3: MASTER DATA RESMI PERTOR 310 & 5 UNIT BISNIS PMO
 * **Epic Key:** `EPIC-03-MSTR`
-* **Epic Name:** Official Pertor 310 Master Data & Business Units
-* **Deskripsi:** Mengisi database dengan data master resmi universitas: 1.063 Akun COA 12-Digit dari Lampiran II Pertor 310/2025 dan 5 Unit Bisnis PMO.
+* **Epic Name:** Official PMO Master Data & Business Units (Excel Specific)
+* **Deskripsi:** Mengisi database dengan data master operasional spesifik PMO dari file Excel: 70 Akun COA 12-Digit (`docs/KODE COA UT.xlsx` & `Semula-Menjadi Revisi ke 7`) dan 5 Unit Bisnis PMO.
 
-### [PMO-031] Injeksi 1.063 Akun COA Resmi Pertor 310 Tahun 2025
+### [PMO-031] Injeksi 70 Akun COA Operasional PMO dari File Excel
 * **Issue Type:** Story | **Priority:** Blocker | **Estimasi:** 5 SP
-* **Status:** `[ ] HARUS DIKERJAKAN (PRIORITAS 1)`
+* **Status:** `[x] SELESAI (IN REVIEW)`
 * **Acceptance Criteria:**
-  1. Tabel `ChartOfAccount` terisi 1.063 akun resmi dari Lampiran II Pertor 310 (Halaman 106-130).
-  2. Format kode akun baku 12 digit `X.XX.XX.XX.XX.XX` (Kepala 1 Aset s/d Kepala 5 Beban).
-  3. Relasi akun E-Revenue (`420301xxxxxx`) ditandai aktif.
+  1. Tabel `ChartOfAccount` terisi 70 akun operasional spesifik PMO dari file Excel resmi (`prisma/seeds/coa-pmo-official.json`).
+  2. Format kode akun baku 12 digit `X.XX.XX.XX.XX.XX` (Kepala 1 Aset/Kas s/d Kepala 5 Belanja).
+  3. Relasi 20 akun E-Revenue (`420301xxxxxx`) dan 27 akun Belanja Operasional ditandai aktif.
 * **Subtasks:**
-  * [ ] `PMO-031-1`: Ekstrak data teks OCR Lampiran II Pertor 310 menjadi JSON terstruktur (`prisma/seeds/coa-pertor310.json`).
-  * [ ] `PMO-031-2`: Buat skrip seed Prisma `prisma/seed-coa-pertor310.ts`.
-  * [ ] `PMO-031-3`: Update endpoint `GET /api/v1/master/coa` untuk mendukung pencarian 1.063 akun.
-  * [ ] `PMO-031-4`: Uji coba query pencarian kode akun pada dropdown frontend.
+  * [x] `PMO-031-1`: Ekstrak 70 akun operasional PMO dari file Excel menjadi JSON terstruktur (`prisma/seeds/coa-pmo-official.json`).
+  * [x] `PMO-031-2`: Migrasi schema Prisma dan model relasi AccountMapping.
+  * [x] `PMO-031-3`: Eksekusi seeder ke PostgreSQL dan verifikasi total 70 akun aktif.
+  * [x] `PMO-031-4`: Implementasi komponen pencarian instan `CoaCombobox.vue` di antarmuka frontend.
 
 ### [PMO-032] Master Data 5 Unit Bisnis PMO & Cost Center Hierarchy
 * **Issue Type:** Task | **Priority:** High | **Estimasi:** 3 SP

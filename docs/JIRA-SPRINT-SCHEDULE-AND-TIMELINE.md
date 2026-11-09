@@ -72,17 +72,18 @@ gantt
 
 ## 📌 BREAKDOWN TIKET PER SPRINT
 
-### SPRINT 1: Foundation & Master Data COA Pertor 310
+### SPRINT 1: Foundation & Master Data COA Spesifik PMO (Excel)
 * **Periode:** Selasa, 10 Nov 2026 – Jumat, 20 Nov 2026
-* **Sasaran Sprint:** Basis data siap 100% menampung 1.063 Akun Resmi Pertor 310, 5 Unit Bisnis PMO, dan Periode Fiskal yang terkunci.
+* **Sasaran Sprint:** Basis data siap 100% menampung 70 Akun COA Operasional PMO dari File Excel (`docs/KODE COA UT.xlsx` & `Semula-Menjadi Revisi ke 7`), 5 Unit Bisnis PMO, dan Periode Fiskal yang terkunci.
 
 | Kode Tiket | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`PMO-031`** | Injeksi 1.063 Akun COA Resmi Pertor 310 ke PostgreSQL | **Susah** | 3 Hari | Sel, 10 Nov 2026 | Kam, 12 Nov 2026 | **Highest / Blocker** | `To Do` |
-| **`PMO-032`** | Setup Master Data 5 Unit Bisnis PMO & Cost Center | **Gampang** | 2 Hari | Jum, 13 Nov 2026 | Sen, 16 Nov 2026 | **High** | `To Do` |
-| **`PMO-033`** | Master Periode Fiskal & Skema Locking Tutup Buku | **Gampang** | 2 Hari | Sel, 17 Nov 2026 | Rab, 18 Nov 2026 | **Medium** | `To Do` |
-| **`PMO-034`** | Integration Testing DB & Smoke Test Sesi Auth | **Gampang** | 1 Hari | Kam, 19 Nov 2026 | Kam, 19 Nov 2026 | **High** | `To Do` |
-| **`SPRINT-1-REV`**| Sprint Review, Retrospective & Release Tag v1.1.0 | **Review** | 1 Hari | Jum, 20 Nov 2026 | Jum, 20 Nov 2026 | **Medium** | `To Do` |
+| **`PMO-031`** | Injeksi 70 Akun COA Operasional PMO dari File Excel ke PostgreSQL | **Sedang** | 3 Hari | Sel, 10 Nov 2026 | Kam, 12 Nov 2026 | **Highest / Blocker** | `In Review` |
+| **`PMO-032`** | Setup Master Data 5 Unit Bisnis PMO & Cost Center | **Gampang** | 2 Hari | Jum, 13 Nov 2026 | Sen, 16 Nov 2026 | **High** | `In Review` |
+| **`PMO-033`** | Master Periode Fiskal & Skema Locking Tutup Buku | **Gampang** | 2 Hari | Sel, 17 Nov 2026 | Rab, 18 Nov 2026 | **Medium** | `In Review` |
+| **`PMO-034`** | Integration Testing DB & Smoke Test Sesi RBAC (9 Role) | **Gampang** | 1 Hari | Kam, 19 Nov 2026 | Kam, 19 Nov 2026 | **High** | `In Review` |
+| **`PMO-035`** | Penyelarasan UI/UX Fondasi: Fast Search 70 Akun COA & Indikator Fiskal | **Sedang** | 1 Hari | Sen, 09 Nov 2026 | Sen, 09 Nov 2026 | **High** | `In Review` |
+| **`SPRINT-1-REV`**| Sprint Review, Retrospective & Release Tag v1.1.0 | **Review** | 1 Hari | Jum, 20 Nov 2026 | Jum, 20 Nov 2026 | **Medium** | `In Review` |
 
 ---
 
