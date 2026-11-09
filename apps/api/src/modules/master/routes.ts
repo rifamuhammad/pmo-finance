@@ -20,6 +20,7 @@ masterRouter.get('/overview', async (req, res, next) => {
       approvalPolicies,
       taxConfigurations,
       systemSettings,
+      chartOfAccounts,
     ] = await Promise.all([
       prisma.businessUnit.findMany({ orderBy: { code: 'asc' } }),
       prisma.costCenter.findMany({ include: { businessUnit: true }, orderBy: { code: 'asc' } }),
@@ -29,6 +30,7 @@ masterRouter.get('/overview', async (req, res, next) => {
       prisma.approvalPolicy.findMany({ orderBy: { module: 'asc' } }),
       prisma.taxConfiguration.findMany({ orderBy: { taxCode: 'asc' } }),
       prisma.systemSetting.findMany({ orderBy: { key: 'asc' } }),
+      prisma.chartOfAccount.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     ]);
 
     res.json({
@@ -42,6 +44,7 @@ masterRouter.get('/overview', async (req, res, next) => {
         approvalPolicies,
         taxConfigurations,
         systemSettings,
+        chartOfAccounts,
       },
       meta: { requestId: req.requestId },
     });

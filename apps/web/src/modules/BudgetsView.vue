@@ -10,6 +10,7 @@ import ModalDialog from '../components/ModalDialog.vue';
 import AlertBanner from '../components/AlertBanner.vue';
 import PaginationControl from '../components/PaginationControl.vue';
 import CurrencyInput from '../components/CurrencyInput.vue';
+import CoaCombobox, { type CoaAccountItem } from '../components/CoaCombobox.vue';
 
 // PrimeVue official components
 import Drawer from 'primevue/drawer';
@@ -24,19 +25,90 @@ const feedbackMsg = ref('');
 const budgets = ref<any[]>([]);
 const selectedBudget = ref<any>(null);
 const isDrawerOpen = ref(false);
-const master = ref<any>({ businessUnits: [], costCenters: [], fundSources: [], fiscalPeriods: [] });
+const master = ref<any>({ businessUnits: [], costCenters: [], fundSources: [], fiscalPeriods: [], chartOfAccounts: [] });
 
 const statusFilter = ref('');
+const unitFilter = ref('ALL');
 const searchQuery = ref('');
 
-// Setup Pagination with default 6 rows per page
+// Computed filtered budgets based on unit filter
+const filteredBudgets = computed(() => {
+  let list = budgets.value || [];
+  if (unitFilter.value !== 'ALL') {
+    list = list.filter(
+      (b) => b.businessUnitId === unitFilter.value || b.businessUnit?.code === unitFilter.value
+    );
+  }
+  return list;
+});
+
+// Setup Pagination with default 6 rows per page based on filtered list
 const {
   currentPage,
   pageSize,
   totalItems,
   paginatedItems: paginatedBudgets,
   resetPage,
-} = usePagination(budgets, 6);
+} = usePagination(filteredBudgets, 6);
+
+// Master 70 akun operasional PMO resmi untuk CoaCombobox
+const officialCoaAccounts = computed<CoaAccountItem[]>(() => {
+  return master.value.chartOfAccounts || [];
+});
+
+// Helper Semula - Menjadi untuk budget dokumen
+function getBudgetSemulaMenjadi(b: any) {
+  const lines = b?.lines || [];
+  if (lines.length === 0) {
+    const total = Number(b?.totalAllocated) || 0;
+    return {
+      semula: total,
+      pergeseran: 0,
+      menjadi: total,
+      selisih: 0,
+    };
+  }
+  const semula = lines.reduce(
+    (sum: number, l: any) => sum + (Number(l.semulaAmount) || Number(l.allocatedAmount) || 0),
+    0
+  );
+  const pergeseran = lines.reduce((sum: number, l: any) => sum + (Number(l.pergeseranAmount) || 0), 0);
+  const menjadi = lines.reduce(
+    (sum: number, l: any) =>
+      sum +
+      (Number(l.menjadiAmount) ||
+        Number(l.semulaAmount || l.allocatedAmount) + Number(l.pergeseranAmount || 0)),
+    0
+  );
+  return {
+    semula: semula > 0 ? semula : (Number(b?.totalAllocated) || 0),
+    pergeseran,
+    menjadi: menjadi > 0 ? menjadi : (Number(b?.totalAllocated) || 0),
+    selisih: semula - menjadi,
+  };
+}
+
+function formatPergeseran(amount: number) {
+  if (!amount || amount === 0) return 'Rp 0';
+  const prefix = amount > 0 ? '+' : '';
+  return `${prefix}${formatRupiah(amount)}`;
+}
+
+function formatLineVolume(l: any) {
+  const parts: string[] = [];
+  if (l.vol1 && Number(l.vol1) > 0) parts.push(`${l.vol1} ${l.satuan1 || ''}`.trim());
+  if (l.vol2 && Number(l.vol2) > 0) parts.push(`${l.vol2} ${l.satuan2 || ''}`.trim());
+  if (l.vol3 && Number(l.vol3) > 0) parts.push(`${l.vol3} ${l.satuan3 || ''}`.trim());
+  if (l.vol4 && Number(l.vol4) > 0) parts.push(`${l.vol4} ${l.satuan4 || ''}`.trim());
+  if (parts.length === 0) return '-';
+  return parts.join(' × ');
+}
+
+function getAccountName(code: string) {
+  if (!code) return '';
+  const acc = (master.value.chartOfAccounts || []).find((a: any) => a.code === code);
+  return acc ? acc.name : '';
+}
 
 // Computed status breakdown for interactive filter pills
 const statusCounts = computed(() => {
@@ -186,7 +258,19 @@ const createForm = ref({
       costCenterId: '',
       accountCode: '',
       category: 'OPEX',
+      subActivity: '',
       description: '',
+      detailDescription: '',
+      useMultiVolume: false,
+      vol1: 1,
+      satuan1: 'Bulan',
+      vol2: 1,
+      satuan2: 'Kegiatan',
+      vol3: 1,
+      satuan3: '',
+      vol4: 1,
+      satuan4: '',
+      unitPrice: 0,
       allocatedAmount: 0,
     },
   ],
@@ -197,15 +281,51 @@ const createTotalAllocated = computed(() => {
   return createForm.value.lines.reduce((sum, l) => sum + (Number(l.allocatedAmount) || 0), 0);
 });
 
+// Helper auto-calculate row allocatedAmount from 4-level volume
+function updateLineAmountFromVolume(line: any) {
+  if (!line.useMultiVolume) return;
+  const v1 = Number(line.vol1) || 1;
+  const v2 = Number(line.vol2) || 1;
+  const v3 = Number(line.vol3) || 1;
+  const v4 = Number(line.vol4) || 1;
+  const price = Number(line.unitPrice) || 0;
+  line.allocatedAmount = v1 * v2 * v3 * v4 * price;
+}
+
 // Revise Budget Modal
 const reviseOpen = ref(false);
 const reviseReason = ref('');
-const reviseLines = ref<Array<{ lineId: string; description: string; current: number; newAllocatedAmount: number }>>([]);
+interface ReviseLineItem {
+  lineId: string;
+  description: string;
+  accountCode: string;
+  semula: number;
+  pergeseran: number;
+  newAllocatedAmount: number;
+}
+const reviseLines = ref<ReviseLineItem[]>([]);
 
-// Live calculated total for revise modal
-const reviseTotalAllocated = computed(() => {
-  return reviseLines.value.reduce((sum, l) => sum + (Number(l.newAllocatedAmount) || 0), 0);
+function onReviseShiftChange(rl: ReviseLineItem) {
+  rl.newAllocatedAmount = Number(rl.semula || 0) + Number(rl.pergeseran || 0);
+}
+
+function onReviseMenjadiChange(rl: ReviseLineItem) {
+  rl.pergeseran = Number(rl.newAllocatedAmount || 0) - Number(rl.semula || 0);
+}
+
+// Live summary calculation for revise modal
+const reviseSummary = computed(() => {
+  const totalSemula = reviseLines.value.reduce((sum, l) => sum + (Number(l.semula) || 0), 0);
+  const totalPergeseran = reviseLines.value.reduce((sum, l) => sum + (Number(l.pergeseran) || 0), 0);
+  const totalMenjadi = reviseLines.value.reduce((sum, l) => sum + (Number(l.newAllocatedAmount) || 0), 0);
+  return {
+    totalSemula,
+    totalPergeseran,
+    totalMenjadi,
+  };
 });
+
+const reviseTotalAllocated = computed(() => reviseSummary.value.totalMenjadi);
 
 async function loadMasterAndBudgets() {
   loading.value = true;
@@ -292,7 +412,19 @@ function openCreateBudget() {
         costCenterId: defaultCc,
         accountCode: '',
         category: 'OPEX',
+        subActivity: '',
         description: '',
+        detailDescription: '',
+        useMultiVolume: false,
+        vol1: 1,
+        satuan1: 'Bulan',
+        vol2: 1,
+        satuan2: 'Kegiatan',
+        vol3: 1,
+        satuan3: '',
+        vol4: 1,
+        satuan4: '',
+        unitPrice: 0,
         allocatedAmount: 0,
       },
     ],
@@ -309,7 +441,19 @@ function addBudgetLineRow() {
     costCenterId: defaultCc,
     accountCode: '',
     category: 'OPEX',
+    subActivity: '',
     description: '',
+    detailDescription: '',
+    useMultiVolume: false,
+    vol1: 1,
+    satuan1: 'Bulan',
+    vol2: 1,
+    satuan2: 'Kegiatan',
+    vol3: 1,
+    satuan3: '',
+    vol4: 1,
+    satuan4: '',
+    unitPrice: 0,
     allocatedAmount: 0,
   });
 }
@@ -326,9 +470,34 @@ async function submitCreateBudget() {
   feedbackMsg.value = '';
   isSubmitting.value = true;
   try {
+    const payload = {
+      ...createForm.value,
+      lines: createForm.value.lines.map((l) => ({
+        costCenterId: l.costCenterId,
+        accountCode: l.accountCode,
+        category: l.category,
+        description: l.description,
+        subActivity: l.subActivity?.trim() || undefined,
+        detailDescription: l.detailDescription?.trim() || undefined,
+        vol1: Number(l.vol1 || 1),
+        satuan1: l.satuan1?.trim() || undefined,
+        vol2: Number(l.vol2 || 1),
+        satuan2: l.satuan2?.trim() || undefined,
+        vol3: Number(l.vol3 || 1),
+        satuan3: l.satuan3?.trim() || undefined,
+        vol4: Number(l.vol4 || 1),
+        satuan4: l.satuan4?.trim() || undefined,
+        unitPrice: Number(l.unitPrice || 0),
+        semulaAmount: Number(l.allocatedAmount),
+        pergeseranAmount: 0,
+        menjadiAmount: Number(l.allocatedAmount),
+        allocatedAmount: Number(l.allocatedAmount),
+      })),
+    };
+
     const res = await apiFetch('/budgets', {
       method: 'POST',
-      body: JSON.stringify(createForm.value),
+      body: JSON.stringify(payload),
     });
     createOpen.value = false;
 
@@ -376,12 +545,19 @@ async function approveBudget(budget: any) {
 
 function openReviseModal(budget: any) {
   reviseReason.value = '';
-  reviseLines.value = (budget.lines || []).map((l: any) => ({
-    lineId: l.id,
-    description: l.description,
-    current: l.allocatedAmount,
-    newAllocatedAmount: l.allocatedAmount,
-  }));
+  reviseLines.value = (budget.lines || []).map((l: any) => {
+    const semula = Number(l.semulaAmount) || Number(l.allocatedAmount) || 0;
+    const pergeseran = Number(l.pergeseranAmount) || 0;
+    const menjadi = Number(l.menjadiAmount) || semula + pergeseran;
+    return {
+      lineId: l.id,
+      description: l.description,
+      accountCode: l.accountCode,
+      semula,
+      pergeseran,
+      newAllocatedAmount: menjadi,
+    };
+  });
   reviseOpen.value = true;
 }
 
@@ -397,6 +573,8 @@ async function submitRevision() {
         lineUpdates: reviseLines.value.map((l) => ({
           lineId: l.lineId,
           newAllocatedAmount: Number(l.newAllocatedAmount),
+          pergeseranAmount: Number(l.pergeseran),
+          alasanRevisi: reviseReason.value,
         })),
       }),
     });
@@ -530,82 +708,114 @@ onMounted(loadMasterAndBudgets);
 
     <!-- Filter & Search Toolbar (Floating White Card with Pill Tabs) -->
     <section class="toolbar-pill-card">
-      <div class="toolbar-pill-group">
-        <button
-          type="button"
-          class="filter-pill-btn"
-          :class="{ active: statusFilter === '' }"
-          @click="setStatusFilter('')"
-        >
-          <span>Semua Anggaran</span>
-          <span class="pill-badge">{{ statusCounts.ALL }}</span>
-        </button>
+      <!-- Row 1: Unit Bisnis Filter Pills -->
+      <div class="toolbar-unit-filter-row">
+        <span class="toolbar-unit-label">
+          <i class="pi pi-building text-xs"></i>
+          <span>Unit Bisnis:</span>
+        </span>
+        <div class="toolbar-pill-group">
+          <button
+            type="button"
+            class="filter-pill-btn filter-pill-unit"
+            :class="{ active: unitFilter === 'ALL' }"
+            @click="unitFilter = 'ALL'"
+          >
+            <span>Semua Unit</span>
+          </button>
 
-        <button
-          type="button"
-          class="filter-pill-btn"
-          :class="{ active: statusFilter === 'APPROVED' }"
-          @click="setStatusFilter('APPROVED')"
-        >
-          <span class="status-dot dot-approved"></span>
-          <span>Disetujui (Approved)</span>
-          <span class="pill-badge">{{ statusCounts.APPROVED }}</span>
-        </button>
-
-        <button
-          type="button"
-          class="filter-pill-btn"
-          :class="{ active: statusFilter === 'SUBMITTED' }"
-          @click="setStatusFilter('SUBMITTED')"
-        >
-          <span class="status-dot dot-submitted"></span>
-          <span>Menunggu Approval</span>
-          <span class="pill-badge">{{ statusCounts.SUBMITTED }}</span>
-        </button>
-
-        <button
-          type="button"
-          class="filter-pill-btn"
-          :class="{ active: statusFilter === 'DRAFT' }"
-          @click="setStatusFilter('DRAFT')"
-        >
-          <span class="status-dot dot-draft"></span>
-          <span>Draft</span>
-          <span class="pill-badge">{{ statusCounts.DRAFT }}</span>
-        </button>
-
-        <button
-          type="button"
-          class="filter-pill-btn"
-          :class="{ active: statusFilter === 'REVISED' }"
-          @click="setStatusFilter('REVISED')"
-        >
-          <span class="status-dot dot-revised"></span>
-          <span>Direvisi</span>
-          <span class="pill-badge">{{ statusCounts.REVISED }}</span>
-        </button>
+          <button
+            v-for="u in master.businessUnits"
+            :key="u.id"
+            type="button"
+            class="filter-pill-btn filter-pill-unit"
+            :class="{ active: unitFilter === u.id || unitFilter === u.code }"
+            @click="unitFilter = u.id"
+          >
+            <span>{{ u.code }}</span>
+          </button>
+        </div>
       </div>
 
-      <!-- Search Field with Pill Input -->
-      <div class="toolbar-search-wrap">
-        <i class="pi pi-search search-lens-ico"></i>
-        <input
-          id="bdg-search"
-          v-model="searchQuery"
-          type="text"
-          class="search-pill-input"
-          placeholder="Cari nomor dokumen / judul..."
-          @keyup.enter="loadMasterAndBudgets"
-        />
-        <button
-          v-if="searchQuery"
-          type="button"
-          class="search-clear-btn"
-          title="Hapus filter pencarian"
-          @click="clearSearch"
-        >
-          <i class="pi pi-times"></i>
-        </button>
+      <!-- Row 2: Status Pills + Search Field -->
+      <div class="toolbar-status-search-row">
+        <div class="toolbar-pill-group">
+          <button
+            type="button"
+            class="filter-pill-btn"
+            :class="{ active: statusFilter === '' }"
+            @click="setStatusFilter('')"
+          >
+            <span>Semua Status</span>
+            <span class="pill-badge">{{ statusCounts.ALL }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="filter-pill-btn"
+            :class="{ active: statusFilter === 'APPROVED' }"
+            @click="setStatusFilter('APPROVED')"
+          >
+            <span class="status-dot dot-approved"></span>
+            <span>Disetujui</span>
+            <span class="pill-badge">{{ statusCounts.APPROVED }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="filter-pill-btn"
+            :class="{ active: statusFilter === 'SUBMITTED' }"
+            @click="setStatusFilter('SUBMITTED')"
+          >
+            <span class="status-dot dot-submitted"></span>
+            <span>Menunggu Approval</span>
+            <span class="pill-badge">{{ statusCounts.SUBMITTED }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="filter-pill-btn"
+            :class="{ active: statusFilter === 'DRAFT' }"
+            @click="setStatusFilter('DRAFT')"
+          >
+            <span class="status-dot dot-draft"></span>
+            <span>Draft</span>
+            <span class="pill-badge">{{ statusCounts.DRAFT }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="filter-pill-btn"
+            :class="{ active: statusFilter === 'REVISED' }"
+            @click="setStatusFilter('REVISED')"
+          >
+            <span class="status-dot dot-revised"></span>
+            <span>Direvisi</span>
+            <span class="pill-badge">{{ statusCounts.REVISED }}</span>
+          </button>
+        </div>
+
+        <!-- Search Field with Pill Input -->
+        <div class="toolbar-search-wrap">
+          <i class="pi pi-search search-lens-ico"></i>
+          <input
+            id="bdg-search"
+            v-model="searchQuery"
+            type="text"
+            class="search-pill-input"
+            placeholder="Cari nomor dokumen / judul..."
+            @keyup.enter="loadMasterAndBudgets"
+          />
+          <button
+            v-if="searchQuery"
+            type="button"
+            class="search-clear-btn"
+            title="Hapus filter pencarian"
+            @click="clearSearch"
+          >
+            <i class="pi pi-times"></i>
+          </button>
+        </div>
       </div>
     </section>
 
@@ -613,8 +823,8 @@ onMounted(loadMasterAndBudgets);
     <section class="main-table-card">
       <div class="table-card-top">
         <div class="table-top-left">
-          <h2 class="table-card-title">Daftar Dokumen Anggaran RKAP</h2>
-          <span class="table-card-count">{{ budgets.length }} Total Dokumen</span>
+          <h2 class="table-card-title">Daftar Dokumen Anggaran RKAP (Semula - Menjadi)</h2>
+          <span class="table-card-count">{{ filteredBudgets.length }} dari {{ budgets.length }} Dokumen Terdaftar</span>
         </div>
         <div class="table-card-legend">
           <span class="legend-unit"><span class="legend-color-dot dot-lilac"></span> Realisasi</span>
@@ -628,11 +838,11 @@ onMounted(loadMasterAndBudgets);
         v-if="loading"
         state="loading"
         title="Memuat Dokumen Anggaran"
-        message="Mengambil rincian mata anggaran, alokasi plafon, komitmen aktif, dan histori versi..."
+        message="Mengambil rincian mata anggaran, alokasi plafon Semula-Menjadi, komitmen aktif, dan histori versi..."
       />
 
       <StateBanner
-        v-else-if="budgets.length === 0"
+        v-else-if="filteredBudgets.length === 0"
         state="empty"
         title="Belum Ada Dokumen Anggaran"
         message="Tidak ada dokumen anggaran yang cocok dengan filter aktif. Coba ubah kata kunci atau buat draft anggaran baru."
@@ -640,18 +850,20 @@ onMounted(loadMasterAndBudgets);
         @action="openCreateBudget"
       />
 
-      <!-- Full-Width Data Table -->
+      <!-- Full-Width Data Table (Format Semula - Menjadi) -->
       <div v-else class="table-scroll-container">
         <table class="aesthetic-data-table">
           <thead>
             <tr>
-              <th style="min-width: 170px;">Nomor Dokumen</th>
-              <th style="min-width: 250px;">Judul Anggaran & Unit Bisnis</th>
-              <th class="money-col" style="min-width: 160px;">Total Plafon (Allocated)</th>
-              <th style="min-width: 200px;">Komposisi Serapan</th>
-              <th class="money-col" style="min-width: 150px;">Sisa Bebas</th>
-              <th style="min-width: 130px; text-align: center;">Status</th>
-              <th style="min-width: 90px; text-align: center;">Aksi</th>
+              <th style="min-width: 150px;">Nomor & Unit</th>
+              <th style="min-width: 220px;">Judul Anggaran</th>
+              <th class="money-col" style="min-width: 140px;">Pagu Semula</th>
+              <th class="money-col" style="min-width: 130px; text-align: center;">Pergeseran (+/-)</th>
+              <th class="money-col" style="min-width: 150px;">Pagu Menjadi</th>
+              <th class="money-col" style="min-width: 130px;">Realisasi</th>
+              <th class="money-col" style="min-width: 130px;">Sisa Bebas</th>
+              <th style="min-width: 110px; text-align: center;">Status</th>
+              <th style="min-width: 70px; text-align: center;">Aksi</th>
             </tr>
           </thead>
           <tbody>
@@ -665,7 +877,7 @@ onMounted(loadMasterAndBudgets);
               <!-- 1. Nomor Dokumen & Unit -->
               <td>
                 <div class="cell-doc-col">
-                  <span class="doc-code-pill">{{ b.docNumber }}</span>
+                  <span class="doc-code-pill font-mono">{{ b.docNumber }}</span>
                   <div class="doc-tags-row">
                     <span class="unit-badge-pill" :class="getUnitBadgeClass(b.businessUnit?.code)">
                       {{ b.businessUnit?.code || 'BU' }}
@@ -687,51 +899,58 @@ onMounted(loadMasterAndBudgets);
                 </div>
               </td>
 
-              <!-- 3. Total Plafon (Allocated) -->
+              <!-- 3. Pagu Semula -->
               <td class="money-col">
-                <div class="amount-number-bold">{{ formatRupiah(b.totalAllocated) }}</div>
-                <div class="amount-target-sub">Target Rev: {{ formatRupiah(b.revenueTarget || 0) }}</div>
-              </td>
-
-              <!-- 4. Stacked Serapan Bar -->
-              <td>
-                <div class="cell-absorption-col">
-                  <div class="stacked-bar-rail" :title="`Realisasi: ${getBudgetAbsorption(b).actualPct}%, PO: ${getBudgetAbsorption(b).committedPct}%, Sisa: ${getBudgetAbsorption(b).freePct}%`">
-                    <div
-                      class="rail-fill fill-lilac"
-                      :style="{ width: getBudgetAbsorption(b).actualPct + '%' }"
-                    ></div>
-                    <div
-                      class="rail-fill fill-amber"
-                      :style="{ width: getBudgetAbsorption(b).committedPct + '%' }"
-                    ></div>
-                    <div
-                      class="rail-fill fill-emerald"
-                      :style="{ width: getBudgetAbsorption(b).freePct + '%' }"
-                    ></div>
-                  </div>
-                  <div class="absorption-text-split">
-                    <span class="text-lilac font-medium">{{ getBudgetAbsorption(b).actualPct }}% realisasi</span>
-                    <span class="text-amber font-medium">{{ getBudgetAbsorption(b).committedPct }}% PO</span>
-                  </div>
+                <div class="amount-number-bold font-mono tabular-nums">
+                  {{ formatRupiah(getBudgetSemulaMenjadi(b).semula) }}
                 </div>
               </td>
 
-              <!-- 5. Sisa Bebas -->
+              <!-- 4. Pergeseran (+/-) -->
+              <td class="money-col" style="text-align: center;">
+                <span
+                  class="shift-pill font-mono tabular-nums"
+                  :class="{
+                    'shift-plus': getBudgetSemulaMenjadi(b).pergeseran > 0,
+                    'shift-minus': getBudgetSemulaMenjadi(b).pergeseran < 0,
+                    'shift-zero': getBudgetSemulaMenjadi(b).pergeseran === 0
+                  }"
+                >
+                  {{ formatPergeseran(getBudgetSemulaMenjadi(b).pergeseran) }}
+                </span>
+              </td>
+
+              <!-- 5. Pagu Menjadi -->
               <td class="money-col">
-                <div class="amount-number-emerald">{{ formatRupiah(b.availableAmount) }}</div>
+                <div class="amount-number-bold font-mono tabular-nums text-blue-700">
+                  {{ formatRupiah(getBudgetSemulaMenjadi(b).menjadi) }}
+                </div>
+                <div class="amount-target-sub font-mono tabular-nums">Rev: {{ formatRupiah(b.revenueTarget || 0) }}</div>
+              </td>
+
+              <!-- 6. Realisasi Beban -->
+              <td class="money-col">
+                <div class="amount-number-bold font-mono tabular-nums text-violet">
+                  {{ formatRupiah(b.totalActual || 0) }}
+                </div>
+                <div class="amount-target-sub font-mono tabular-nums">PO: {{ formatRupiah(b.totalCommitted || 0) }}</div>
+              </td>
+
+              <!-- 7. Sisa Bebas -->
+              <td class="money-col">
+                <div class="amount-number-emerald font-mono tabular-nums">{{ formatRupiah(b.availableAmount) }}</div>
                 <div class="amount-percent-emerald">
                   <i class="pi pi-check text-xs"></i>
-                  {{ b.totalAllocated > 0 ? Math.round(((b.availableAmount || 0) / b.totalAllocated) * 100) : 0 }}% kapasitas
+                  {{ b.totalAllocated > 0 ? Math.round(((b.availableAmount || 0) / b.totalAllocated) * 100) : 0 }}% sisa
                 </div>
               </td>
 
-              <!-- 6. Status -->
+              <!-- 8. Status -->
               <td style="text-align: center;">
                 <StatusBadge :status="b.status" />
               </td>
 
-              <!-- 7. Action Button -->
+              <!-- 9. Action Button -->
               <td style="text-align: center;">
                 <button
                   type="button"
@@ -848,39 +1067,50 @@ onMounted(loadMasterAndBudgets);
           <MeterGroup :value="meterItems" />
         </div>
 
-        <!-- 4 Metric Cards in 2x2 Grid -->
+        <!-- 4 Metric Cards in 2x2 Grid (Semula, Pergeseran, Menjadi, Sisa) -->
         <div class="drawer-kpi-grid">
           <div class="card-kpi-box box-amber-subtle">
-            <span class="box-label">Plafon Disetujui (Allocated)</span>
-            <div class="box-value text-blue">{{ formatRupiah(selectedBudget.totalAllocated) }}</div>
+            <span class="box-label">Pagu Semula</span>
+            <div class="box-value text-blue tabular-nums font-mono">
+              {{ formatRupiah(getBudgetSemulaMenjadi(selectedBudget).semula) }}
+            </div>
             <span class="box-sub">Target Rev: {{ formatRupiah(selectedBudget.revenueTarget) }}</span>
           </div>
 
           <div class="card-kpi-box box-rose-subtle">
-            <span class="box-label">Komitmen Terikat (Encumbered PO)</span>
-            <div class="box-value text-amber">{{ formatRupiah(selectedBudget.totalCommitted) }}</div>
-            <span class="box-sub">{{ selectedUtilization.committed }}% dari Total Plafon</span>
+            <span class="box-label">Total Pergeseran (+/-)</span>
+            <div
+              class="box-value tabular-nums font-mono font-bold"
+              :class="getBudgetSemulaMenjadi(selectedBudget).pergeseran >= 0 ? 'text-emerald' : 'text-rose'"
+            >
+              {{ formatPergeseran(getBudgetSemulaMenjadi(selectedBudget).pergeseran) }}
+            </div>
+            <span class="box-sub">Komitmen PO: {{ formatRupiah(selectedBudget.totalCommitted) }}</span>
           </div>
 
           <div class="card-kpi-box box-lilac-subtle">
-            <span class="box-label">Realisasi Beban Aktual</span>
-            <div class="box-value text-violet">{{ formatRupiah(selectedBudget.totalActual) }}</div>
-            <span class="box-sub">{{ selectedUtilization.actual }}% Beban Terbayar</span>
+            <span class="box-label">Pagu Menjadi (Plafon Aktif)</span>
+            <div class="box-value text-blue-700 tabular-nums font-mono font-bold">
+              {{ formatRupiah(getBudgetSemulaMenjadi(selectedBudget).menjadi) }}
+            </div>
+            <span class="box-sub">Realisasi Beban: {{ formatRupiah(selectedBudget.totalActual) }}</span>
           </div>
 
           <div class="card-kpi-box box-cyan-subtle focal">
             <span class="box-label">Sisa Plafon Bebas (Available)</span>
-            <div class="box-value text-emerald">{{ formatRupiah(selectedBudget.availableAmount) }}</div>
+            <div class="box-value text-emerald tabular-nums font-mono font-bold">
+              {{ formatRupiah(selectedBudget.availableAmount) }}
+            </div>
             <span class="box-sub text-emerald font-semibold">{{ selectedUtilization.free }}% Siap Digunakan</span>
           </div>
         </div>
 
-        <!-- Budget Lines Section -->
+        <!-- Budget Lines Section (Format Semula - Menjadi & 4 Volume) -->
         <div class="drawer-section">
           <div class="section-header-custom">
             <div class="section-title-wrap">
               <i class="pi pi-list text-primary"></i>
-              <h3>Rincian Pos Mata Anggaran ({{ selectedBudget.lines?.length || 0 }} Pos Terdaftar)</h3>
+              <h3>Rincian Pos Anggaran Semula - Menjadi ({{ selectedBudget.lines?.length || 0 }} Pos Terdaftar)</h3>
             </div>
           </div>
 
@@ -888,33 +1118,67 @@ onMounted(loadMasterAndBudgets);
             <table class="erp-table line-items-table">
               <thead>
                 <tr>
-                  <th style="min-width: 130px;">Cost Center & COA</th>
-                  <th style="min-width: 170px;">Kategori & Uraian Pos</th>
-                  <th class="money-col" style="min-width: 110px;">Plafon</th>
-                  <th class="money-col" style="min-width: 110px;">Komitmen</th>
-                  <th class="money-col" style="min-width: 110px;">Aktual</th>
-                  <th class="money-col" style="min-width: 110px;">Tersedia</th>
-                  <th style="min-width: 90px; text-align: center;">Serapan</th>
+                  <th style="min-width: 40px; text-align: center;">No</th>
+                  <th style="min-width: 140px;">Cost Center & Sub Kegiatan</th>
+                  <th style="min-width: 220px;">COA & Uraian Pekerjaan</th>
+                  <th style="min-width: 160px;">Volume & Tarif</th>
+                  <th class="money-col" style="min-width: 120px;">Pagu Semula</th>
+                  <th class="money-col" style="min-width: 110px; text-align: center;">Pergeseran</th>
+                  <th class="money-col" style="min-width: 120px;">Pagu Menjadi</th>
+                  <th class="money-col" style="min-width: 110px;">Realisasi</th>
+                  <th class="money-col" style="min-width: 110px;">Sisa Bebas</th>
+                  <th style="min-width: 80px; text-align: center;">Serapan</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="line in selectedBudget.lines" :key="line.id">
+                <tr v-for="(line, idx) in selectedBudget.lines" :key="line.id">
+                  <td style="text-align: center;" class="text-slate-400 font-mono text-xs">{{ idx + 1 }}</td>
                   <td>
-                    <span class="doc-code-pill">{{ line.costCenter?.code }}</span>
-                    <div class="line-coa-text">
-                      COA: <strong>{{ line.accountCode }}</strong>
+                    <span class="doc-code-pill font-mono">{{ line.costCenter?.code }}</span>
+                    <div v-if="line.subActivity" class="text-xs font-semibold text-slate-700 mt-1">
+                      {{ line.subActivity }}
                     </div>
                   </td>
                   <td>
-                    <span class="cat-chip" :class="getCatBadgeClass(line.category)">
-                      {{ line.category }}
-                    </span>
-                    <div class="line-desc-text">{{ line.description }}</div>
+                    <div class="line-coa-badge">
+                      <span class="doc-code-pill font-mono">{{ line.accountCode }}</span>
+                      <span v-if="getAccountName(line.accountCode)" class="text-xs text-slate-700 font-medium ml-1">
+                        {{ getAccountName(line.accountCode) }}
+                      </span>
+                    </div>
+                    <div class="line-desc-text mt-1 font-medium">{{ line.description }}</div>
+                    <div v-if="line.detailDescription" class="text-xs text-slate-400 italic">
+                      {{ line.detailDescription }}
+                    </div>
                   </td>
-                  <td class="money-col font-semibold">{{ formatRupiah(line.allocatedAmount) }}</td>
-                  <td class="money-col text-amber">{{ formatRupiah(line.committedAmount) }}</td>
-                  <td class="money-col text-violet">{{ formatRupiah(line.actualAmount) }}</td>
-                  <td class="money-col font-bold text-emerald">{{ formatRupiah(line.availableAmount) }}</td>
+                  <td>
+                    <div class="volume-calc-pill font-mono text-xs">
+                      {{ formatLineVolume(line) }}
+                    </div>
+                    <div v-if="line.unitPrice" class="text-xs text-slate-500 tabular-nums font-mono mt-0.5">
+                      @ {{ formatRupiah(line.unitPrice) }}
+                    </div>
+                  </td>
+                  <td class="money-col tabular-nums font-mono">
+                    {{ formatRupiah(line.semulaAmount || line.allocatedAmount) }}
+                  </td>
+                  <td class="money-col" style="text-align: center;">
+                    <span
+                      class="shift-pill font-mono tabular-nums text-xs font-semibold"
+                      :class="{
+                        'shift-plus': Number(line.pergeseranAmount) > 0,
+                        'shift-minus': Number(line.pergeseranAmount) < 0,
+                        'shift-zero': !line.pergeseranAmount || Number(line.pergeseranAmount) === 0
+                      }"
+                    >
+                      {{ formatPergeseran(Number(line.pergeseranAmount) || 0) }}
+                    </span>
+                  </td>
+                  <td class="money-col font-bold text-blue-700 tabular-nums font-mono">
+                    {{ formatRupiah(line.menjadiAmount || line.allocatedAmount) }}
+                  </td>
+                  <td class="money-col text-violet tabular-nums font-mono">{{ formatRupiah(line.actualAmount) }}</td>
+                  <td class="money-col font-bold text-emerald tabular-nums font-mono">{{ formatRupiah(line.availableAmount) }}</td>
                   <td style="text-align: center;">
                     <div class="mini-bar-wrap" :title="getLineUtilizationPct(line) + '% terserap'">
                       <div
@@ -925,7 +1189,7 @@ onMounted(loadMasterAndBudgets);
                         }"
                       ></div>
                     </div>
-                    <small class="mini-bar-label">{{ getLineUtilizationPct(line) }}%</small>
+                    <small class="mini-bar-label tabular-nums font-mono">{{ getLineUtilizationPct(line) }}%</small>
                   </td>
                 </tr>
               </tbody>
@@ -1052,7 +1316,10 @@ onMounted(loadMasterAndBudgets);
 
         <div class="form-section-divider">
           <div class="section-title-between">
-            <strong class="font-bold text-sm">Pos Rincian Mata Anggaran</strong>
+            <div>
+              <strong class="font-bold text-sm">Pos Rincian Mata Anggaran</strong>
+              <p class="text-xs text-slate-500 mt-0.5">Pilih 70 akun COA resmi PMO dan gunakan kalkulator volume bertingkat.</p>
+            </div>
             <button type="button" class="btn-add-line-pill" @click="addBudgetLineRow">
               <i class="pi pi-plus text-xs"></i>
               <span>Tambah Pos</span>
@@ -1062,7 +1329,7 @@ onMounted(loadMasterAndBudgets);
           <div class="lines-container">
             <div v-for="(line, idx) in createForm.lines" :key="idx" class="line-row-card">
               <div class="line-row-header">
-                <span class="line-row-index">Pos #{{ idx + 1 }}</span>
+                <span class="line-row-index font-mono">Pos #{{ idx + 1 }}</span>
                 <button
                   v-if="createForm.lines.length > 1"
                   type="button"
@@ -1074,7 +1341,8 @@ onMounted(loadMasterAndBudgets);
                 </button>
               </div>
 
-              <div class="form-grid">
+              <!-- Row 1: Cost Center, Kategori & COA Combobox -->
+              <div class="form-grid" style="grid-template-columns: 1fr 1fr 2fr;">
                 <div class="form-field">
                   <label :for="`line-cc-${idx}`" class="form-label">Cost Center</label>
                   <select :id="`line-cc-${idx}`" v-model="line.costCenterId" class="select-pill" required>
@@ -1087,8 +1355,8 @@ onMounted(loadMasterAndBudgets);
                 <div class="form-field">
                   <label :for="`line-cat-${idx}`" class="form-label">Kategori</label>
                   <select :id="`line-cat-${idx}`" v-model="line.category" class="select-pill" required>
-                    <option value="CAPEX">CAPEX (Investasi Modal)</option>
                     <option value="OPEX">OPEX (Operasional)</option>
+                    <option value="CAPEX">CAPEX (Investasi Modal)</option>
                     <option value="PENGADAAN">PENGADAAN (Barang & Jasa)</option>
                     <option value="PEGAWAI">PEGAWAI (Remunerasi / Diklat)</option>
                     <option value="MODAL_KERJA">MODAL_KERJA</option>
@@ -1097,18 +1365,153 @@ onMounted(loadMasterAndBudgets);
                 </div>
 
                 <div class="form-field">
-                  <label :for="`line-coa-${idx}`" class="form-label">Kode Akun Beban (COA)</label>
-                  <input
-                    :id="`line-coa-${idx}`"
+                  <label class="form-label">Akun COA Operasional PMO (70 Akun Excel)</label>
+                  <CoaCombobox
                     v-model="line.accountCode"
+                    :accounts="officialCoaAccounts"
+                    placeholder="Pilih kode atau nama akun..."
+                  />
+                </div>
+              </div>
+
+              <!-- Row 2: Sub Kegiatan & Uraian Pekerjaan -->
+              <div class="form-grid" style="margin-top: 8px; grid-template-columns: 1fr 2fr;">
+                <div class="form-field">
+                  <label :for="`line-sub-${idx}`" class="form-label">Sub Kegiatan</label>
+                  <input
+                    :id="`line-sub-${idx}`"
+                    v-model="line.subActivity"
                     type="text"
-                    class="input-pill tabular-nums"
-                    placeholder="Contoh: 520101030100"
-                    required
+                    class="input-pill"
+                    placeholder="Contoh: Operasional Layanan Cloud"
                   />
                 </div>
 
                 <div class="form-field">
+                  <label :for="`line-desc-${idx}`" class="form-label">Uraian Komponen / Mata Anggaran</label>
+                  <input
+                    :id="`line-desc-${idx}`"
+                    v-model="line.description"
+                    type="text"
+                    class="input-pill"
+                    placeholder="Contoh: Pemeliharaan infrastruktur cloud & server backup"
+                    required
+                  />
+                </div>
+              </div>
+
+              <!-- Row 3: Multi-Volume Calculator Toggle & Fields -->
+              <div class="volume-calc-box mt-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div class="flex items-center justify-between mb-2">
+                  <label class="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      v-model="line.useMultiVolume"
+                      class="rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>Gunakan Formula 4 Level Volume (V1 × V2 × V3 × V4 × Tarif)</span>
+                  </label>
+                  <span v-if="line.useMultiVolume" class="text-xs font-mono text-blue-700 font-semibold">
+                    Subtotal: {{ formatRupiah(line.allocatedAmount) }}
+                  </span>
+                </div>
+
+                <!-- 4 Level Volume Grid if Active -->
+                <div v-if="line.useMultiVolume" class="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2">
+                  <div>
+                    <label class="text-xs font-medium text-slate-500 block mb-1">Vol 1 & Satuan</label>
+                    <div class="flex gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        v-model.number="line.vol1"
+                        class="input-pill tabular-nums font-mono w-16"
+                        placeholder="1"
+                        @input="updateLineAmountFromVolume(line)"
+                      />
+                      <input
+                        type="text"
+                        v-model="line.satuan1"
+                        class="input-pill text-xs flex-1"
+                        placeholder="Satuan 1 (ex: Orang)"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="text-xs font-medium text-slate-500 block mb-1">Vol 2 & Satuan</label>
+                    <div class="flex gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        v-model.number="line.vol2"
+                        class="input-pill tabular-nums font-mono w-16"
+                        placeholder="1"
+                        @input="updateLineAmountFromVolume(line)"
+                      />
+                      <input
+                        type="text"
+                        v-model="line.satuan2"
+                        class="input-pill text-xs flex-1"
+                        placeholder="Satuan 2 (ex: Bulan)"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="text-xs font-medium text-slate-500 block mb-1">Vol 3 & Satuan</label>
+                    <div class="flex gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        v-model.number="line.vol3"
+                        class="input-pill tabular-nums font-mono w-16"
+                        placeholder="1"
+                        @input="updateLineAmountFromVolume(line)"
+                      />
+                      <input
+                        type="text"
+                        v-model="line.satuan3"
+                        class="input-pill text-xs flex-1"
+                        placeholder="Satuan 3 (ex: Hari)"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="text-xs font-medium text-slate-500 block mb-1">Vol 4 & Satuan</label>
+                    <div class="flex gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        v-model.number="line.vol4"
+                        class="input-pill tabular-nums font-mono w-16"
+                        placeholder="1"
+                        @input="updateLineAmountFromVolume(line)"
+                      />
+                      <input
+                        type="text"
+                        v-model="line.satuan4"
+                        class="input-pill text-xs flex-1"
+                        placeholder="Satuan 4 (opsional)"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="text-xs font-medium text-slate-500 block mb-1">Tarif Satuan (IDR)</label>
+                    <CurrencyInput
+                      :id="`line-tariff-${idx}`"
+                      v-model="line.unitPrice"
+                      :min="0"
+                      placeholder="0"
+                      @update:modelValue="updateLineAmountFromVolume(line)"
+                    />
+                  </div>
+                </div>
+
+                <!-- Direct Plafon Input if Multi-Volume Inactive -->
+                <div v-else class="form-field mt-1">
                   <label :for="`line-amt-${idx}`" class="form-label">Plafon Alokasi (IDR)</label>
                   <CurrencyInput
                     :id="`line-amt-${idx}`"
@@ -1118,18 +1521,6 @@ onMounted(loadMasterAndBudgets);
                     required
                   />
                 </div>
-              </div>
-
-              <div class="form-field" style="margin-top: 8px">
-                <label :for="`line-desc-${idx}`" class="form-label">Uraian Pekerjaan / Mata Anggaran</label>
-                <input
-                  :id="`line-desc-${idx}`"
-                  v-model="line.description"
-                  type="text"
-                  class="input-pill"
-                  placeholder="Contoh: Pemeliharaan infrastruktur cloud & server"
-                  required
-                />
               </div>
             </div>
           </div>
@@ -1145,26 +1536,39 @@ onMounted(loadMasterAndBudgets);
       </form>
     </ModalDialog>
 
-    <!-- Modal: Revise Budget -->
-    <ModalDialog :open="reviseOpen" title="Revisi Plafon Anggaran Ber-Histori" @close="reviseOpen = false">
+    <!-- Modal: Revise Budget (Format Semula - Menjadi) -->
+    <ModalDialog :open="reviseOpen" title="Revisi Plafon Anggaran Semula - Menjadi" @close="reviseOpen = false">
       <form @submit.prevent="submitRevision" class="modal-form-wrap">
         <div class="panel audit-warning-panel">
           <i class="pi pi-shield text-primary" style="font-size: 1.25rem;"></i>
           <p style="font-size: 0.86rem; color: var(--text-primary); margin: 0;">
-            Penyesuaian plafon akan menyimpan snapshot versi saat ini ke tabel <code>BudgetRevision</code> untuk kepatuhan audit BPKP/Internal, tanpa menghapus riwayat historis sebelumnya.
+            Penyesuaian pergeseran pagu akan menyimpan snapshot versi sebelumnya ke tabel <code>BudgetRevision</code> untuk kepatuhan audit BPKP/Internal tanpa menghapus rekam jejak historis.
           </p>
         </div>
 
-        <!-- Live Total Comparison -->
-        <div class="live-total-banner">
-          <div class="live-total-left">
-            <span class="live-label">Total Plafon Baru Hasil Revisi</span>
-            <span class="live-value text-emerald font-bold">{{ formatRupiah(reviseTotalAllocated) }}</span>
+        <!-- Live Total Comparison Semula - Menjadi Banner -->
+        <div class="live-total-banner" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center;">
+          <div class="live-col">
+            <span class="live-label text-slate-500">Pagu Semula</span>
+            <div class="live-value text-slate-700 font-mono font-bold">{{ formatRupiah(reviseSummary.totalSemula) }}</div>
+          </div>
+          <div class="live-col">
+            <span class="live-label text-slate-500">Total Pergeseran (+/-)</span>
+            <div
+              class="live-value font-mono font-bold"
+              :class="reviseSummary.totalPergeseran >= 0 ? 'text-emerald' : 'text-rose'"
+            >
+              {{ formatPergeseran(reviseSummary.totalPergeseran) }}
+            </div>
+          </div>
+          <div class="live-col">
+            <span class="live-label text-slate-500">Pagu Menjadi Baru</span>
+            <div class="live-value text-blue-700 font-mono font-bold">{{ formatRupiah(reviseSummary.totalMenjadi) }}</div>
           </div>
         </div>
 
         <div class="form-field">
-          <label for="rev-reason" class="form-label">Alasan Penyesuaian Plafon (Wajib Diisi)</label>
+          <label for="rev-reason" class="form-label">Alasan Penyesuaian / Pergeseran Plafon (Wajib Diisi)</label>
           <textarea
             id="rev-reason"
             v-model="reviseReason"
@@ -1176,19 +1580,40 @@ onMounted(loadMasterAndBudgets);
         </div>
 
         <div class="revise-lines-list">
-          <div v-for="rl in reviseLines" :key="rl.lineId" class="revise-line-card">
-            <div class="revise-line-header">
-              <span class="font-bold text-sm">{{ rl.description }}</span>
-              <span class="text-muted text-xs">Plafon Berjalan: {{ formatRupiah(rl.current) }}</span>
+          <div v-for="rl in reviseLines" :key="rl.lineId" class="revise-line-card p-3 rounded-xl border border-slate-200 mb-3 bg-white">
+            <div class="revise-line-header flex justify-between items-center mb-2">
+              <div>
+                <span class="font-bold text-sm text-slate-800">{{ rl.description }}</span>
+                <span v-if="rl.accountCode" class="doc-code-pill font-mono text-xs ml-2">{{ rl.accountCode }}</span>
+              </div>
+              <span class="text-slate-500 text-xs font-mono">Pagu Semula: <strong>{{ formatRupiah(rl.semula) }}</strong></span>
             </div>
-            <div class="form-field" style="margin-top: 6px;">
-              <CurrencyInput
-                :id="`rev-line-${rl.lineId}`"
-                v-model="rl.newAllocatedAmount"
-                :min="1000"
-                placeholder="0"
-                required
-              />
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="form-field">
+                <label class="form-label text-xs">Pergeseran (+/- IDR)</label>
+                <div class="flex items-center gap-1">
+                  <input
+                    type="number"
+                    v-model.number="rl.pergeseran"
+                    class="input-pill tabular-nums font-mono text-sm"
+                    placeholder="0"
+                    @input="onReviseShiftChange(rl)"
+                  />
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="form-label text-xs">Pagu Menjadi (IDR)</label>
+                <CurrencyInput
+                  :id="`rev-line-${rl.lineId}`"
+                  v-model="rl.newAllocatedAmount"
+                  :min="0"
+                  placeholder="0"
+                  required
+                  @update:modelValue="onReviseMenjadiChange(rl)"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -1462,9 +1887,35 @@ onMounted(loadMasterAndBudgets);
 .toolbar-pill-card {
   background: #ffffff;
   border-radius: 20px;
-  padding: 12px 18px;
+  padding: 14px 18px;
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toolbar-unit-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.toolbar-unit-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+
+.toolbar-status-search-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1477,6 +1928,48 @@ onMounted(loadMasterAndBudgets);
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.filter-pill-unit {
+  font-size: 0.78rem;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+/* SHIFT PILLS (Semula - Menjadi) */
+.shift-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.shift-plus {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.shift-minus {
+  background: #fff1f2;
+  color: #be123c;
+  border: 1px solid #fecdd3;
+}
+
+.shift-zero {
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+}
+
+.volume-calc-pill {
+  background: #f1f5f9;
+  color: #334155;
+  padding: 3px 6px;
+  border-radius: 6px;
+  display: inline-block;
 }
 
 .filter-pill-btn {
