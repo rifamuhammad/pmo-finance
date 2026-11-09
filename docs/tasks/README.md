@@ -10,7 +10,8 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-90` | Integration Testing DB & Smoke Test Sesi RBAC | `feature/KOI-90-integration-testing-db-rbac` | `In Review` | [KOI-90-integration-testing-db-rbac.md](./KOI-90-integration-testing-db-rbac.md) |
 | `KOI-94` | [PMO-041] Penyesuaian Skema Prisma BudgetLine Multi-Volume & Pagu Pergeseran | `feature/KOI-94-budget-line-multi-volume-semula-menjadi` | `Done` | [KOI-94-budget-line-multi-volume-semula-menjadi.md](./KOI-94-budget-line-multi-volume-semula-menjadi.md) |
 | `KOI-101` | [PMO-035] Penyelarasan UI/UX Fondasi: Fast Search 70 Akun COA & Indikator Fiskal | `feature/KOI-101-uiux-fondasi-search-coa-fiskal` | `Done` | [KOI-101-uiux-fondasi-search-coa-fiskal.md](./KOI-101-uiux-fondasi-search-coa-fiskal.md) |
-| `KOI-98` | [PMO-042] Transformasi Antarmuka BudgetsView.vue ke Format Semula - Menjadi | `feature/KOI-98-ui-budgets-semula-menjadi` | `In Review` | [KOI-98-ui-budgets-semula-menjadi.md](./KOI-98-ui-budgets-semula-menjadi.md) |
+| `KOI-98` | [PMO-042] Transformasi Antarmuka BudgetsView.vue ke Format Semula - Menjadi | `feature/KOI-98-ui-budgets-semula-menjadi` | `Done` | [KOI-98-ui-budgets-semula-menjadi.md](./KOI-98-ui-budgets-semula-menjadi.md) |
+| `KOI-100` | [PMO-044] Injeksi Data Anggaran Riil PMO dari Excel (Revisi 7 & Usulan 2027) | `feature/KOI-100-injeksi-data-anggaran-riil-excel` | `In Review` | [KOI-100-injeksi-data-anggaran-riil.md](./KOI-100-injeksi-data-anggaran-riil.md) |
 
 ---
 
