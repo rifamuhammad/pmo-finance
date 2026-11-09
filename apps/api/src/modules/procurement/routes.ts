@@ -144,7 +144,7 @@ procurementRouter.get('/purchase-requests', requirePermission('procurement:view'
       include: {
         businessUnit: true,
         costCenter: true,
-        budgetLine: { include: { budget: true } },
+        budgetLine: { include: { budget: true, costCenter: true } },
         lines: true,
         quotations: { include: { vendor: true } },
         purchaseOrders: true,
@@ -205,7 +205,7 @@ procurementRouter.post('/purchase-requests', requirePermission('procurement:crea
 
     const budgetLine = await prisma.budgetLine.findUnique({
       where: { id: parsed.budgetLineId },
-      include: { budget: true },
+      include: { budget: true, costCenter: true },
     });
     if (!budgetLine) throw new AppError(404, 'BUDGET_LINE_NOT_FOUND', 'Mata anggaran tidak ditemukan.');
     if (!['APPROVED', 'REVISED'].includes(budgetLine.budget.status)) {
@@ -1021,7 +1021,7 @@ procurementRouter.post('/expenses', requirePermission('expense:create'), async (
 
     const budgetLine = await prisma.budgetLine.findUnique({
       where: { id: parsed.budgetLineId },
-      include: { budget: true },
+      include: { budget: true, costCenter: true },
     });
     if (!budgetLine) throw new AppError(404, 'BUDGET_LINE_NOT_FOUND', 'Mata anggaran tidak ditemukan.');
     if (!['APPROVED', 'REVISED'].includes(budgetLine.budget.status)) {
@@ -1324,8 +1324,17 @@ procurementRouter.post('/expenses/:id/pay', requirePermission('expense:pay'), as
       }
 
       // Auto-post balanced double-entry journal idempotently
-      const debitAccount = freshLine.accountCode || '5-1100';
-      const creditAccount = expense.paymentMethod === 'PETTY_CASH' ? '1-1110' : '1-1120';
+      let debitAccount = freshLine.accountCode;
+      if (!debitAccount) {
+        const officialExpense = await tx.chartOfAccount.findUnique({ where: { code: '520901020100' } });
+        debitAccount = officialExpense ? '520901020100' : '5-1100';
+      }
+
+      let creditAccount = expense.paymentMethod === 'PETTY_CASH' ? '110501010100' : '110101020200';
+      const checkCredit = await tx.chartOfAccount.findUnique({ where: { code: creditAccount } });
+      if (!checkCredit) {
+        creditAccount = expense.paymentMethod === 'PETTY_CASH' ? '1-1110' : '1-1120';
+      }
 
       const journal = await createOrGetBalancedJournal(
         {

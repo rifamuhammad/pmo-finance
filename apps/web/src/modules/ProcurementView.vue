@@ -168,16 +168,51 @@ const vendorForm = ref({
 const selectedExpenseForVoid = ref<any>(null);
 const voidReason = ref('');
 
+const prBlineSearch = ref('');
+const prBlineUnitFilter = ref('');
+const prPickerOpen = ref(false);
+
 const availableBudgetLines = computed(() =>
   approvedBudgets.value.flatMap((b) =>
     (b.lines || []).map((l: any) => ({
       ...l,
       budgetDocNumber: b.docNumber,
+      budgetTitle: b.title,
       businessUnitId: b.businessUnitId,
+      businessUnitCode: b.businessUnit?.code || '',
+      businessUnitName: b.businessUnit?.name || '',
       fundSourceId: b.fundSourceId,
     }))
   )
 );
+
+const filteredBudgetLinesForPr = computed(() => {
+  let list = availableBudgetLines.value;
+  if (prBlineUnitFilter.value) {
+    list = list.filter((l) => l.businessUnitId === prBlineUnitFilter.value);
+  }
+  if (prBlineSearch.value.trim()) {
+    const q = prBlineSearch.value.trim().toLowerCase();
+    list = list.filter((l) =>
+      (l.description || '').toLowerCase().includes(q) ||
+      (l.accountCode || '').toLowerCase().includes(q) ||
+      (l.budgetDocNumber || '').toLowerCase().includes(q) ||
+      (l.costCenter?.code || '').toLowerCase().includes(q) ||
+      (l.costCenter?.name || '').toLowerCase().includes(q)
+    );
+  }
+  return list;
+});
+
+function selectBudgetLineForPr(line: any) {
+  prForm.value.budgetLineId = line.id;
+  prForm.value.businessUnitId = line.businessUnitId;
+  if (line.costCenterId) {
+    prForm.value.costCenterId = line.costCenterId;
+  }
+  prPickerOpen.value = false;
+  prModalError.value = '';
+}
 
 const selectedBudgetLine = computed(() =>
   availableBudgetLines.value.find((l) => l.id === prForm.value.budgetLineId)
@@ -193,6 +228,45 @@ const isPrOverBudget = computed(() => {
   if (!selectedBudgetLine.value) return false;
   return prTotalEstimated.value > (Number(selectedBudgetLine.value.availableAmount) || 0);
 });
+
+const expBlineSearch = ref('');
+const expBlineUnitFilter = ref('');
+const expPickerOpen = ref(false);
+
+const filteredBudgetLinesForExpense = computed(() => {
+  let list = availableBudgetLines.value;
+  if (expBlineUnitFilter.value) {
+    list = list.filter((l) => l.businessUnitId === expBlineUnitFilter.value);
+  }
+  if (expBlineSearch.value.trim()) {
+    const q = expBlineSearch.value.trim().toLowerCase();
+    list = list.filter((l) =>
+      (l.description || '').toLowerCase().includes(q) ||
+      (l.accountCode || '').toLowerCase().includes(q) ||
+      (l.budgetDocNumber || '').toLowerCase().includes(q) ||
+      (l.costCenter?.code || '').toLowerCase().includes(q) ||
+      (l.costCenter?.name || '').toLowerCase().includes(q)
+    );
+  }
+  return list;
+});
+
+const selectedExpenseBudgetLine = computed(() =>
+  availableBudgetLines.value.find((l) => l.id === expenseForm.value.budgetLineId)
+);
+
+function selectBudgetLineForExpense(line: any) {
+  expenseForm.value.budgetLineId = line.id;
+  expenseForm.value.businessUnitId = line.businessUnitId;
+  if (line.costCenterId) {
+    expenseForm.value.costCenterId = line.costCenterId;
+  }
+  if (line.fundSourceId) {
+    expenseForm.value.fundSourceId = line.fundSourceId;
+  }
+  expPickerOpen.value = false;
+  expenseModalError.value = '';
+}
 
 async function loadAllProcurementData() {
   loading.value = true;
@@ -227,9 +301,20 @@ async function loadAllProcurementData() {
 }
 
 function openCreatePr() {
-  const firstLine = availableBudgetLines.value[0];
   prModalError.value = '';
   prSubmitting.value = false;
+  prBlineSearch.value = '';
+
+  const defaultUnit = (auth.user?.roleCode === 'UNIT_MANAGER' && auth.user?.businessUnitId)
+    ? auth.user.businessUnitId
+    : (auth.selectedBusinessUnitId || '');
+  prBlineUnitFilter.value = defaultUnit;
+
+  const validLines = defaultUnit
+    ? availableBudgetLines.value.filter((l) => l.businessUnitId === defaultUnit)
+    : availableBudgetLines.value;
+  const firstLine = validLines[0] || availableBudgetLines.value[0];
+
   prForm.value = {
     title: '',
     businessUnitId: firstLine?.businessUnitId || master.value.businessUnits[0]?.id || '',
@@ -243,6 +328,7 @@ function openCreatePr() {
     unit: 'Unit',
     estimatedUnitPrice: 0,
   };
+  prPickerOpen.value = !firstLine;
   prModalOpen.value = true;
 }
 
@@ -446,7 +532,17 @@ async function submitGoodsReceipt() {
 }
 
 function openCreateExpense() {
-  const firstLine = availableBudgetLines.value[0];
+  const defaultUnit = (auth.user?.roleCode === 'UNIT_MANAGER' && auth.user?.businessUnitId)
+    ? auth.user.businessUnitId
+    : (auth.selectedBusinessUnitId || '');
+  expBlineUnitFilter.value = defaultUnit;
+  expBlineSearch.value = '';
+
+  const validLines = defaultUnit
+    ? availableBudgetLines.value.filter((l) => l.businessUnitId === defaultUnit)
+    : availableBudgetLines.value;
+  const firstLine = validLines[0] || availableBudgetLines.value[0];
+
   expenseModalError.value = '';
   expenseSubmitting.value = false;
   expenseForm.value = {
@@ -465,6 +561,7 @@ function openCreateExpense() {
     description: '',
     receiptRef: `TRX-${Date.now().toString().slice(-6)}`,
   };
+  expPickerOpen.value = !firstLine;
   expenseModalOpen.value = true;
 }
 
@@ -1044,7 +1141,7 @@ onMounted(() => {
     </div>
 
     <!-- Modal: Create PR -->
-    <ModalDialog :open="prModalOpen" title="Ajukan Purchase Request (PR) Baru" @close="prModalOpen = false">
+    <ModalDialog :open="prModalOpen" title="Ajukan Purchase Request (PR) Baru" maxWidth="780px" @close="prModalOpen = false">
       <form @submit.prevent="submitPr" style="display: flex; flex-direction: column; gap: 14px">
         <AlertBanner
           v-if="prModalError"
@@ -1072,19 +1169,122 @@ onMounted(() => {
           </span>
         </div>
 
+        <!-- Smart Budget Line Picker -->
         <div class="form-field">
-          <label for="pr-bline" class="form-label">
-            Pos Mata Anggaran Sumber <span style="color: var(--danger-base, #dc2626)">*</span>
-          </label>
-          <select id="pr-bline" v-model="prForm.budgetLineId" class="select" required @change="prModalError = ''">
-            <option v-if="availableBudgetLines.length === 0" value="" disabled selected>
-              Belum ada anggaran berstatus APPROVED
-            </option>
-            <option v-else value="" disabled selected>-- Pilih Pos Mata Anggaran Sumber --</option>
-            <option v-for="bl in availableBudgetLines" :key="bl.id" :value="bl.id">
-              {{ bl.budgetDocNumber }} - {{ bl.description }} (Sisa Pagu: {{ formatRupiah(bl.availableAmount) }})
-            </option>
-          </select>
+          <div class="flex justify-between items-center mb-1">
+            <label class="form-label mb-0">
+              Pos Mata Anggaran Sumber <span style="color: var(--danger-base, #dc2626)">*</span>
+            </label>
+            <span v-if="availableBudgetLines.length > 0" class="text-xs text-slate-500 font-mono">
+              {{ availableBudgetLines.length }} Pos Anggaran Siap Digunakan
+            </span>
+          </div>
+
+          <!-- Card Pos Terpilih -->
+          <div
+            v-if="selectedBudgetLine && !prPickerOpen"
+            class="p-3 rounded-xl border border-blue-200 bg-blue-50/50 flex flex-col gap-2"
+          >
+            <div class="flex justify-between items-start gap-2">
+              <div>
+                <div class="flex items-center gap-1.5 flex-wrap mb-1">
+                  <span class="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
+                    {{ selectedBudgetLine.budgetDocNumber }}
+                  </span>
+                  <span v-if="selectedBudgetLine.accountCode" class="font-mono text-xs text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200 font-semibold">
+                    {{ selectedBudgetLine.accountCode }}
+                  </span>
+                  <span v-if="selectedBudgetLine.businessUnitCode" class="text-xs text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded">
+                    {{ selectedBudgetLine.businessUnitCode }}
+                  </span>
+                </div>
+                <div class="font-bold text-slate-900 text-sm leading-snug">
+                  {{ selectedBudgetLine.description }}
+                </div>
+                <div v-if="selectedBudgetLine.costCenter" class="text-xs text-slate-500 mt-1 font-mono">
+                  Cost Center: <strong>{{ selectedBudgetLine.costCenter.code }}</strong> - {{ selectedBudgetLine.costCenter.name }}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm shrink-0"
+                style="padding: 4px 10px; font-size: 0.76rem;"
+                @click="prPickerOpen = true"
+              >
+                Ganti Pos
+              </button>
+            </div>
+
+            <div class="flex justify-between items-center pt-2 border-t border-blue-200/60 text-xs">
+              <span class="text-slate-600 font-medium">Sisa Pagu Tersedia (Ceiling):</span>
+              <span class="font-mono font-bold text-emerald text-sm">
+                {{ formatRupiah(selectedBudgetLine.availableAmount) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Mode Pencarian & Seleksi Pos Anggaran -->
+          <div
+            v-else
+            class="p-3 rounded-xl border border-slate-300 bg-white shadow-sm flex flex-col gap-2"
+          >
+            <div class="flex gap-2 flex-wrap">
+              <input
+                v-model="prBlineSearch"
+                type="text"
+                class="input text-xs flex-1"
+                placeholder="Cari uraian pos, kode COA, atau nomor dokumen anggaran..."
+              />
+              <select v-model="prBlineUnitFilter" class="select text-xs" style="max-width: 170px;">
+                <option value="">Semua Unit Bisnis</option>
+                <option v-for="u in master.businessUnits" :key="u.id" :value="u.id">
+                  {{ u.code }} - {{ u.name }}
+                </option>
+              </select>
+            </div>
+
+            <div class="max-h-48 overflow-y-auto flex flex-col gap-1 border border-slate-100 rounded-lg p-1 bg-slate-50/50">
+              <div
+                v-for="bl in filteredBudgetLinesForPr"
+                :key="bl.id"
+                class="p-2 rounded-lg cursor-pointer transition-all hover:bg-white hover:shadow-xs border border-transparent hover:border-slate-200 flex justify-between items-center"
+                :class="{ 'bg-blue-50 border-blue-300': prForm.budgetLineId === bl.id }"
+                @click="selectBudgetLineForPr(bl)"
+              >
+                <div class="flex flex-col pr-2">
+                  <div class="flex items-center gap-1 mb-0.5">
+                    <span class="font-mono text-xs px-1.5 py-0.5 rounded bg-slate-200 text-slate-800 font-semibold">
+                      {{ bl.budgetDocNumber }}
+                    </span>
+                    <span v-if="bl.accountCode" class="font-mono text-xs text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                      {{ bl.accountCode }}
+                    </span>
+                    <span class="text-xs text-slate-500 font-bold ml-1">{{ bl.businessUnitCode }}</span>
+                  </div>
+                  <span class="text-xs font-semibold text-slate-800 line-clamp-1">{{ bl.description }}</span>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-xs font-mono font-bold text-emerald">
+                    {{ formatRupiah(bl.availableAmount) }}
+                  </div>
+                  <span class="text-xs text-slate-400">sisa pagu</span>
+                </div>
+              </div>
+              <div v-if="filteredBudgetLinesForPr.length === 0" class="text-center py-4 text-xs text-slate-400">
+                Tidak ada pos anggaran yang sesuai dengan filter pencarian.
+              </div>
+            </div>
+
+            <div v-if="selectedBudgetLine" class="flex justify-end pt-1">
+              <button
+                type="button"
+                class="text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                @click="prPickerOpen = false"
+              >
+                Batal Ganti
+              </button>
+            </div>
+          </div>
           <span v-if="availableBudgetLines.length === 0" class="input-hint" style="color: var(--danger-base, #dc2626); font-size: 0.78rem; margin-top: 4px">
             ⚠️ Belum ada anggaran berstatus APPROVED. Harap buat dan setujui anggaran di menu <strong>Modal & Anggaran</strong> terlebih dahulu.
           </span>
@@ -1383,7 +1583,7 @@ onMounted(() => {
     </ModalDialog>
 
     <!-- Modal: Create Expense -->
-    <ModalDialog :open="expenseModalOpen" title="Catat Pengeluaran Operasional / Kas Keluar" @close="expenseModalOpen = false">
+    <ModalDialog :open="expenseModalOpen" title="Catat Pengeluaran Operasional / Kas Keluar" maxWidth="780px" @close="expenseModalOpen = false">
       <form @submit.prevent="submitExpense" style="display: flex; flex-direction: column; gap: 12px">
         <AlertBanner
           v-if="expenseModalError"
@@ -1398,17 +1598,120 @@ onMounted(() => {
           <input id="exp-title" v-model="expenseForm.title" type="text" class="input" placeholder="Contoh: Biaya Konsumsi & Dokumentasi Workshop" required />
         </div>
 
+        <!-- Smart Budget Line Picker for Expense -->
         <div class="form-field">
-          <label for="exp-bline" class="form-label">Pos Mata Anggaran Beban</label>
-          <select id="exp-bline" v-model="expenseForm.budgetLineId" class="select" required>
-            <option v-if="availableBudgetLines.length === 0" value="" disabled selected>
-              Belum ada anggaran berstatus APPROVED
-            </option>
-            <option v-else value="" disabled selected>-- Pilih Pos Mata Anggaran --</option>
-            <option v-for="bl in availableBudgetLines" :key="bl.id" :value="bl.id">
-              {{ bl.budgetDocNumber }} - {{ bl.description }} (Sisa Pagu: {{ formatRupiah(bl.availableAmount) }})
-            </option>
-          </select>
+          <div class="flex justify-between items-center mb-1">
+            <label class="form-label mb-0">Pos Mata Anggaran Beban</label>
+            <span v-if="availableBudgetLines.length > 0" class="text-xs text-slate-500 font-mono">
+              {{ availableBudgetLines.length }} Pos Anggaran Tersedia
+            </span>
+          </div>
+
+          <!-- Card Pos Terpilih -->
+          <div
+            v-if="selectedExpenseBudgetLine && !expPickerOpen"
+            class="p-3 rounded-xl border border-slate-200 bg-slate-50/80 flex flex-col gap-2"
+          >
+            <div class="flex justify-between items-start gap-2">
+              <div>
+                <div class="flex items-center gap-1.5 flex-wrap mb-1">
+                  <span class="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
+                    {{ selectedExpenseBudgetLine.budgetDocNumber }}
+                  </span>
+                  <span v-if="selectedExpenseBudgetLine.accountCode" class="font-mono text-xs text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200 font-semibold">
+                    {{ selectedExpenseBudgetLine.accountCode }}
+                  </span>
+                  <span v-if="selectedExpenseBudgetLine.businessUnitCode" class="text-xs text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded">
+                    {{ selectedExpenseBudgetLine.businessUnitCode }}
+                  </span>
+                </div>
+                <div class="font-bold text-slate-900 text-sm leading-snug">
+                  {{ selectedExpenseBudgetLine.description }}
+                </div>
+                <div v-if="selectedExpenseBudgetLine.costCenter" class="text-xs text-slate-500 mt-1 font-mono">
+                  Cost Center: <strong>{{ selectedExpenseBudgetLine.costCenter.code }}</strong> - {{ selectedExpenseBudgetLine.costCenter.name }}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm shrink-0"
+                style="padding: 4px 10px; font-size: 0.76rem;"
+                @click="expPickerOpen = true"
+              >
+                Ganti Pos
+              </button>
+            </div>
+
+            <div class="flex justify-between items-center pt-2 border-t border-slate-200 text-xs">
+              <span class="text-slate-600 font-medium">Sisa Pagu Tersedia (Ceiling):</span>
+              <span class="font-mono font-bold text-emerald text-sm">
+                {{ formatRupiah(selectedExpenseBudgetLine.availableAmount) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Mode Seleksi Pos Beban -->
+          <div
+            v-else
+            class="p-3 rounded-xl border border-slate-300 bg-white shadow-sm flex flex-col gap-2"
+          >
+            <div class="flex gap-2 flex-wrap">
+              <input
+                v-model="expBlineSearch"
+                type="text"
+                class="input text-xs flex-1"
+                placeholder="Cari uraian pos, kode COA, atau nomor dokumen anggaran..."
+              />
+              <select v-model="expBlineUnitFilter" class="select text-xs" style="max-width: 170px;">
+                <option value="">Semua Unit Bisnis</option>
+                <option v-for="u in master.businessUnits" :key="u.id" :value="u.id">
+                  {{ u.code }} - {{ u.name }}
+                </option>
+              </select>
+            </div>
+
+            <div class="max-h-48 overflow-y-auto flex flex-col gap-1 border border-slate-100 rounded-lg p-1 bg-slate-50/50">
+              <div
+                v-for="bl in filteredBudgetLinesForExpense"
+                :key="bl.id"
+                class="p-2 rounded-lg cursor-pointer transition-all hover:bg-white hover:shadow-xs border border-transparent hover:border-slate-200 flex justify-between items-center"
+                :class="{ 'bg-blue-50 border-blue-300': expenseForm.budgetLineId === bl.id }"
+                @click="selectBudgetLineForExpense(bl)"
+              >
+                <div class="flex flex-col pr-2">
+                  <div class="flex items-center gap-1 mb-0.5">
+                    <span class="font-mono text-xs px-1.5 py-0.5 rounded bg-slate-200 text-slate-800 font-semibold">
+                      {{ bl.budgetDocNumber }}
+                    </span>
+                    <span v-if="bl.accountCode" class="font-mono text-xs text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                      {{ bl.accountCode }}
+                    </span>
+                    <span class="text-xs text-slate-500 font-bold ml-1">{{ bl.businessUnitCode }}</span>
+                  </div>
+                  <span class="text-xs font-semibold text-slate-800 line-clamp-1">{{ bl.description }}</span>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-xs font-mono font-bold text-emerald">
+                    {{ formatRupiah(bl.availableAmount) }}
+                  </div>
+                  <span class="text-xs text-slate-400">sisa pagu</span>
+                </div>
+              </div>
+              <div v-if="filteredBudgetLinesForExpense.length === 0" class="text-center py-4 text-xs text-slate-400">
+                Tidak ada pos anggaran yang cocok dengan filter pencarian.
+              </div>
+            </div>
+
+            <div v-if="selectedExpenseBudgetLine" class="flex justify-end pt-1">
+              <button
+                type="button"
+                class="text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                @click="expPickerOpen = false"
+              >
+                Batal Ganti
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="form-grid">
