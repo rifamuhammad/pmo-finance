@@ -21,7 +21,12 @@ Tiket ini menyelaraskan seluruh komponen fondasi tersebut agar interaksi kerja c
 
 ## 2. Lokasi Menu & Fitur yang Berubah
 1. **Menu Akuntansi & Buku Besar (`/accounting`):**
-   - **Tab Bagan Akun (COA) & Pajak:** Penambahan search bar fuzzy dan filter kategori cepat (Kepala 1 - 5) untuk menelusuri 70 akun operasional PMO secara instan.
+   - **Tab Bagan Akun (COA) & Pajak (Accordion Solusi 2):**
+     - Master COA diposisikan paling atas (primary focus) dengan tampilan **Accordion / Collapsible Group per Kategori Akun** (Kepala 1: Aset Lancar, Kepala 2: Kewajiban & Pajak, Kepala 3: Ekuitas, Kepala 4: Pendapatan Bisnis, Kepala 5: Belanja Operasional).
+     - Menghilangkan scroll panjang 70 baris tabel menjadi kartu-kartu ringkas yang dapat dibuka/tutup secara mandiri, lengkap dengan tombol **Buka Semua** dan **Tutup Semua**.
+     - **Pencarian Cerdas & Auto-Expand:** Mengetik kata kunci akun otomatis membuka kelompok yang memiliki kecocokan dan menampilkan badge counter akun riil.
+     - **Tombol Salin Kode:** Staf akuntansi dapat langsung menyalin kode 12-digit akun ke clipboard dengan satu klik.
+     - Posisi rekapitulasi pajak (PPN Masukan/Keluaran) dan register aset tetap ditata rapi di bagian bawah COA.
    - **Pembersihan Tab:** Menghilangkan penomoran tab baku (`1. Buku Besar` ➔ `Buku Besar & Neraca Saldo`, `4. COA...` ➔ `Bagan Akun (COA) & Pajak`).
 2. **Modal Posting Jurnal Umum Berimbang:**
    - Dropdown pemilihan akun diganti dari native `<select>` ke komponen cerdas `CoaCombobox.vue` dengan autocomplete kode 12-digit, nama akun, dan kategori.

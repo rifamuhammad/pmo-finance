@@ -417,6 +417,193 @@
 
       <!-- TAB 4: COA, TAX SUMMARY & FIXED ASSETS -->
       <div v-if="activeTab === 'coa'" class="erp-stack">
+        <!-- 1. BAGAN AKUN STANDAR (COA - 70 AKUN OPERASIONAL PMO) - ACCORDION VIEW -->
+        <section class="erp-card">
+          <div class="erp-card-header erp-row-between" style="flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div class="erp-row" style="gap: 8px; align-items: center;">
+                <h3 class="erp-section-title">Bagan Akun Standar (COA - 70 Akun Operasional PMO)</h3>
+                <span class="erp-badge erp-badge-info">70 Akun Excel</span>
+              </div>
+              <p class="erp-subtitle">
+                Master COA unit bisnis PMO dari file Excel KODE COA UT &amp; Revisi ke-7, dikelompokkan dalam 5 kategori hierarki akun.
+              </p>
+            </div>
+            <div class="erp-row" style="gap: 8px; flex-wrap: wrap;">
+              <div style="position: relative;">
+                <input
+                  v-model="coaSearch"
+                  type="text"
+                  class="erp-input"
+                  style="min-width: 270px; padding-right: 28px;"
+                  placeholder="Cari kode (12-digit) atau nama akun..."
+                />
+                <button
+                  v-if="coaSearch"
+                  type="button"
+                  style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px;"
+                  title="Bersihkan pencarian"
+                  @click="coaSearch = ''"
+                >
+                  &times;
+                </button>
+              </div>
+              <button
+                type="button"
+                class="erp-btn erp-btn-secondary erp-btn-sm"
+                @click="expandAllGroups"
+              >
+                Buka Semua
+              </button>
+              <button
+                type="button"
+                class="erp-btn erp-btn-secondary erp-btn-sm"
+                @click="collapseAllGroups"
+              >
+                Tutup Semua
+              </button>
+            </div>
+          </div>
+
+          <!-- Banner Hasil Pencarian jika ada kata kunci -->
+          <div
+            v-if="coaSearch.trim()"
+            style="padding: 8px 16px; background: rgba(3, 70, 147, 0.05); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between;"
+          >
+            <span class="erp-subtitle" style="font-size: 0.82rem;">
+              Hasil pencarian "<strong>{{ coaSearch }}</strong>": Ditemukan <strong>{{ totalCoaMatches }}</strong> dari {{ coaList.length || 70 }} akun.
+            </span>
+            <button
+              type="button"
+              class="erp-btn erp-btn-ghost erp-btn-sm"
+              style="font-size: 0.75rem;"
+              @click="coaSearch = ''"
+            >
+              Reset Pencarian
+            </button>
+          </div>
+
+          <!-- 5 Kategori Accordion List -->
+          <div class="coa-accordion-stack">
+            <div
+              v-for="group in groupedCoaList"
+              :key="group.id"
+              class="coa-accordion-item"
+              :class="{ 'is-open': expandedGroups[group.id] }"
+            >
+              <!-- Accordion Header Button -->
+              <button
+                type="button"
+                class="coa-accordion-header"
+                :aria-expanded="expandedGroups[group.id]"
+                @click="toggleGroup(group.id)"
+              >
+                <div class="coa-accordion-title-group">
+                  <span class="coa-accordion-chevron" :class="{ 'is-open': expandedGroups[group.id] }">
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+                      <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                    </svg>
+                  </span>
+                  <span
+                    class="erp-badge"
+                    :style="{ backgroundColor: group.color + '18', color: group.color, borderColor: group.color + '40', fontWeight: '700' }"
+                  >
+                    Kepala {{ group.id }}
+                  </span>
+                  <div>
+                    <div style="font-weight: 700; font-size: 0.92rem; color: var(--text-normal);">
+                      {{ group.name }}
+                    </div>
+                    <p class="erp-subtitle" style="margin: 2px 0 0 0; font-size: 0.76rem;">
+                      {{ group.subtitle }}
+                    </p>
+                  </div>
+                </div>
+
+                <div class="coa-accordion-meta">
+                  <span class="erp-badge erp-badge-neutral" style="font-size: 0.72rem;">{{ group.badge }}</span>
+                  <span
+                    class="erp-badge"
+                    :class="group.matchCount > 0 ? 'erp-badge-info' : 'erp-badge-neutral'"
+                    style="font-family: inherit; font-weight: 600; font-size: 0.75rem;"
+                  >
+                    <template v-if="coaSearch.trim()">
+                      {{ group.matchCount }} / {{ group.totalCount }} Akun
+                    </template>
+                    <template v-else>
+                      {{ group.totalCount }} Akun
+                    </template>
+                  </span>
+                  <span class="coa-toggle-pill">{{ expandedGroups[group.id] ? 'Sembunyikan' : 'Tampilkan' }}</span>
+                </div>
+              </button>
+
+              <!-- Accordion Body -->
+              <div v-show="expandedGroups[group.id]" class="coa-accordion-body">
+                <div v-if="group.matchCount === 0" style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+                  Tidak ada akun pada kategori ini yang cocok dengan kriteria pencarian.
+                </div>
+                <div v-else class="erp-table-wrap">
+                  <table class="erp-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 170px;">Kode Akun (12-Digit)</th>
+                        <th>Nama Akun</th>
+                        <th>Kategori Operasional</th>
+                        <th>Lingkup Unit</th>
+                        <th style="width: 110px;">Saldo Normal</th>
+                        <th style="width: 110px;">Akun Kontrol</th>
+                        <th style="width: 80px; text-align: center;">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="c in group.accounts" :key="c.id || c.code">
+                        <td>
+                          <code class="tabular-nums" style="font-weight: 700; color: #034693; letter-spacing: 0.02em;">
+                            {{ c.code }}
+                          </code>
+                        </td>
+                        <td style="font-weight: 600;">{{ c.name }}</td>
+                        <td class="erp-subtitle" style="font-size: 0.8rem;">{{ c.category || '-' }}</td>
+                        <td>
+                          <span v-if="c.businessUnit && c.businessUnit !== 'ALL'" class="erp-badge erp-badge-info" style="font-size: 0.72rem;">
+                            {{ c.businessUnit }}
+                          </span>
+                          <span v-else class="erp-subtitle" style="font-size: 0.78rem;">Semua Unit</span>
+                        </td>
+                        <td>
+                          <span class="erp-badge erp-badge-neutral" style="font-size: 0.72rem;">
+                            {{ c.normalBalance }}
+                          </span>
+                        </td>
+                        <td>
+                          <span v-if="c.isControlAccount" class="erp-badge erp-badge-warning" style="font-size: 0.72rem;">
+                            Control
+                          </span>
+                          <span v-else class="erp-subtitle" style="font-size: 0.75rem;">-</span>
+                        </td>
+                        <td style="text-align: center;">
+                          <button
+                            type="button"
+                            class="erp-btn erp-btn-ghost erp-btn-sm"
+                            style="padding: 2px 8px; font-size: 0.72rem;"
+                            :title="'Salin kode ' + c.code"
+                            @click="copyToClipboard(c.code)"
+                          >
+                            <span v-if="copiedCode === c.code" style="color: #059669; font-weight: 700;">Tersalin!</span>
+                            <span v-else>Salin</span>
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. REKAPITULASI PAJAK INTERNAL & KONFIGURASI TARIF -->
         <div class="erp-grid-2">
           <section class="erp-card erp-card-pad">
             <span class="erp-badge erp-badge-info">REKAPITULASI PAJAK INTERNAL</span>
@@ -472,6 +659,7 @@
           </section>
         </div>
 
+        <!-- 3. DAFTAR ASET TETAP & INVENTARIS (FIXED ASSETS REGISTER) -->
         <section class="erp-card">
           <div class="erp-card-header">
             <div>
@@ -513,79 +701,6 @@
                   <td class="num">{{ formatIdr(ast.accumulatedDepreciation) }}</td>
                   <td class="num" style="font-weight: 700;">{{ formatIdr(ast.bookValue) }}</td>
                   <td><StatusBadge :status="ast.status" /></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="erp-card">
-          <div class="erp-card-header erp-row-between" style="flex-wrap: wrap; gap: 12px;">
-            <div>
-              <h3 class="erp-section-title">Bagan Akun Standar (70 Akun Operasional PMO)</h3>
-              <p class="erp-subtitle">Master COA spesifik unit bisnis PMO dari file Excel KODE COA UT &amp; Revisi ke-7</p>
-            </div>
-            <div class="erp-row" style="gap: 8px;">
-              <input
-                v-model="coaSearch"
-                type="text"
-                class="erp-input"
-                style="min-width: 260px;"
-                placeholder="Cari kode (12-digit) atau nama akun..."
-              />
-            </div>
-          </div>
-
-          <!-- Filter Kategori Cepat Kepala 1 s/d Kepala 5 -->
-          <div class="coa-table-filter-bar" style="padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 6px; overflow-x: auto;">
-            <button
-              v-for="cat in coaCategoryTabs"
-              :key="cat.id"
-              type="button"
-              class="erp-btn erp-btn-sm"
-              :class="coaFilterCategory === cat.id ? 'erp-btn-primary' : 'erp-btn-secondary'"
-              style="padding: 3px 10px; font-size: 0.75rem;"
-              @click="coaFilterCategory = cat.id"
-            >
-              {{ cat.label }}
-            </button>
-            <span class="erp-subtitle" style="margin-left: auto; align-self: center; font-size: 0.75rem;">
-              Ditemukan <strong>{{ filteredCoaList.length }}</strong> akun
-            </span>
-          </div>
-
-          <div class="erp-table-wrap">
-            <table class="erp-table">
-              <thead>
-                <tr>
-                  <th>Kode Akun</th>
-                  <th>Nama Akun</th>
-                  <th>Tipe</th>
-                  <th>Kategori Operasional</th>
-                  <th>Lingkup Unit</th>
-                  <th>Saldo Normal</th>
-                  <th>Akun Kontrol</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="c in filteredCoaList" :key="c.id || c.code">
-                  <td><code class="tabular-nums" style="font-weight: 700; color: #034693;">{{ c.code }}</code></td>
-                  <td style="font-weight: 600;">{{ c.name }}</td>
-                  <td><span class="erp-badge erp-badge-neutral">{{ c.type }}</span></td>
-                  <td class="erp-subtitle">{{ c.category || '-' }}</td>
-                  <td>
-                    <span v-if="c.businessUnit && c.businessUnit !== 'ALL'" class="erp-badge erp-badge-info">
-                      {{ c.businessUnit }}
-                    </span>
-                    <span v-else class="erp-subtitle">Semua Unit</span>
-                  </td>
-                  <td>{{ c.normalBalance }}</td>
-                  <td>{{ c.isControlAccount ? 'Ya (Control)' : 'Tidak' }}</td>
-                </tr>
-                <tr v-if="filteredCoaList.length === 0">
-                  <td colspan="7" style="text-align: center; padding: 24px; color: var(--text-muted);">
-                    Tidak ada akun COA yang cocok dengan kriteria pencarian.
-                  </td>
                 </tr>
               </tbody>
             </table>
@@ -719,7 +834,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { api } from '../services/api';
 import { useAuthStore } from '../stores/auth';
 import { formatIdr, formatDate } from '../utils/format';
@@ -763,26 +878,100 @@ const assetsTaxData = ref<{ fixedAssets: any[]; taxConfigurations: any[]; taxSum
 const coaList = ref<any[]>([]);
 const masterUnits = ref<any[]>([]);
 const coaSearch = ref('');
-const coaFilterCategory = ref('ALL');
+const copiedCode = ref<string | null>(null);
 
-const coaCategoryTabs = [
-  { id: 'ALL', label: 'Semua Akun' },
-  { id: '1', label: '1 - Aset' },
-  { id: '2', label: '2 - Kewajiban' },
-  { id: '3', label: '3 - Ekuitas' },
-  { id: '4', label: '4 - Pendapatan Bisnis' },
-  { id: '5', label: '5 - Belanja Operasional' },
+interface CoaCategoryDef {
+  id: string;
+  name: string;
+  subtitle: string;
+  badge: string;
+  color: string;
+}
+
+const coaCategories: CoaCategoryDef[] = [
+  {
+    id: '1',
+    name: '1 - Kas, Rekening Bank & Aset Lancar',
+    subtitle: 'Kas operasional kasir, rekening giro/operasional BRI/Mandiri, piutang usaha & UMK kas kecil',
+    badge: 'ASET',
+    color: '#0284c7',
+  },
+  {
+    id: '2',
+    name: '2 - Kewajiban & Utang Pajak',
+    subtitle: 'Utang rekanan AP, utang pemotongan PPh (21/22/23/4(2)), PPN Keluaran & uang muka sewa diterima di muka',
+    badge: 'KEWAJIBAN',
+    color: '#d97706',
+  },
+  {
+    id: '3',
+    name: '3 - Ekuitas PMO Utama',
+    subtitle: 'Modal kerja RKAP unit bisnis dan Sisa Lebih Pembiayaan Anggaran (SiLPA) / Saldo Laba',
+    badge: 'EKUITAS',
+    color: '#7c3aed',
+  },
+  {
+    id: '4',
+    name: '4 - Pendapatan Unit Bisnis Komersial',
+    subtitle: 'Pendapatan hotel, SPBU BBM, wisma diklat, pujasera, sarana olahraga, dan lab TI (KODE COA UT.xlsx)',
+    badge: 'PENDAPATAN',
+    color: '#059669',
+  },
+  {
+    id: '5',
+    name: '5 - Belanja & Beban Operasional PMO',
+    subtitle: 'Belanja pegawai/gaji PUT PK, pemeliharaan gedung/mesin, utilitas listrik/air, ATK & konsumsi (Semula-Menjadi Revisi ke-7)',
+    badge: 'BEBAN',
+    color: '#dc2626',
+  },
 ];
 
-const filteredCoaList = computed(() => {
-  let list = coaList.value || [];
-  if (coaFilterCategory.value !== 'ALL') {
-    list = list.filter((c: any) => (c.code || '').startsWith(coaFilterCategory.value));
+const expandedGroups = ref<Record<string, boolean>>({
+  '1': true,
+  '2': false,
+  '3': false,
+  '4': true,
+  '5': true,
+});
+
+function toggleGroup(id: string) {
+  expandedGroups.value[id] = !expandedGroups.value[id];
+}
+
+function expandAllGroups() {
+  for (const cat of coaCategories) {
+    expandedGroups.value[cat.id] = true;
   }
+}
+
+function collapseAllGroups() {
+  for (const cat of coaCategories) {
+    expandedGroups.value[cat.id] = false;
+  }
+}
+
+async function copyToClipboard(code: string) {
+  try {
+    await navigator.clipboard.writeText(code);
+    copiedCode.value = code;
+    setTimeout(() => {
+      if (copiedCode.value === code) {
+        copiedCode.value = null;
+      }
+    }, 2000);
+  } catch {
+    // clipboard fallback
+  }
+}
+
+const groupedCoaList = computed(() => {
   const q = coaSearch.value.trim().toLowerCase();
-  if (q) {
-    const cleanQ = q.replace(/[.\s-]/g, '');
-    list = list.filter((c: any) => {
+  const cleanQ = q.replace(/[.\s-]/g, '');
+
+  return coaCategories.map((cat) => {
+    const allInCat = (coaList.value || []).filter((c: any) => (c.code || '').startsWith(cat.id));
+    const filtered = allInCat.filter((c: any) => {
+      if (!q) return true;
       const cleanCode = (c.code || '').replace(/[.\s-]/g, '').toLowerCase();
       const codeMatch = cleanCode.includes(cleanQ) || (c.code || '').toLowerCase().includes(q);
       const nameMatch = (c.name || '').toLowerCase().includes(q);
@@ -790,8 +979,28 @@ const filteredCoaList = computed(() => {
       const buMatch = (c.businessUnit || '').toLowerCase().includes(q);
       return codeMatch || nameMatch || catMatch || buMatch;
     });
+
+    return {
+      ...cat,
+      totalCount: allInCat.length,
+      matchCount: filtered.length,
+      accounts: filtered,
+    };
+  });
+});
+
+const totalCoaMatches = computed(() =>
+  groupedCoaList.value.reduce((acc, g) => acc + g.matchCount, 0)
+);
+
+watch(coaSearch, (newVal) => {
+  if (newVal.trim()) {
+    groupedCoaList.value.forEach((group) => {
+      if (group.matchCount > 0) {
+        expandedGroups.value[group.id] = true;
+      }
+    });
   }
-  return list;
 });
 
 const showJournalModal = ref(false);
@@ -949,3 +1158,84 @@ async function submitAsset() {
 
 onMounted(loadAll);
 </script>
+
+<style scoped>
+.coa-accordion-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.coa-accordion-item {
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  transition: background-color 0.15s ease;
+}
+
+.coa-accordion-item:last-child {
+  border-bottom: none;
+}
+
+.coa-accordion-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease;
+}
+
+.coa-accordion-header:hover {
+  background-color: rgba(3, 70, 147, 0.035);
+}
+
+.coa-accordion-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.coa-accordion-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--text-muted);
+}
+
+.coa-accordion-chevron.is-open {
+  transform: rotate(90deg);
+  color: var(--color-primary, #034693);
+}
+
+.coa-accordion-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.coa-toggle-pill {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--bg-canvas, rgba(0, 0, 0, 0.04));
+  font-weight: 500;
+}
+
+.coa-accordion-body {
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface, #ffffff);
+}
+</style>
