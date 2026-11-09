@@ -1,6 +1,7 @@
 # 🎨 Tiket KOI-101 (PMO-035): Penyelarasan UI/UX Fondasi & Fast Search 70 Akun COA Excel
 
-- **Jira Key:** `KOI-101`
+- **Jira Key:** `KOI-101` (Task), `KOI-102`, `KOI-103`, `KOI-104` (Subtasks)
+- **Parent Epic:** `KOI-79` ([SPRINT 1] Foundation & Master Data COA Pertor 310)
 - **Status Jira:** `In Review`
 - **Branch GitHub:** `feature/KOI-101-uiux-fondasi-search-coa-fiskal`
 - **Komponen Utama:** `apps/web/src/components/CoaCombobox.vue`
