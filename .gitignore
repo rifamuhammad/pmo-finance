@@ -49,6 +49,7 @@ temp/
 # AI Tooling & Local Agent Rules
 .archify/
 .agents/
+.agent/
 
 # Verification dumps & browser check outputs
 docs/*.json

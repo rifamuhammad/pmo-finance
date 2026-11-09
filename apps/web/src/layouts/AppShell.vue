@@ -75,6 +75,37 @@ const appLauncherOpen = ref(false);
 const unitDropdownOpen = ref(false);
 const notifications = ref<any[]>([]);
 const businessUnits = ref<any[]>([]);
+const fiscalPeriods = ref<any[]>([]);
+
+const activeFiscalPeriod = computed(() => {
+  if (!fiscalPeriods.value || fiscalPeriods.value.length === 0) return null;
+  const open = fiscalPeriods.value.find((p) => p.status === 'OPEN');
+  return open || fiscalPeriods.value[0];
+});
+
+function getFiscalBadgeClass(status: string) {
+  switch (status?.toUpperCase()) {
+    case 'OPEN':
+      return 'fiscal-badge-open';
+    case 'LOCKED':
+      return 'fiscal-badge-locked';
+    case 'CLOSED':
+      return 'fiscal-badge-closed';
+    default:
+      return 'fiscal-badge-default';
+  }
+}
+
+function getFiscalPeriodTooltip(period: any) {
+  if (!period) return '';
+  if (period.status === 'OPEN') {
+    return `Periode Fiskal: ${period.name} (${period.periodCode}) — Status OPEN: Seluruh transaksi diizinkan.`;
+  }
+  if (period.status === 'LOCKED') {
+    return `Periode Fiskal: ${period.name} (${period.periodCode}) — Status LOCKED: Terkunci sementara untuk rekonsiliasi & tutup buku.`;
+  }
+  return `Periode Fiskal: ${period.name} (${period.periodCode}) — Status CLOSED: Ditutup permanen untuk audit.`;
+}
 
 // Provide open AI assistant action to child views like AppsLauncherView
 provide('openAiAssistant', () => {
@@ -265,6 +296,7 @@ async function loadMasterContext() {
   try {
     const res = await apiFetch('/master/overview');
     businessUnits.value = res.data.businessUnits || [];
+    fiscalPeriods.value = res.data.fiscalPeriods || [];
   } catch {
     // Non-blocking
   }
@@ -385,6 +417,19 @@ onUnmounted(() => {
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </button>
+
+        <!-- Real-Time Fiscal Period Status Pill -->
+        <div
+          v-if="!isHomeLauncher && activeFiscalPeriod"
+          class="custom-fiscal-pill"
+          :title="getFiscalPeriodTooltip(activeFiscalPeriod)"
+        >
+          <span class="fiscal-icon">📅</span>
+          <span class="fiscal-name hide-on-tablet">{{ activeFiscalPeriod.name || activeFiscalPeriod.periodCode }}</span>
+          <span class="fiscal-badge" :class="getFiscalBadgeClass(activeFiscalPeriod.status)">
+            {{ activeFiscalPeriod.status }}
+          </span>
+        </div>
 
         <!-- Custom Business Unit Selector -->
         <div v-if="!isHomeLauncher && !auth.user?.businessUnitId && businessUnits.length > 0" class="custom-unit-wrap">
@@ -2148,6 +2193,53 @@ onUnmounted(() => {
   padding: 1px 6px;
   border-radius: 4px;
   flex-shrink: 0;
+}
+
+/* Real-Time Fiscal Period Status Pill */
+.custom-fiscal-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-subtle, #cbd5e1);
+  color: var(--text-primary, #0f172a);
+  font-size: 0.78rem;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  user-select: none;
+}
+
+.fiscal-icon {
+  font-size: 0.82rem;
+}
+
+.fiscal-name {
+  white-space: nowrap;
+}
+
+.fiscal-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1.5px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+.fiscal-badge-open {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.fiscal-badge-locked {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.fiscal-badge-closed {
+  background: #f1f5f9;
+  color: #64748b;
 }
 
 /* Custom Business Unit Selector */

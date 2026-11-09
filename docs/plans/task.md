@@ -1,0 +1,7 @@
+| id | task | status | notes |
+| --- | --- | --- | --- |
+| s1-ui-1 | Buat komponen reusable CoaCombobox.vue untuk pencarian instan 70 Akun COA PMO dari Excel | completed | CoaCombobox.vue dibuat dengan fuzzy search, tab filter kepala 1-5, keyboard nav |
+| s1-ui-2 | Integrasikan CoaCombobox & bersihkan tab numbering di AccountingView.vue | completed | Tab diperbarui tanpa angka, COA table ditambah filter/search 70 akun, modal jurnal memakai CoaCombobox |
+| s1-ui-3 | Tambahkan Indikator Periode Fiskal Aktif (OPEN/LOCKED/CLOSED) di Navbar AppShell.vue | completed | Pill status periode fiskal aktif (Nov 2026) dengan badge OPEN/LOCKED/CLOSED terpasang di navbar |
+| s1-ui-4 | Terapkan audit Style UI (tabular-nums & palette restraint) pada tabel finansial AccountingView | completed | Menghapus badge demo, audit alignment kolom num & tabular-nums untuk seluruh angka moneter |
+| s1-ui-5 | Eksekusi verifikasi penuh (typecheck, tests, build) dan dokumentasikan hasil | completed | Typecheck 0 errors, 24 integration tests pass, build 2.02s OK, docs KOI-101 tuntas |

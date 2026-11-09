@@ -50,7 +50,7 @@
         :class="{ active: activeTab === 'ledger' }"
         @click="activeTab = 'ledger'"
       >
-        1. Buku Besar &amp; Neraca Saldo
+        Buku Besar &amp; Neraca Saldo
       </button>
       <button
         type="button"
@@ -58,7 +58,7 @@
         :class="{ active: activeTab === 'journals' }"
         @click="activeTab = 'journals'"
       >
-        2. Jurnal Umum ({{ journals.length }})
+        Jurnal Umum ({{ journals.length }})
       </button>
       <button
         type="button"
@@ -66,7 +66,7 @@
         :class="{ active: activeTab === 'aging' }"
         @click="activeTab = 'aging'"
       >
-        3. Umur Piutang (AR) &amp; Utang (AP)
+        Umur Piutang (AR) &amp; Utang (AP)
       </button>
       <button
         type="button"
@@ -74,7 +74,7 @@
         :class="{ active: activeTab === 'coa' }"
         @click="activeTab = 'coa'"
       >
-        4. COA, Pajak &amp; Aset Tetap
+        Bagan Akun (COA) &amp; Pajak
       </button>
     </div>
 
@@ -98,7 +98,7 @@
       <div v-if="activeTab === 'ledger'" class="erp-stack">
         <div class="erp-card erp-card-pad erp-row-between">
           <div>
-            <span class="erp-badge erp-badge-demo">KONTROL NERACA SALDO (TRIAL BALANCE)</span>
+            <span class="erp-badge erp-badge-neutral">KONTROL NERACA SALDO (TRIAL BALANCE)</span>
             <h2 class="erp-section-title" style="margin-top: 6px;">
               Status Keseimbangan Buku Besar:
               <StatusBadge :status="trialBalance.isBalanced ? 'MATCHED' : 'DISCREPANCY'" />
@@ -520,12 +520,40 @@
         </section>
 
         <section class="erp-card">
-          <div class="erp-card-header">
+          <div class="erp-card-header erp-row-between" style="flex-wrap: wrap; gap: 12px;">
             <div>
-              <h3 class="erp-section-title">Bagan Akun Standar (Chart of Accounts)</h3>
-              <p class="erp-subtitle">Struktur akun buku besar untuk seluruh unit PMO Utama</p>
+              <h3 class="erp-section-title">Bagan Akun Standar (70 Akun Operasional PMO)</h3>
+              <p class="erp-subtitle">Master COA spesifik unit bisnis PMO dari file Excel KODE COA UT &amp; Revisi ke-7</p>
+            </div>
+            <div class="erp-row" style="gap: 8px;">
+              <input
+                v-model="coaSearch"
+                type="text"
+                class="erp-input"
+                style="min-width: 260px;"
+                placeholder="Cari kode (12-digit) atau nama akun..."
+              />
             </div>
           </div>
+
+          <!-- Filter Kategori Cepat Kepala 1 s/d Kepala 5 -->
+          <div class="coa-table-filter-bar" style="padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 6px; overflow-x: auto;">
+            <button
+              v-for="cat in coaCategoryTabs"
+              :key="cat.id"
+              type="button"
+              class="erp-btn erp-btn-sm"
+              :class="coaFilterCategory === cat.id ? 'erp-btn-primary' : 'erp-btn-secondary'"
+              style="padding: 3px 10px; font-size: 0.75rem;"
+              @click="coaFilterCategory = cat.id"
+            >
+              {{ cat.label }}
+            </button>
+            <span class="erp-subtitle" style="margin-left: auto; align-self: center; font-size: 0.75rem;">
+              Ditemukan <strong>{{ filteredCoaList.length }}</strong> akun
+            </span>
+          </div>
+
           <div class="erp-table-wrap">
             <table class="erp-table">
               <thead>
@@ -533,17 +561,31 @@
                   <th>Kode Akun</th>
                   <th>Nama Akun</th>
                   <th>Tipe</th>
+                  <th>Kategori Operasional</th>
+                  <th>Lingkup Unit</th>
                   <th>Saldo Normal</th>
                   <th>Akun Kontrol</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="c in coaList" :key="c.id">
-                  <td><code>{{ c.code }}</code></td>
+                <tr v-for="c in filteredCoaList" :key="c.id || c.code">
+                  <td><code class="tabular-nums" style="font-weight: 700; color: #034693;">{{ c.code }}</code></td>
                   <td style="font-weight: 600;">{{ c.name }}</td>
                   <td><span class="erp-badge erp-badge-neutral">{{ c.type }}</span></td>
+                  <td class="erp-subtitle">{{ c.category || '-' }}</td>
+                  <td>
+                    <span v-if="c.businessUnit && c.businessUnit !== 'ALL'" class="erp-badge erp-badge-info">
+                      {{ c.businessUnit }}
+                    </span>
+                    <span v-else class="erp-subtitle">Semua Unit</span>
+                  </td>
                   <td>{{ c.normalBalance }}</td>
-                  <td>{{ c.isControlAccount ? 'Ya (Control Account)' : 'Tidak' }}</td>
+                  <td>{{ c.isControlAccount ? 'Ya (Control)' : 'Tidak' }}</td>
+                </tr>
+                <tr v-if="filteredCoaList.length === 0">
+                  <td colspan="7" style="text-align: center; padding: 24px; color: var(--text-muted);">
+                    Tidak ada akun COA yang cocok dengan kriteria pencarian.
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -569,7 +611,7 @@
               v-model="journalForm.description"
               type="text"
               class="erp-input"
-              placeholder="Contoh: Penyesuaian beban penyusutan bulanan"
+              placeholder="Contoh: Penyesuaian beban operasional bulanan"
               required
             />
           </div>
@@ -583,18 +625,16 @@
             </button>
           </div>
 
-          <div v-for="(line, idx) in journalForm.lines" :key="idx" class="erp-grid-4" style="margin-bottom: 8px;">
-            <select v-model="line.accountCode" class="erp-select" required aria-label="Pilih akun COA">
-              <option v-for="c in coaList" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
-            </select>
+          <div v-for="(line, idx) in journalForm.lines" :key="idx" class="journal-line-grid" style="margin-bottom: 10px; display: grid; grid-template-columns: 2fr 1.5fr 1fr 1fr; gap: 8px; align-items: start;">
+            <CoaCombobox v-model="line.accountCode" :accounts="coaList" placeholder="Pilih akun COA..." />
             <input v-model="line.description" type="text" class="erp-input" placeholder="Keterangan baris" required />
-            <input v-model.number="line.debit" type="number" min="0" class="erp-input" placeholder="Debit (IDR)" required />
-            <input v-model.number="line.credit" type="number" min="0" class="erp-input" placeholder="Kredit (IDR)" required />
+            <input v-model.number="line.debit" type="number" min="0" class="erp-input tabular-nums" style="text-align: right;" placeholder="Debit (IDR)" required />
+            <input v-model.number="line.credit" type="number" min="0" class="erp-input tabular-nums" style="text-align: right;" placeholder="Kredit (IDR)" required />
           </div>
 
           <div class="erp-row-between" style="margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-            <span class="erp-money">Total Debit: <strong>{{ formatIdr(manualJournalDebitTotal) }}</strong></span>
-            <span class="erp-money">Total Kredit: <strong>{{ formatIdr(manualJournalCreditTotal) }}</strong></span>
+            <span class="erp-money">Total Debit: <strong class="tabular-nums">{{ formatIdr(manualJournalDebitTotal) }}</strong></span>
+            <span class="erp-money">Total Kredit: <strong class="tabular-nums">{{ formatIdr(manualJournalCreditTotal) }}</strong></span>
           </div>
         </div>
 
@@ -688,6 +728,7 @@ import StateBanner from '../components/StateBanner.vue';
 import ModalDialog from '../components/ModalDialog.vue';
 import AlertBanner from '../components/AlertBanner.vue';
 import PaginationControl from '../components/PaginationControl.vue';
+import CoaCombobox from '../components/CoaCombobox.vue';
 import { usePagination } from '../composables/usePagination';
 
 const auth = useAuthStore();
@@ -721,14 +762,45 @@ const assetsTaxData = ref<{ fixedAssets: any[]; taxConfigurations: any[]; taxSum
 
 const coaList = ref<any[]>([]);
 const masterUnits = ref<any[]>([]);
+const coaSearch = ref('');
+const coaFilterCategory = ref('ALL');
+
+const coaCategoryTabs = [
+  { id: 'ALL', label: 'Semua Akun' },
+  { id: '1', label: '1 - Aset' },
+  { id: '2', label: '2 - Kewajiban' },
+  { id: '3', label: '3 - Ekuitas' },
+  { id: '4', label: '4 - Pendapatan Bisnis' },
+  { id: '5', label: '5 - Belanja Operasional' },
+];
+
+const filteredCoaList = computed(() => {
+  let list = coaList.value || [];
+  if (coaFilterCategory.value !== 'ALL') {
+    list = list.filter((c: any) => (c.code || '').startsWith(coaFilterCategory.value));
+  }
+  const q = coaSearch.value.trim().toLowerCase();
+  if (q) {
+    const cleanQ = q.replace(/[.\s-]/g, '');
+    list = list.filter((c: any) => {
+      const cleanCode = (c.code || '').replace(/[.\s-]/g, '').toLowerCase();
+      const codeMatch = cleanCode.includes(cleanQ) || (c.code || '').toLowerCase().includes(q);
+      const nameMatch = (c.name || '').toLowerCase().includes(q);
+      const catMatch = (c.category || '').toLowerCase().includes(q);
+      const buMatch = (c.businessUnit || '').toLowerCase().includes(q);
+      return codeMatch || nameMatch || catMatch || buMatch;
+    });
+  }
+  return list;
+});
 
 const showJournalModal = ref(false);
 const journalForm = ref({
   businessUnitId: '',
   description: '',
   lines: [
-    { accountCode: '5-1400', description: 'Beban Operasional Kantor', debit: 1500000, credit: 0 },
-    { accountCode: '1-1120', description: 'Pengeluaran Bank Mandiri Operasional', debit: 0, credit: 1500000 },
+    { accountCode: '520101030100', description: 'Belanja Pegawai Tidak Tetap (Gaji PUT PK)', debit: 1500000, credit: 0 },
+    { accountCode: '110101020200', description: 'Bank BRI Penerimaan Komersial PMO', debit: 0, credit: 1500000 },
   ],
 });
 
