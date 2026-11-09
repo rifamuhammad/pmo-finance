@@ -666,8 +666,8 @@ async function main() {
   for (const c of legacyCoaList) {
     await prisma.chartOfAccount.upsert({
       where: { code: c.code },
-      update: { name: c.name },
-      create: c,
+      update: { name: c.name, isActive: false },
+      create: { ...c, isActive: false },
     });
   }
 

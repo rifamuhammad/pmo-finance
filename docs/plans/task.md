@@ -6,3 +6,4 @@
 | s1-ui-4 | Terapkan audit Style UI (tabular-nums & palette restraint) pada tabel finansial AccountingView | completed | Menghapus badge demo, audit alignment kolom num & tabular-nums untuk seluruh angka moneter |
 | s1-ui-5 | Eksekusi verifikasi penuh (typecheck, tests, build) dan dokumentasikan hasil | completed | Typecheck 0 errors, 24 integration tests pass, build 2.02s OK, docs KOI-101 tuntas |
 | s1-ui-6 | Refactor tampilan COA di AccountingView.vue menjadi Accordion / Collapsible Group (Solusi 2) | completed | Dikelompokkan 5 kategori hierarki akun, auto-expand saat search, tombol Buka/Tutup Semua, copy kode akun |
+| s1-ui-7 | Bersihkan akun legacy [LEGACY] & integrasikan CoaCombobox pada form Kas Kecil (DRA-UK) | completed | PettyCashView memakai CoaCombobox 70 akun Excel, sembunyikan 17 akun [LEGACY] dari dropdown UI |

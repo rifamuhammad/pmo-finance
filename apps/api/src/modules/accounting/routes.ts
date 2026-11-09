@@ -15,7 +15,14 @@ accountingRouter.use(requireAuth);
 accountingRouter.get('/coa', requirePermission('accounting:view'), async (req, res, next) => {
   try {
     const [accounts, mappings] = await Promise.all([
-      prisma.chartOfAccount.findMany({ orderBy: { code: 'asc' } }),
+      prisma.chartOfAccount.findMany({
+        where: {
+          isActive: true,
+          code: { not: { contains: '-' } },
+          name: { not: { startsWith: '[LEGACY]' } },
+        },
+        orderBy: { code: 'asc' },
+      }),
       prisma.accountMapping.findMany({ orderBy: { transactionType: 'asc' } }),
     ]);
 
@@ -287,7 +294,14 @@ accountingRouter.get('/ledger', requirePermission('accounting:view'), async (req
     if (typeof accountCode === 'string' && accountCode) lineWhere.accountCode = accountCode;
 
     const [accounts, lines] = await Promise.all([
-      prisma.chartOfAccount.findMany({ orderBy: { code: 'asc' } }),
+      prisma.chartOfAccount.findMany({
+        where: {
+          isActive: true,
+          code: { not: { contains: '-' } },
+          name: { not: { startsWith: '[LEGACY]' } },
+        },
+        orderBy: { code: 'asc' },
+      }),
       prisma.journalLine.findMany({
         where: lineWhere,
         include: {

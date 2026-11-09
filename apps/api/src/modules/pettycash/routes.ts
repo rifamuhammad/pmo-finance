@@ -315,7 +315,11 @@ pettyCashRouter.get('/master-context', async (req, res, next) => {
         orderBy: { taxCode: 'asc' },
       }),
       prisma.chartOfAccount.findMany({
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          code: { not: { contains: '-' } },
+          name: { not: { startsWith: '[LEGACY]' } },
+        },
         select: { id: true, code: true, name: true, type: true, normalBalance: true },
         orderBy: { code: 'asc' },
       }),

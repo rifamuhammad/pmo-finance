@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ModalDialog from '../components/ModalDialog.vue';
+import CoaCombobox, { type CoaAccountItem } from '../components/CoaCombobox.vue';
 import { api } from '../services/api';
 import { useAuthStore } from '../stores/auth';
 import { formatRupiah as formatCurrency, formatDate } from '../utils/format';
@@ -97,10 +98,14 @@ interface VendorOption {
 }
 
 interface CoaOption {
-  id: string;
+  id?: string;
   code: string;
   name: string;
-  category: string;
+  type?: string;
+  category?: string;
+  normalBalance?: string;
+  businessUnit?: string;
+  isControlAccount?: boolean;
 }
 
 interface UserOption {
@@ -162,10 +167,10 @@ const formAjuan = reactive({
   proposerUnit: '',
   proposerPhone: '082112457061',
   budgetType: 'Anggaran Operasional',
-  draCode: '5-1200',
-  draDescription: '[IT-OPS] Sewa Server Cloud & Infrastruktur IT',
-  coaCode: '5-1200',
-  coaName: 'Beban Operasional Layanan & Proyek',
+  draCode: '520201010100',
+  draDescription: 'Belanja Bahan & Perlengkapan Operasional Unit',
+  coaCode: '520201010100',
+  coaName: 'Belanja Bahan dan Perlengkapan Operasional',
   activityDetail: 'Biaya Operasional Kegiatan dan Belanja Kebutuhan Unit PMO UTama',
   vendorId: null as string | null,
   vendorName: 'CV Berkah Rasa Nusantara',
@@ -259,20 +264,37 @@ watch(
   }
 );
 
+const LEGACY_COA_MAP: Record<string, { code: string; name: string }> = {
+  '5-1100': { code: '520101030100', name: 'Belanja Pegawai Tidak Tetap (Gaji PUT PK)' },
+  '5-1200': { code: '520201010100', name: 'Belanja Bahan & Perlengkapan Operasional Unit' },
+  '5-1300': { code: '520101040100', name: 'Belanja Lembur & Honorarium Instruktur' },
+  '5-1400': { code: '520201010200', name: 'Belanja Pemeliharaan Sarana & Utilitas' },
+  '5-1500': { code: '520501010100', name: 'Beban Administrasi Bank & Payment Gateway' },
+};
+
 function selectBudgetLineById(lineId: string) {
   selectedBudgetLineId.value = lineId;
   const line = masterData.budgetLines.find((b) => b.id === lineId);
   if (line) {
-    formAjuan.draCode = line.draCode || line.code;
+    const rawCoa = line.coaCode || line.code;
+    const mapped = LEGACY_COA_MAP[rawCoa];
+    formAjuan.draCode = mapped ? mapped.code : (line.draCode || line.code);
     formAjuan.draDescription = line.description || line.name || '';
-    formAjuan.coaCode = line.coaCode || line.code;
-    formAjuan.coaName = line.coaName || line.description || line.name || '';
+    formAjuan.coaCode = mapped ? mapped.code : rawCoa;
+    formAjuan.coaName = mapped ? mapped.name : (line.coaName || line.description || line.name || '');
   }
 }
 
 function onBudgetLineChange(event: Event) {
   const target = event.target as HTMLSelectElement;
   selectBudgetLineById(target.value);
+}
+
+function onCoaSelected(acc: CoaAccountItem | null) {
+  if (acc) {
+    formAjuan.coaCode = acc.code;
+    formAjuan.coaName = acc.name;
+  }
 }
 
 function onCoaChange(event: Event) {
@@ -417,7 +439,18 @@ async function loadAllData() {
       ...v,
       taxId: v.taxId || v.taxIdNpwp || null
     }));
-    masterData.coas = masterRes.data.coas || [];
+    masterData.coas = (masterRes.data.coas || [])
+      .filter((c: any) => !c.code.includes('-') && !c.name.includes('[LEGACY]'))
+      .map((c: any) => ({
+        id: c.id || c.code,
+        code: c.code,
+        name: c.name,
+        type: c.type || (c.code.startsWith('5') ? 'EXPENSE' : c.code.startsWith('4') ? 'REVENUE' : c.code.startsWith('1') ? 'ASSET' : c.code.startsWith('2') ? 'LIABILITY' : 'EQUITY'),
+        category: c.category || '',
+        normalBalance: c.normalBalance || (c.code.startsWith('5') || c.code.startsWith('1') ? 'DEBIT' : 'CREDIT'),
+        businessUnit: c.businessUnit || 'ALL',
+        isControlAccount: Boolean(c.isControlAccount)
+      }));
     masterData.budgetLines = (masterRes.data.budgetLines || []).map((bl: any) => ({
       ...bl,
       description: bl.description || bl.name || ''
@@ -928,20 +961,13 @@ onMounted(loadAllData);
                   <label for="select-coa">Akun Pembebanan Buku Besar (COA) <span class="req">*</span></label>
                   <span class="field-hint">Jurnal Debet Otomatis</span>
                 </div>
-                <select
+                <CoaCombobox
                   id="select-coa"
-                  :value="formAjuan.coaCode"
-                  class="form-control"
-                  @change="onCoaChange"
-                >
-                  <option
-                    v-for="coa in masterData.coas"
-                    :key="coa.id"
-                    :value="coa.code"
-                  >
-                    {{ coa.code }} - {{ coa.name }}
-                  </option>
-                </select>
+                  v-model="formAjuan.coaCode"
+                  :accounts="masterData.coas"
+                  placeholder="Cari kode (12-digit) atau nama belanja operasional PMO..."
+                  @select="onCoaSelected"
+                />
               </div>
 
               <!-- Row 6: Uraian Kegiatan -->

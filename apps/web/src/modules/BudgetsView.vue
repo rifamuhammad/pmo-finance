@@ -1102,8 +1102,8 @@ onMounted(loadMasterAndBudgets);
                     :id="`line-coa-${idx}`"
                     v-model="line.accountCode"
                     type="text"
-                    class="input-pill"
-                    placeholder="Contoh: 5-1100"
+                    class="input-pill tabular-nums"
+                    placeholder="Contoh: 520101030100"
                     required
                   />
                 </div>

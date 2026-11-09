@@ -5,7 +5,7 @@ export interface CoaAccountItem {
   id?: string;
   code: string;
   name: string;
-  type: string; // 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE'
+  type?: string; // 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE'
   normalBalance?: 'DEBIT' | 'CREDIT' | string;
   category?: string;
   businessUnit?: string;
@@ -65,7 +65,7 @@ const filteredAccounts = computed<CoaAccountItem[]>(() => {
   let list = props.accounts || [];
 
   if (props.restrictType) {
-    list = list.filter((a) => a.type.toUpperCase() === props.restrictType?.toUpperCase());
+    list = list.filter((a) => a.type?.toUpperCase() === props.restrictType?.toUpperCase());
   }
 
   if (activeCategoryTab.value !== 'ALL') {
@@ -168,7 +168,8 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside);
 });
 
-const getTypeBadgeClass = (type: string) => {
+const getTypeBadgeClass = (type?: string) => {
+  if (!type) return 'badge-neutral';
   switch (type.toUpperCase()) {
     case 'ASSET':
       return 'badge-asset';
@@ -185,7 +186,8 @@ const getTypeBadgeClass = (type: string) => {
   }
 };
 
-const getTypeLabel = (type: string) => {
+const getTypeLabel = (type?: string) => {
+  if (!type) return 'AKUN';
   switch (type.toUpperCase()) {
     case 'ASSET':
       return 'Aset';
