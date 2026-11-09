@@ -841,7 +841,7 @@ onMounted(loadAllData);
     <!-- =================================================================== -->
     <div v-if="currentSubView === 'CREATE'" class="submission-workspace">
       <!-- SECTION 1: FORM AJUAN -->
-      <section class="form-panel">
+      <section class="form-panel" style="position: relative; z-index: 25;">
         <header class="form-panel-header">
           <div>
             <h3 class="form-panel-title">1. Form Ajuan {{ activeModuleTab === 'GUP' ? 'Ganti Uang Persediaan (GUP)' : 'Pertanggungjawaban TUP Nihil' }}</h3>
@@ -965,7 +965,8 @@ onMounted(loadAllData);
                   id="select-coa"
                   v-model="formAjuan.coaCode"
                   :accounts="masterData.coas"
-                  placeholder="Cari kode (12-digit) atau nama belanja operasional PMO..."
+                  restrict-type="EXPENSE"
+                  placeholder="Cari kode (misal 5201) atau nama belanja operasional PMO..."
                   @select="onCoaSelected"
                 />
               </div>
@@ -1987,7 +1988,7 @@ onMounted(loadAllData);
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 
@@ -1999,6 +2000,8 @@ onMounted(loadAllData);
   padding: 1rem 1.35rem;
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
 }
 
 .form-panel-title {
@@ -2027,6 +2030,8 @@ onMounted(loadAllData);
 
 .form-panel-body {
   padding: 1.35rem;
+  overflow: visible;
+  position: relative;
 }
 
 /* Symmetric Two Column Layout for Form Ajuan */
@@ -2035,6 +2040,8 @@ onMounted(loadAllData);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.35rem;
   align-items: stretch;
+  overflow: visible;
+  position: relative;
 }
 
 .form-col-card {
@@ -2045,6 +2052,12 @@ onMounted(loadAllData);
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+  overflow: visible;
+  position: relative;
+}
+
+.form-col-card:focus-within {
+  z-index: 50;
 }
 
 .col-section-header {

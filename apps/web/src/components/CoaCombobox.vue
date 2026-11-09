@@ -42,19 +42,9 @@ const emit = defineEmits<{
 
 const isOpen = ref(false);
 const searchQuery = ref('');
-const activeCategoryTab = ref<string>('ALL');
 const highlightedIndex = ref(0);
 const containerRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
-
-const categoryTabs = [
-  { id: 'ALL', label: 'Semua Akun' },
-  { id: '1', label: '1 - Kas & Aset', type: 'ASSET' },
-  { id: '2', label: '2 - Utang & Pajak', type: 'LIABILITY' },
-  { id: '3', label: '3 - Ekuitas', type: 'EQUITY' },
-  { id: '4', label: '4 - Pendapatan Bisnis', type: 'REVENUE' },
-  { id: '5', label: '5 - Belanja Operasional', type: 'EXPENSE' },
-];
 
 const selectedAccount = computed<CoaAccountItem | null>(() => {
   if (!props.modelValue) return null;
@@ -65,11 +55,13 @@ const filteredAccounts = computed<CoaAccountItem[]>(() => {
   let list = props.accounts || [];
 
   if (props.restrictType) {
-    list = list.filter((a) => a.type?.toUpperCase() === props.restrictType?.toUpperCase());
-  }
-
-  if (activeCategoryTab.value !== 'ALL') {
-    list = list.filter((a) => a.code.startsWith(activeCategoryTab.value));
+    const target = props.restrictType.toUpperCase();
+    list = list.filter((a) => {
+      const t = (a.type || '').toUpperCase();
+      if (target === 'EXPENSE') return t === 'EXPENSE' || t === 'BEBAN' || a.code.startsWith('5');
+      if (target === 'REVENUE') return t === 'REVENUE' || t === 'PENDAPATAN' || a.code.startsWith('4');
+      return t === target;
+    });
   }
 
   const query = searchQuery.value.trim().toLowerCase();
@@ -268,20 +260,6 @@ const getTypeLabel = (type?: string) => {
         </span>
       </div>
 
-      <!-- Quick Filter Tabs (Kepala 1 s/d Kepala 5) -->
-      <div v-if="!restrictType" class="coa-tabs-bar">
-        <button
-          v-for="tab in categoryTabs"
-          :key="tab.id"
-          type="button"
-          class="coa-tab-chip"
-          :class="{ 'is-active': activeCategoryTab === tab.id }"
-          @click="activeCategoryTab = tab.id; highlightedIndex = 0"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
-
       <!-- Result List -->
       <div class="coa-list-viewport">
         <div v-if="filteredAccounts.length === 0" class="coa-empty-state">
@@ -439,11 +417,11 @@ const getTypeLabel = (type?: string) => {
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  z-index: 999;
+  z-index: 99999;
   background: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: 10px;
-  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.1);
+  box-shadow: 0 16px 36px -4px rgba(15, 23, 42, 0.2), 0 8px 16px -6px rgba(15, 23, 42, 0.12);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -487,42 +465,9 @@ const getTypeLabel = (type?: string) => {
   white-space: nowrap;
 }
 
-/* TABS BAR */
-.coa-tabs-bar {
-  display: flex;
-  gap: 4px;
-  padding: 6px 10px;
-  background: #ffffff;
-  border-bottom: 1px solid #f1f5f9;
-  overflow-x: auto;
-}
-
-.coa-tab-chip {
-  background: #f1f5f9;
-  border: 1px solid transparent;
-  color: #475569;
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.15s ease;
-}
-
-.coa-tab-chip:hover {
-  background: #e2e8f0;
-  color: #0f172a;
-}
-
-.coa-tab-chip.is-active {
-  background: #034693;
-  color: #ffffff;
-}
-
 /* LIST VIEWPORT */
 .coa-list-viewport {
-  max-height: 260px;
+  max-height: 240px;
   overflow-y: auto;
   padding: 4px;
 }
