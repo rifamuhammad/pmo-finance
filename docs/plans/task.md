@@ -8,3 +8,4 @@
 | s1-ui-6 | Refactor tampilan COA di AccountingView.vue menjadi Accordion / Collapsible Group (Solusi 2) | completed | Dikelompokkan 5 kategori hierarki akun, auto-expand saat search, tombol Buka/Tutup Semua, copy kode akun |
 | s1-ui-7 | Bersihkan akun legacy [LEGACY] & integrasikan CoaCombobox pada form Kas Kecil (DRA-UK) | completed | PettyCashView memakai CoaCombobox 70 akun Excel, sembunyikan 17 akun [LEGACY] dari dropdown UI |
 | s1-ui-8 | Hapus filter parsial backend & frontend agar 100% dari 70 akun COA Excel tampil utuh | completed | Endpoint /master-context & CoaCombobox kini menyajikan 70 dari 70 akun resmi tanpa batasan 38/28 |
+| s1-ui-9 | Redesain CoaCombobox sesuai mockup: pill kategori (Semua, Aset, Liabilitas, Ekuitas, Pendapatan, Beban) & grouped list header | completed | Sesuai Screenshot 13.04.44: filter pill non-slop, section header per kategori, counter 70 akun, elevation z-index 99999 |

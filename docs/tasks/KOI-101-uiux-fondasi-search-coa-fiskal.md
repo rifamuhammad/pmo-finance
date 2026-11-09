@@ -48,11 +48,18 @@ Tiket ini menyelaraskan seluruh komponen fondasi tersebut agar interaksi kerja c
 ---
 
 ## 4. Langkah & Keputusan Teknis
-1. **Komponen Reusable `CoaCombobox.vue`:**
+1. **Komponen Reusable `CoaCombobox.vue` (Desain Mockup Non-Slop):**
    - Menggunakan Composition API Vue 3 dengan TypeScript props `accounts: CoaAccountItem[]`.
+   - Mengusung layout bersih sesuai mockup UI non-slop:
+     - Input pencarian cepat di bagian atas dengan placeholder intuitif (`Cari kode atau nama akun, misalnya 5201 atau gaji...`).
+     - Baris filter kategori berbentuk pill buttons: `Semua`, `Aset`, `Liabilitas`, `Ekuitas`, `Pendapatan`, `Beban`.
+     - Subheader counter dinamis: `70 akun tersedia` (menyesuaikan filter yang aktif).
+     - Daftar akun yang dikelompokkan secara hierarkis dengan section header (`ASET`, `LIABILITAS`, `EKUITAS`, `PENDAPATAN`, `BEBAN`).
+     - Setiap baris akun menampilkan badge kode akun biru muda (`110101010100`), nama akun, sub-label kategori, badge jenis di sisi kanan (`Aset`, `Beban`, dll.), dan tanda centang aktif `✓`.
+     - Popover footer informatif: ikon info di kiri (`Menampilkan akun sesuai filter`) dan panduan tombol navigasi keyboard di kanan (`[↑] [↓] Navigasi | [Enter] Pilih | [Esc] Tutup`).
+     - Pengaturan z-index tinggi (`z-index: 99999`) dan penyesuaian kontainer form (`overflow: visible`) agar dropdown tidak terpotong oleh card form lainnya.
    - Mendukung pencarian fuzzy berdasarkan kode angka 12 digit (menghapus tanda titik/spasi secara otomatis saat pencocokan) maupun nama akun.
-   - Dilengkapi filter cepat berbasis tab: `Semua`, `1 - Kas & Aset`, `2 - Utang & Pajak`, `3 - Ekuitas`, `4 - Pendapatan Bisnis`, `5 - Belanja Operasional`.
-   - Keyboard navigation lengkap (`ArrowUp`, `ArrowDown`, `Enter`, `Escape`).
+   - Keyboard navigation lengkap (`ArrowUp`, `ArrowDown`, `Enter`, `Escape`) melintasi akun-akun yang terkelompok.
 2. **Refactor `AccountingView.vue`:**
    - Mengintegrasikan `CoaCombobox` ke dalam baris input debit/kredit modal jurnal umum.
    - Menata ulang tabel COA dengan indikator pencarian jumlah akun yang cocok.
