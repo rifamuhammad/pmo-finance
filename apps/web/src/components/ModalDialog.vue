@@ -4,6 +4,7 @@ import { watch, onMounted, onUnmounted } from 'vue';
 const props = defineProps<{
   open: boolean;
   title: string;
+  maxWidth?: string;
 }>();
 
 const emit = defineEmits<{
@@ -45,7 +46,7 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
-      <div class="modal-dialog" role="dialog" aria-modal="true" :aria-label="title">
+      <div class="modal-dialog" :style="maxWidth ? { maxWidth } : undefined" role="dialog" aria-modal="true" :aria-label="title">
         <div class="modal-header">
           <h2 class="modal-title">{{ title }}</h2>
           <button

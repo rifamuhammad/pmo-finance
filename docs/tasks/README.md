@@ -12,6 +12,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-101` | [PMO-035] Penyelarasan UI/UX Fondasi: Fast Search 70 Akun COA & Indikator Fiskal | `feature/KOI-101-uiux-fondasi-search-coa-fiskal` | `Done` | [KOI-101-uiux-fondasi-search-coa-fiskal.md](./KOI-101-uiux-fondasi-search-coa-fiskal.md) |
 | `KOI-98` | [PMO-042] Transformasi Antarmuka BudgetsView.vue ke Format Semula - Menjadi | `feature/KOI-98-ui-budgets-semula-menjadi` | `Done` | [KOI-98-ui-budgets-semula-menjadi.md](./KOI-98-ui-budgets-semula-menjadi.md) |
 | `KOI-100` | [PMO-044] Injeksi Data Anggaran Riil PMO dari Excel (Revisi 7 & Usulan 2027) | `feature/KOI-100-injeksi-data-anggaran-riil-excel` | `In Review` | [KOI-100-injeksi-data-anggaran-riil.md](./KOI-100-injeksi-data-anggaran-riil.md) |
+| `KOI-99` | [PMO-043] Versioning Snapshot Revisi Anggaran (Revisi 1 s/d Revisi 7) | `feature/KOI-99-versioning-snapshot-revisi-anggaran` | `In Review` | [KOI-99-versioning-snapshot-revisi-anggaran.md](./KOI-99-versioning-snapshot-revisi-anggaran.md) |
 
 ---
 

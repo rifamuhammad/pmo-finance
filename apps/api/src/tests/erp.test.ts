@@ -274,6 +274,25 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(revRes.body.data.version).toBe(2);
       expect(revRes.body.data.totalAllocated).toBe(60000000);
       expect(revRes.body.data.revisions.length).toBeGreaterThanOrEqual(1);
+
+      // Verify revision list endpoint
+      const listRev = await request(app)
+        .get(`/api/v1/budgets/${createdBudgetId}/revisions`)
+        .set('Authorization', `Bearer ${unitMgrToken}`);
+      expect(listRev.status).toBe(200);
+      expect(listRev.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(listRev.body.data[0].version).toBe(1);
+
+      // Verify revision diff comparison endpoint
+      const diffRes = await request(app)
+        .get(`/api/v1/budgets/${createdBudgetId}/revisions/compare?fromVersion=1&toVersion=current`)
+        .set('Authorization', `Bearer ${unitMgrToken}`);
+      expect(diffRes.status).toBe(200);
+      expect(diffRes.body.data.fromVersion).toBe(1);
+      expect(diffRes.body.data.toVersion).toBe(2);
+      expect(diffRes.body.data.totalDifference).toBe(10000000);
+      expect(diffRes.body.data.lines.length).toBeGreaterThanOrEqual(1);
+      expect(diffRes.body.data.lines[0].status).toBe('INCREASED');
     });
 
     it('supports 4-level volume (V1 x V2 x V3 x V4) and Semula-Menjadi pergeseran calculations', async () => {

@@ -648,3 +648,131 @@ budgetRouter.post('/:id/revise', requirePermission('budget:approve'), async (req
     next(err);
   }
 });
+
+// Endpoint histori snapshot revisi anggaran
+budgetRouter.get('/:id/revisions', requirePermission('budget:view'), async (req, res, next) => {
+  try {
+    const budget = await prisma.budget.findUnique({ where: { id: req.params.id } });
+    if (!budget) throw new AppError(404, 'BUDGET_NOT_FOUND', 'Anggaran tidak ditemukan.');
+    enforceUnitScope(req.user, budget.businessUnitId);
+
+    const revisions = await prisma.budgetRevision.findMany({
+      where: { budgetId: req.params.id },
+      orderBy: { version: 'desc' },
+    });
+
+    res.json({
+      success: true,
+      data: revisions.map((r) => ({
+        ...r,
+        previousAllocated: Number(fromCents(toCents(r.previousAllocated))),
+        newAllocated: Number(fromCents(toCents(r.newAllocated))),
+      })),
+      meta: { total: revisions.length, requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Endpoint perbandingan (diff viewer) antar 2 versi revisi anggaran
+budgetRouter.get('/:id/revisions/compare', requirePermission('budget:view'), async (req, res, next) => {
+  try {
+    const { fromVersion, toVersion } = req.query;
+    const budget = await prisma.budget.findUnique({
+      where: { id: req.params.id },
+      include: { lines: { include: { costCenter: true } } },
+    });
+    if (!budget) throw new AppError(404, 'BUDGET_NOT_FOUND', 'Anggaran tidak ditemukan.');
+    enforceUnitScope(req.user, budget.businessUnitId);
+
+    const vFrom = Number(fromVersion) || 1;
+    const vTo = toVersion === 'current' ? budget.version : (Number(toVersion) || budget.version);
+
+    let fromLines: any[] = [];
+    let fromTotal = 0;
+    if (vFrom === budget.version) {
+      fromLines = budget.lines;
+      fromTotal = Number(fromCents(toCents(budget.totalAllocated)));
+    } else {
+      const revFrom = await prisma.budgetRevision.findFirst({
+        where: { budgetId: budget.id, version: vFrom },
+      });
+      if (revFrom) {
+        fromLines = (revFrom.snapshotData as any[]) || [];
+        fromTotal = Number(fromCents(toCents(revFrom.previousAllocated)));
+      }
+    }
+
+    let toLines: any[] = [];
+    let toTotal = 0;
+    if (vTo === budget.version) {
+      toLines = budget.lines;
+      toTotal = Number(fromCents(toCents(budget.totalAllocated)));
+    } else {
+      const revTo = await prisma.budgetRevision.findFirst({
+        where: { budgetId: budget.id, version: vTo },
+      });
+      if (revTo) {
+        toLines = (revTo.snapshotData as any[]) || [];
+        toTotal = Number(fromCents(toCents(revTo.previousAllocated)));
+      }
+    }
+
+    const lineMap = new Map<string, { from?: any; to?: any }>();
+    for (const fl of fromLines) {
+      const key = fl.id || `${fl.accountCode}-${fl.description}`;
+      if (!lineMap.has(key)) lineMap.set(key, {});
+      lineMap.get(key)!.from = fl;
+    }
+    for (const tl of toLines) {
+      const key = tl.id || `${tl.accountCode}-${tl.description}`;
+      if (!lineMap.has(key)) lineMap.set(key, {});
+      lineMap.get(key)!.to = tl;
+    }
+
+    const comparisonLines: any[] = [];
+    for (const [key, pair] of lineMap.entries()) {
+      const fAmt = pair.from ? Number(fromCents(toCents(pair.from.allocatedAmount ?? pair.from.menjadiAmount ?? 0))) : 0;
+      const tAmt = pair.to ? Number(fromCents(toCents(pair.to.allocatedAmount ?? pair.to.menjadiAmount ?? 0))) : 0;
+      const diff = tAmt - fAmt;
+      const desc = pair.to?.description || pair.from?.description || 'Pos Anggaran';
+      const coa = pair.to?.accountCode || pair.from?.accountCode || '-';
+      const costCenter = pair.to?.costCenter?.code || pair.from?.costCenter?.code || '-';
+
+      let status = 'UNCHANGED';
+      if (!pair.from && pair.to) status = 'ADDED';
+      else if (pair.from && !pair.to) status = 'REMOVED';
+      else if (diff > 0) status = 'INCREASED';
+      else if (diff < 0) status = 'DECREASED';
+
+      comparisonLines.push({
+        key,
+        costCenter,
+        accountCode: coa,
+        description: desc,
+        fromAmount: fAmt,
+        toAmount: tAmt,
+        differenceAmount: diff,
+        status,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        budgetId: budget.id,
+        docNumber: budget.docNumber,
+        fromVersion: vFrom,
+        toVersion: vTo,
+        fromTotalAllocated: fromTotal,
+        toTotalAllocated: toTotal,
+        totalDifference: toTotal - fromTotal,
+        lines: comparisonLines,
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});

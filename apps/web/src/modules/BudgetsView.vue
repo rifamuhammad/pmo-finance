@@ -586,6 +586,93 @@ async function submitRevision() {
   }
 }
 
+// Diff Viewer State & Methods
+const diffModalOpen = ref(false);
+const diffLoading = ref(false);
+const diffFromVersion = ref<number | string>(1);
+const diffToVersion = ref<number | string>('current');
+const diffResult = ref<any>(null);
+const diffFilter = ref<'ALL' | 'CHANGED' | 'INCREASED' | 'DECREASED' | 'ADDED' | 'REMOVED'>('ALL');
+
+const standardRevisionReasons = [
+  'Dialihkan ke Block Grant PMO (Efisiensi & Konsolidasi Program)',
+  'Penyesuaian Prognosis Kegiatan Triwulan (Realokasi Pos Belanja)',
+  'Optimalisasi & Efisiensi Belanja Operasional Unit',
+  'Addendum Kontrak Klien / Perubahan Ruang Lingkup Proyek',
+  'Penyesuaian Tarif Standar Biaya Masukan (SBM) Rektorat',
+];
+
+function selectStandardReason(reason: string) {
+  reviseReason.value = reason;
+}
+
+async function openDiffModal(fromVer?: number, toVer?: number | string) {
+  if (!selectedBudget.value) return;
+  diffModalOpen.value = true;
+  diffLoading.value = true;
+  diffFilter.value = 'ALL';
+
+  const revs = selectedBudget.value.revisions || [];
+  if (fromVer !== undefined) {
+    diffFromVersion.value = fromVer;
+  } else {
+    diffFromVersion.value = revs.length > 0 ? revs[revs.length - 1].version : 1;
+  }
+
+  if (toVer !== undefined) {
+    diffToVersion.value = toVer;
+  } else {
+    diffToVersion.value = 'current';
+  }
+
+  await fetchDiffData();
+}
+
+async function fetchDiffData() {
+  if (!selectedBudget.value) return;
+  diffLoading.value = true;
+  try {
+    const res = await apiFetch(
+      `/budgets/${selectedBudget.value.id}/revisions/compare?fromVersion=${diffFromVersion.value}&toVersion=${diffToVersion.value}`
+    );
+    diffResult.value = res.data;
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal memuat perbandingan revisi anggaran.';
+  } finally {
+    diffLoading.value = false;
+  }
+}
+
+const filteredDiffLines = computed(() => {
+  if (!diffResult.value?.lines) return [];
+  if (diffFilter.value === 'ALL') return diffResult.value.lines;
+  if (diffFilter.value === 'CHANGED') {
+    return diffResult.value.lines.filter((l: any) => l.status !== 'UNCHANGED');
+  }
+  return diffResult.value.lines.filter((l: any) => l.status === diffFilter.value);
+});
+
+const diffStats = computed(() => {
+  const lines = diffResult.value?.lines || [];
+  let changed = 0;
+  let increased = 0;
+  let decreased = 0;
+  let added = 0;
+  let removed = 0;
+  let unchanged = 0;
+
+  for (const l of lines) {
+    if (l.status === 'INCREASED') increased++;
+    else if (l.status === 'DECREASED') decreased++;
+    else if (l.status === 'ADDED') added++;
+    else if (l.status === 'REMOVED') removed++;
+    else unchanged++;
+    if (l.status !== 'UNCHANGED') changed++;
+  }
+
+  return { total: lines.length, changed, increased, decreased, added, removed, unchanged };
+});
+
 watch(() => auth.selectedBusinessUnitId, loadMasterAndBudgets);
 onMounted(loadMasterAndBudgets);
 </script>
@@ -1199,11 +1286,20 @@ onMounted(loadMasterAndBudgets);
 
         <!-- Riwayat Versi & Revisi Plafon -->
         <div v-if="selectedBudget.revisions?.length > 0" class="drawer-section">
-          <div class="section-header-custom">
+          <div class="section-header-custom flex justify-between items-center">
             <div class="section-title-wrap">
               <i class="pi pi-history text-primary"></i>
               <h3>Histori Revisi & Audit Trail ({{ selectedBudget.revisions.length }} Versi)</h3>
             </div>
+            <button
+              type="button"
+              class="pill-btn pill-btn-ghost text-xs"
+              style="padding: 5px 12px; gap: 6px;"
+              @click="openDiffModal()"
+            >
+              <i class="pi pi-arrows-h"></i>
+              Bandingkan Versi (Diff Viewer)
+            </button>
           </div>
 
           <div class="timeline-container">
@@ -1217,10 +1313,21 @@ onMounted(loadMasterAndBudgets);
                   <span class="rev-badge">Versi {{ rev.version }} &rarr; Versi {{ rev.version + 1 }}</span>
                   <span class="timeline-date">{{ formatDateTime(rev.createdAt) }}</span>
                 </div>
-                <span class="rev-author">
-                  <i class="pi pi-user-edit text-xs"></i>
-                  Oleh: <strong>{{ rev.revisedByName }}</strong>
-                </span>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="rev-diff-btn"
+                    title="Bandingkan snapshot versi ini dengan versi berikutnya"
+                    @click="openDiffModal(rev.version, rev.version + 1)"
+                  >
+                    <i class="pi pi-search-plus text-xs"></i>
+                    Bandingkan
+                  </button>
+                  <span class="rev-author">
+                    <i class="pi pi-user-edit text-xs"></i>
+                    Oleh: <strong>{{ rev.revisedByName }}</strong>
+                  </span>
+                </div>
               </div>
               <p class="rev-reason">"{{ rev.reason }}"</p>
               <div class="rev-diff-strip">
@@ -1569,6 +1676,21 @@ onMounted(loadMasterAndBudgets);
 
         <div class="form-field">
           <label for="rev-reason" class="form-label">Alasan Penyesuaian / Pergeseran Plafon (Wajib Diisi)</label>
+          <div class="quick-preset-container mb-2">
+            <span class="text-xs text-slate-500 font-medium">Preset Rekomendasi Audit:</span>
+            <div class="quick-preset-chips flex flex-wrap gap-1 mt-1">
+              <button
+                v-for="(reasonPreset, rIdx) in standardRevisionReasons"
+                :key="rIdx"
+                type="button"
+                class="reason-chip-btn"
+                :class="{ active: reviseReason === reasonPreset }"
+                @click="selectStandardReason(reasonPreset)"
+              >
+                {{ reasonPreset }}
+              </button>
+            </div>
+          </div>
           <textarea
             id="rev-reason"
             v-model="reviseReason"
@@ -1623,6 +1745,241 @@ onMounted(loadMasterAndBudgets);
           <button type="submit" class="pill-btn pill-btn-primary">Simpan Versi Revisi</button>
         </div>
       </form>
+    </ModalDialog>
+
+    <!-- Modal: Budget Revision Snapshot Diff Viewer -->
+    <ModalDialog
+      :open="diffModalOpen"
+      title="Perbandingan Snapshot Revisi Anggaran (Diff Viewer)"
+      maxWidth="1050px"
+      @close="diffModalOpen = false"
+    >
+      <div v-if="selectedBudget" class="diff-viewer-wrap">
+        <!-- Top Info Header & Version Pickers -->
+        <div class="diff-header-bar">
+          <div class="diff-doc-info">
+            <span class="diff-doc-badge font-mono font-bold">{{ selectedBudget.docNumber }}</span>
+            <span class="diff-doc-title">{{ selectedBudget.title }}</span>
+          </div>
+
+          <div class="diff-selectors-row">
+            <div class="diff-selector-group">
+              <label class="diff-selector-label">Versi Asal (From):</label>
+              <select
+                v-model="diffFromVersion"
+                class="select-pill text-xs font-mono"
+                @change="fetchDiffData"
+              >
+                <option
+                  v-for="rev in (selectedBudget.revisions || [])"
+                  :key="`from-${rev.version}`"
+                  :value="rev.version"
+                >
+                  Versi {{ rev.version }} ({{ formatDateTime(rev.createdAt) }})
+                </option>
+              </select>
+            </div>
+
+            <div class="diff-arrow-separator">
+              <i class="pi pi-arrow-right text-slate-400"></i>
+            </div>
+
+            <div class="diff-selector-group">
+              <label class="diff-selector-label">Versi Target (To):</label>
+              <select
+                v-model="diffToVersion"
+                class="select-pill text-xs font-mono"
+                @change="fetchDiffData"
+              >
+                <option value="current">Versi Saat Ini (Aktif - v{{ selectedBudget.version }})</option>
+                <option
+                  v-for="rev in (selectedBudget.revisions || [])"
+                  :key="`to-${rev.version}`"
+                  :value="rev.version"
+                >
+                  Versi {{ rev.version }} ({{ formatDateTime(rev.createdAt) }})
+                </option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              class="pill-btn pill-btn-ghost text-xs ml-auto"
+              :disabled="diffLoading"
+              @click="fetchDiffData"
+            >
+              <i class="pi pi-refresh" :class="{ 'pi-spin': diffLoading }"></i>
+              Segarkan
+            </button>
+          </div>
+        </div>
+
+        <div v-if="diffLoading" class="diff-loading-box">
+          <div class="spinner-sm"></div>
+          <span>Mengkalkulasi perbandingan snapshot antar versi...</span>
+        </div>
+
+        <div v-else-if="diffResult" class="diff-body-content">
+          <!-- KPI Summary Cards -->
+          <div class="diff-kpi-grid">
+            <div class="diff-kpi-card">
+              <span class="kpi-label">Pagu Versi Asal (v{{ diffResult.fromVersion }})</span>
+              <span class="kpi-value font-mono tabular-nums text-slate-700">
+                {{ formatRupiah(diffResult.fromTotalAllocated) }}
+              </span>
+            </div>
+
+            <div class="diff-kpi-card">
+              <span class="kpi-label">Pagu Versi Target ({{ diffResult.toVersion === 'current' ? `v${selectedBudget.version} (Aktif)` : `v${diffResult.toVersion}` }})</span>
+              <span class="kpi-value font-mono tabular-nums text-blue-700">
+                {{ formatRupiah(diffResult.toTotalAllocated) }}
+              </span>
+            </div>
+
+            <div class="diff-kpi-card" :class="diffResult.totalDifference > 0 ? 'bg-emerald-subtle' : diffResult.totalDifference < 0 ? 'bg-rose-subtle' : ''">
+              <span class="kpi-label">Total Selisih Plafon</span>
+              <span
+                class="kpi-value font-mono tabular-nums font-bold"
+                :class="diffResult.totalDifference > 0 ? 'text-emerald' : diffResult.totalDifference < 0 ? 'text-rose' : 'text-slate-600'"
+              >
+                {{ formatPergeseran(diffResult.totalDifference) }}
+              </span>
+            </div>
+
+            <div class="diff-kpi-card">
+              <span class="kpi-label">Status Perubahan Pos</span>
+              <div class="flex items-center gap-2 mt-1">
+                <span class="badge-pill font-mono text-xs" :class="diffStats.changed > 0 ? 'badge-amber' : 'badge-neutral'">
+                  {{ diffStats.changed }} Berubah
+                </span>
+                <span class="text-xs text-slate-500 font-mono">/ {{ diffStats.total }} Total</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Filter Pills Bar -->
+          <div class="diff-filter-bar">
+            <span class="text-xs text-slate-500 font-semibold mr-1">Filter Baris:</span>
+            <button
+              type="button"
+              class="diff-filter-pill"
+              :class="{ active: diffFilter === 'ALL' }"
+              @click="diffFilter = 'ALL'"
+            >
+              Semua ({{ diffStats.total }})
+            </button>
+            <button
+              type="button"
+              class="diff-filter-pill"
+              :class="{ active: diffFilter === 'CHANGED' }"
+              @click="diffFilter = 'CHANGED'"
+            >
+              Hanya Perubahan ({{ diffStats.changed }})
+            </button>
+            <button
+              v-if="diffStats.increased > 0"
+              type="button"
+              class="diff-filter-pill pill-inc"
+              :class="{ active: diffFilter === 'INCREASED' }"
+              @click="diffFilter = 'INCREASED'"
+            >
+              + Bertambah ({{ diffStats.increased }})
+            </button>
+            <button
+              v-if="diffStats.decreased > 0"
+              type="button"
+              class="diff-filter-pill pill-dec"
+              :class="{ active: diffFilter === 'DECREASED' }"
+              @click="diffFilter = 'DECREASED'"
+            >
+              - Berkurang ({{ diffStats.decreased }})
+            </button>
+            <button
+              v-if="diffStats.added > 0"
+              type="button"
+              class="diff-filter-pill pill-add"
+              :class="{ active: diffFilter === 'ADDED' }"
+              @click="diffFilter = 'ADDED'"
+            >
+              Pos Baru ({{ diffStats.added }})
+            </button>
+            <button
+              v-if="diffStats.removed > 0"
+              type="button"
+              class="diff-filter-pill pill-rem"
+              :class="{ active: diffFilter === 'REMOVED' }"
+              @click="diffFilter = 'REMOVED'"
+            >
+              Dihapus ({{ diffStats.removed }})
+            </button>
+          </div>
+
+          <!-- Lines Diff Table -->
+          <div class="diff-table-container">
+            <table class="diff-table">
+              <thead>
+                <tr>
+                  <th style="width: 120px;">Akun COA</th>
+                  <th>Pos Kegiatan / Uraian</th>
+                  <th style="width: 130px;">Cost Center</th>
+                  <th style="width: 140px; text-align: right;">Versi Asal</th>
+                  <th style="width: 140px; text-align: right;">Versi Target</th>
+                  <th style="width: 140px; text-align: right;">Selisih (+/-)</th>
+                  <th style="width: 110px; text-align: center;">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="l in filteredDiffLines"
+                  :key="l.key"
+                  :class="[
+                    l.status === 'INCREASED' ? 'row-increased' : '',
+                    l.status === 'DECREASED' ? 'row-decreased' : '',
+                    l.status === 'ADDED' ? 'row-added' : '',
+                    l.status === 'REMOVED' ? 'row-removed' : '',
+                  ]"
+                >
+                  <td class="font-mono text-xs text-slate-600 font-semibold">{{ l.accountCode }}</td>
+                  <td>
+                    <div class="font-medium text-slate-800 text-sm">{{ l.description }}</div>
+                  </td>
+                  <td class="font-mono text-xs text-slate-500">{{ l.costCenter }}</td>
+                  <td class="text-right font-mono tabular-nums text-xs text-slate-600">
+                    {{ l.status === 'ADDED' ? '-' : formatRupiah(l.fromAmount) }}
+                  </td>
+                  <td class="text-right font-mono tabular-nums text-xs font-semibold text-slate-800">
+                    {{ l.status === 'REMOVED' ? '-' : formatRupiah(l.toAmount) }}
+                  </td>
+                  <td
+                    class="text-right font-mono tabular-nums text-xs font-bold"
+                    :class="l.differenceAmount > 0 ? 'text-emerald' : l.differenceAmount < 0 ? 'text-rose' : 'text-slate-400'"
+                  >
+                    {{ l.differenceAmount === 0 ? '0' : formatPergeseran(l.differenceAmount) }}
+                  </td>
+                  <td style="text-align: center;">
+                    <span v-if="l.status === 'UNCHANGED'" class="diff-badge badge-neutral">Sama</span>
+                    <span v-else-if="l.status === 'INCREASED'" class="diff-badge badge-emerald">+ Naik</span>
+                    <span v-else-if="l.status === 'DECREASED'" class="diff-badge badge-rose">- Turun</span>
+                    <span v-else-if="l.status === 'ADDED'" class="diff-badge badge-blue">Baru</span>
+                    <span v-else-if="l.status === 'REMOVED'" class="diff-badge badge-slate">Dihapus</span>
+                  </td>
+                </tr>
+                <tr v-if="filteredDiffLines.length === 0">
+                  <td colspan="7" class="text-center py-6 text-slate-400 text-sm">
+                    Tidak ada pos anggaran yang sesuai dengan filter status perubahan ini.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="btn-row" style="justify-content: flex-end; margin-top: 16px;">
+          <button type="button" class="pill-btn pill-btn-ghost" @click="diffModalOpen = false">
+            Tutup Diff Viewer
+          </button>
+        </div>
+      </div>
     </ModalDialog>
 
     <!-- Animated Checkmark Success Notification Modal -->
@@ -2941,6 +3298,318 @@ onMounted(loadMasterAndBudgets);
   color: #ffffff;
   border: none;
   cursor: pointer;
+}
+
+/* Quick Preset Revision Reasons */
+.quick-preset-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quick-preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reason-chip-btn {
+  padding: 4px 10px;
+  font-size: 0.76rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  transition: all 120ms ease;
+  line-height: 1.3;
+  text-align: left;
+}
+
+.reason-chip-btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #1e293b;
+}
+
+.reason-chip-btn.active {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+/* Timeline card compare button */
+.rev-diff-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.rev-diff-btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+/* Diff Viewer Styling */
+.diff-viewer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.diff-header-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.diff-doc-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.diff-doc-badge {
+  padding: 3px 8px;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #ffffff;
+}
+
+.diff-doc-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.diff-selectors-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.diff-selector-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diff-selector-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.diff-arrow-separator {
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.diff-loading-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 36px 16px;
+  font-size: 0.88rem;
+  color: #64748b;
+}
+
+.diff-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.diff-kpi-card {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.diff-kpi-card.bg-emerald-subtle {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.diff-kpi-card.bg-rose-subtle {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.kpi-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.kpi-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.diff-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.diff-filter-pill {
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.diff-filter-pill:hover {
+  background: #f1f5f9;
+}
+
+.diff-filter-pill.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+}
+
+.diff-filter-pill.pill-inc.active {
+  background: #059669;
+  border-color: #059669;
+  color: #ffffff;
+}
+
+.diff-filter-pill.pill-dec.active {
+  background: #e11d48;
+  border-color: #e11d48;
+  color: #ffffff;
+}
+
+.diff-filter-pill.pill-add.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.diff-filter-pill.pill-rem.active {
+  background: #475569;
+  border-color: #475569;
+  color: #ffffff;
+}
+
+.diff-table-container {
+  max-height: 440px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.diff-table th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  padding: 10px 12px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  z-index: 1;
+}
+
+.diff-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+
+.diff-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.row-increased {
+  background: #fafffd;
+}
+
+.row-decreased {
+  background: #fffcfc;
+}
+
+.row-added {
+  background: #f8faff;
+}
+
+.row-removed {
+  background: #fcfcfc;
+  opacity: 0.8;
+}
+
+.diff-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.diff-badge.badge-neutral {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.diff-badge.badge-emerald {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.diff-badge.badge-rose {
+  background: #ffe4e6;
+  color: #be123c;
+}
+
+.diff-badge.badge-blue {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.diff-badge.badge-slate {
+  background: #f1f5f9;
+  color: #475569;
 }
 
 /* Responsive */
