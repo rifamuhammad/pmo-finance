@@ -380,12 +380,10 @@ pettyCashRouter.get('/master-context', async (req, res, next) => {
           ...tc,
           ratePercent: toNumber(tc.ratePercent),
         })),
-        coas: coas
-          .filter((c) => c.type === 'EXPENSE' || c.normalBalance === 'DEBIT')
-          .map((c) => ({
-            ...c,
-            category: c.type,
-          })),
+        coas: coas.map((c) => ({
+          ...c,
+          category: c.type,
+        })),
         users: users.map((u) => ({
           ...u,
           role: u.roleCode,

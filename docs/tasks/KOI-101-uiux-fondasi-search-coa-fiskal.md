@@ -34,7 +34,7 @@ Tiket ini menyelaraskan seluruh komponen fondasi tersebut agar interaksi kerja c
    - Penambahan pill status periode fiskal aktif (`📅 Nov 2026` + badge `OPEN` emerald / `LOCKED` amber) tepat di sebelah selector unit bisnis.
 4. **Form Pengajuan Kas Kecil GUP / TUP (`/petty-cash` - Panel DRA-UK):**
    - Menghapus dropdown native `<select>` yang menampilkan 17 akun usang bertanda `[LEGACY]` (misal: `1-1110`, `5-1100`, `5-1200`).
-   - Mengganti input dengan komponen cerdas `CoaCombobox.vue` yang secara eksklusif hanya memuat **70 Akun Operasional Resmi PMO dari File Excel**.
+   - Mengganti input dengan komponen cerdas `CoaCombobox.vue` yang menyajikan **100% dari 70 Akun Operasional Resmi PMO dari File Excel** (menghapus filter backend 38 akun dan frontend 28 akun).
    - Menambahkan mapping otomatis agar pemilihan pos DRA lama langsung terkonversi menjadi kode 12-digit belanja operasional riil (`520201010100`).
 
 ---

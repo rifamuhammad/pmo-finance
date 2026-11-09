@@ -965,8 +965,7 @@ onMounted(loadAllData);
                   id="select-coa"
                   v-model="formAjuan.coaCode"
                   :accounts="masterData.coas"
-                  restrict-type="EXPENSE"
-                  placeholder="Cari kode (misal 5201) atau nama belanja operasional PMO..."
+                  placeholder="Pilih atau cari dari 70 akun COA resmi (kode atau nama)..."
                   @select="onCoaSelected"
                 />
               </div>
