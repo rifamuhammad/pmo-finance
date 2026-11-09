@@ -91,12 +91,12 @@ gantt
 * **Periode:** Senin, 23 Nov 2026 – Jumat, 04 Des 2026
 * **Sasaran Sprint:** Modul Anggaran (`BudgetsView.vue`) selaras penuh dengan format Excel Rektorat (4 tingkat perkalian volume, pagu Semula vs Menjadi, dan selisih otomatis).
 
-| Kode Tiket | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **`PMO-041`** | Refactor Prisma Schema `BudgetLine` & Formula $V_1 \times V_2 \times V_3 \times V_4$ | **Susah** | 3 Hari | Sen, 23 Nov 2026 | Rab, 25 Nov 2026 | **Highest** |
-| **`PMO-042`** | Refactor Komponen UI `BudgetsView.vue` Semula vs Menjadi | **Susah** | 3 Hari | Kam, 26 Nov 2026 | Sen, 30 Nov 2026 | **High** |
-| **`PMO-043`** | Workflow Persetujuan Revisi Anggaran & Validasi Realisasi | **Gampang** | 2 Hari | Sel, 01 Des 2026 | Rab, 02 Des 2026 | **High** |
-| **`PMO-044`** | Review Sprint 2, Uji Impor Excel & Freeze Anggaran 2027 | **Gampang** | 2 Hari | Kam, 03 Des 2026 | Jum, 04 Des 2026 | **Medium** |
+| Kode Tiket | Jira Key | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`PMO-041`** | `KOI-94` | Refactor Prisma Schema `BudgetLine` & Formula $V_1 \times V_2 \times V_3 \times V_4$ | **Susah** | 3 Hari | Sen, 23 Nov 2026 | Rab, 25 Nov 2026 | **Highest** | `Done` |
+| **`PMO-042`** | `KOI-98` | Refactor Komponen UI `BudgetsView.vue` Semula vs Menjadi | **Susah** | 3 Hari | Kam, 26 Nov 2026 | Sen, 30 Nov 2026 | **High** | `Done` |
+| **`PMO-043`** | `KOI-99` | Workflow Persetujuan Revisi Anggaran, Snapshot Versioning & Diff Viewer | **Gampang** | 2 Hari | Sel, 01 Des 2026 | Rab, 02 Des 2026 | **High** | `In Review (Board)` |
+| **`PMO-044`** | `KOI-100` | Injeksi Data Anggaran Riil PMO (Revisi 7 Block Grant & Usulan 2027) | **Gampang** | 2 Hari | Kam, 03 Des 2026 | Jum, 04 Des 2026 | **Medium** | `In Review (Board)` |
 
 ---
 
@@ -104,12 +104,12 @@ gantt
 * **Periode:** Senin, 07 Des 2026 – Jumat, 18 Des 2026
 * **Sasaran Sprint:** Alur transaksi kas utama (Pengadaan LS, Kas Kecil UMK, Kasir POS) terhubung ke akun COA Pertor 310.
 
-| Kode Tiket | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **`PMO-051`** | Modul LS: Alur BAST ➔ Utang Pengadaan (`210101010100`) & Utang Pajak (`2102`) | **Susah** | 3 Hari | Sen, 07 Des 2026 | Rab, 09 Des 2026 | **High** |
-| **`PMO-061`** | Modul UMK: Pencairan Kasir ➔ Akun `110501010100` & Pertanggungjawaban SPJ | **Susah** | 3 Hari | Kam, 10 Des 2026 | Sen, 14 Des 2026 | **High** |
-| **`PMO-071`** | Modul Kasir E-Revenue: Sinkronisasi Akun Pendapatan `4203xxxxxx` & PPN Keluaran | **Gampang** | 2 Hari | Sel, 15 Des 2026 | Rab, 16 Des 2026 | **High** |
-| **`PMO-072`** | Sprint 3 Review & Uji Transaksi Kas Lintas Unit | **Gampang** | 2 Hari | Kam, 17 Des 2026 | Jum, 18 Des 2026 | **Medium** |
+| Kode Tiket | Jira Key | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`PMO-051`** | `KOI-105` | Modul LS: Alur PR & Integrasi 296 Pos Anggaran Riil Pertor 310 | **Susah** | 3 Hari | Sen, 07 Des 2026 | Rab, 09 Des 2026 | **High** | `In Review (Board)` |
+| **`PMO-061`** | - | Modul UMK: Pencairan Kasir ➔ Akun `110501010100` & Pertanggungjawaban SPJ | **Susah** | 3 Hari | Kam, 10 Des 2026 | Sen, 14 Des 2026 | **High** | `To Do` |
+| **`PMO-071`** | - | Modul Kasir E-Revenue: Sinkronisasi Akun Pendapatan `4203xxxxxx` & PPN Keluaran | **Gampang** | 2 Hari | Sel, 15 Des 2026 | Rab, 16 Des 2026 | **High** | `To Do` |
+| **`PMO-072`** | - | Sprint 3 Review & Uji Transaksi Kas Lintas Unit | **Gampang** | 2 Hari | Kam, 17 Des 2026 | Jum, 18 Des 2026 | **Medium** | `To Do` |
 
 ---
 

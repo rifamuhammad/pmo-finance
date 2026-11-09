@@ -190,16 +190,17 @@ flowchart TD
 * **Epic Name:** Direct Procurement & LS Disbursement
 * **Deskripsi:** Mengelola pengadaan pihak ketiga, PR, PO, BAST/GRN, serta pemotongan utang pajak sesuai alur LS Lampiran III Pertor 310.
 
-### [PMO-051] Alur Purchase Request (PR) & Auto-Lock Budget Commitment
-* **Issue Type:** Story | **Priority:** High | **Estimasi:** 5 SP
-* **Status:** `[x] SELESAI DI DEVELOP`
+### [PMO-051] Alur Purchase Request (PR) & Auto-Lock Budget Commitment (Jira: KOI-105)
+* **Issue Type:** Task | **Priority:** High | **Estimasi:** 5 SP
+* **Status:** `[x] SELESAI DI DEVELOP - IN REVIEW (BOARD AKTIF)`
 * **Acceptance Criteria:**
-  1. Form PR mengecek ketersediaan `availableAmount` di `BudgetLine`.
+  1. Form PR mengecek ketersediaan `availableAmount` di `BudgetLine` 296 pos riil.
   2. Persetujuan PR otomatis mengunci dana di `BudgetCommitment`.
+  3. Integrasi Smart BudgetLine Picker dengan pencarian instan dan filter unit bisnis.
 * **Subtasks:**
   * [x] `PMO-051-1`: Endpoint pengajuan PR di `apps/api/src/modules/procurement/routes.ts`.
-  * [x] `PMO-051-2`: UI form PR di `ProcurementView.vue`.
-  * [ ] `PMO-051-3`: Sambungkan dropdown akun belanja ke master COA Pertor 310.
+  * [x] `PMO-051-2`: UI form PR di `ProcurementView.vue` dengan Smart BudgetLine Picker.
+  * [x] `PMO-051-3`: Sambungkan dropdown akun belanja ke master COA Pertor 310 & 296 pos riil.
 
 ### [PMO-052] Penerimaan Barang/Jasa (BAST) & Jurnal Akrual Utang Pengadaan
 * **Issue Type:** Story | **Priority:** High | **Estimasi:** 5 SP
