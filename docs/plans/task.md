@@ -1,8 +1,7 @@
 | id | task | status | notes |
 | --- | --- | --- | --- |
-| koi118-1 | Prisma Schema Model HrisPeriodLock & Constraint Compound Unique | completed | Field cutoffDate, cutoffTime, isLocked, unlockedUntil, dsb. |
-| koi118-2 | Backend Lock Engine: isAttendancePeriodLocked & Validasi 403 di Record Attendance | completed | Penolakan mutasi kehadiran/lembur pasca cut-off tanggal 25 |
-| koi118-3 | Endpoints Lock Status, Unlock Override GM PMO & Lock Period | completed | /attendance/lock-status, /attendance/unlock-override, /attendance/lock-period |
-| koi118-4 | UI HrisView.vue: Banner Status Kunci Otomatis & Modal Otorisasi Override Unfreeze | completed | Indikator visual lock/unlocked, form unfreeze darurat GM PMO |
-| koi118-5 | Integration Testing Section 12 erp.test.ts (3 tes baru) | completed | 39/39 Vitest tests passing 100% |
-| koi118-6 | Quality Gate & Dokumentasi: build clean, docs/tasks/KOI-118, Git commit, Push & Jira In Review | completed | Strictly In Review (anti-Done) |
+| koi119-1 | Prisma Schema Model AssetExpenditure & DB Push Sync | completed | Relation ke FixedAsset, field ratioPercent, isCapitalized, accountingTreatment, coaDebit, dsb. |
+| koi119-2 | Backend Asset Capitalization Engine & Endpoints | completed | /assets/capitalization-rules, /assets/evaluate-capitalization, /assets/:id/expenditures POST/GET |
+| koi119-3 | UI AssetsView.vue: Form/Modal Catat Pengeluaran Perbaikan & Indikator >10% Nilai Buku | completed | Live calculation badge, accounting treatment preview, expenditure list |
+| koi119-4 | Integration Testing Section 13 erp.test.ts (3 tes) | completed | Ambang batas perolehan baru (1 jt/20 jt), perbaikan <=10% beban, renovasi >10% kapitalisasi (42/42 passing) |
+| koi119-5 | Quality Gate, Docs KOI-119, Git Commit, Push & Jira In Review | in_progress | Anti-Done strictly, PR link, evidence of clean test & build |

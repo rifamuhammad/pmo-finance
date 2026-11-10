@@ -970,7 +970,34 @@ model FixedAsset {
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @default(now()) @updatedAt
 
+  expenditures AssetExpenditure[]
+
   @@index([businessUnitId, ownershipStatus])
+}
+
+model AssetExpenditure {
+  id                  String     @id @default(uuid())
+  expenditureNumber   String     @unique // e.g. "EXP-AST/2026/12/001"
+  assetId             String
+  asset               FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  transactionDate     DateTime   @db.Date
+  description         String
+  amount              Decimal    @db.Decimal(18, 2)
+  currentBookValue    Decimal    @db.Decimal(18, 2)
+  ratioPercent        Decimal    @db.Decimal(8, 2)
+  isCapitalized       Boolean
+  accountingTreatment String     // CAPITALIZED_TO_ASSET or EXPENSED_TO_MAINTENANCE
+  coaDebit            String
+  coaCredit           String     @default("110101020200")
+  additionalMonths    Int        @default(0)
+  vendorName          String?
+  invoiceDocNumber    String?
+  approvedBy          String?
+  notes               String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @default(now()) @updatedAt
+
+  @@index([assetId, isCapitalized])
 }
 
 model StrategicEvaluation {

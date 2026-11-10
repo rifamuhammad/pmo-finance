@@ -9,6 +9,92 @@ export const assetRouter = Router();
 
 assetRouter.use(requireAuth);
 
+// ISAK 335 & Pertor 310 Fixed Asset Capitalization Rules Constants
+export const CAPITALIZATION_RULES = {
+  MIN_THRESHOLD_EQUIPMENT: 1_000_000, // Rp 1.000.000 (Peralatan, Mesin, Komputer, Furnitur)
+  MIN_THRESHOLD_BUILDING: 20_000_000,  // Rp 20.000.000 (Gedung, Bangunan, Renovasi Struktural)
+  SUBSEQUENT_EXPENSE_RATIO_PERCENT: 10.0, // Batas 10% dari Nilai Buku Bersih (Net Book Value)
+  COA_MAPPING: {
+    ASSET_EQUIPMENT: '120301010100', // Aset Tetap - Peralatan & Mesin Kantor
+    ASSET_BUILDING: '120301010100',  // Aset Tetap
+    MAINTENANCE_EXPENSE: '520901060100', // Beban Pemeliharaan Unit Usaha (Pengeluaran <= 10%)
+    LOW_VALUE_EXPENSE: '520901020100',   // Beban Barang dan Perlengkapan Unit Usaha (< Ambang Batas)
+    CREDIT_BANK_BRI: '110101020200',     // Bank BRI Operasional PMO
+  },
+  REGULATORY_REFERENCE: 'ISAK 335 & Peraturan Rektor UT No. 310 Tahun 2024 tentang Tata Kelola Aset Tetap PTN-BH',
+};
+
+// Helper: Evaluasi Kapitalisasi Sesuai ISAK 335 & Pertor 310
+export function evaluateCapitalization(params: {
+  type: 'NEW_ACQUISITION' | 'SUBSEQUENT_EXPENDITURE';
+  category?: string;
+  amount: number;
+  currentBookValue?: number;
+  additionalMonths?: number;
+}) {
+  const isBuilding =
+    params.category?.toLowerCase().includes('gedung') ||
+    params.category?.toLowerCase().includes('bangunan');
+  const minThreshold = isBuilding
+    ? CAPITALIZATION_RULES.MIN_THRESHOLD_BUILDING
+    : CAPITALIZATION_RULES.MIN_THRESHOLD_EQUIPMENT;
+
+  if (params.type === 'NEW_ACQUISITION') {
+    const isCapitalized = params.amount >= minThreshold;
+    return {
+      type: 'NEW_ACQUISITION',
+      amount: params.amount,
+      minThreshold,
+      isCapitalized,
+      ratioPercent: 100,
+      accountingTreatment: isCapitalized ? 'CAPITALIZED_TO_ASSET' : 'EXPENSED_DIRECTLY',
+      recommendedDebitCoa: isCapitalized
+        ? CAPITALIZATION_RULES.COA_MAPPING.ASSET_EQUIPMENT
+        : CAPITALIZATION_RULES.COA_MAPPING.LOW_VALUE_EXPENSE,
+      recommendedCreditCoa: CAPITALIZATION_RULES.COA_MAPPING.CREDIT_BANK_BRI,
+      status: isCapitalized ? 'CAPITALIZED' : 'EXPENSED',
+      explanation: isCapitalized
+        ? `Nilai perolehan (Rp ${params.amount.toLocaleString('id-ID')}) memenuhi ambang batas kapitalisasi (Rp ${minThreshold.toLocaleString('id-ID')}) sesuai ISAK 335 & Pertor 310.`
+        : `Nilai perolehan (Rp ${params.amount.toLocaleString('id-ID')}) di bawah ambang batas kapitalisasi (Rp ${minThreshold.toLocaleString('id-ID')}). Harus diakui sebagai Beban Perlengkapan operasional tahun berjalan.`,
+    };
+  }
+
+  // SUBSEQUENT_EXPENDITURE (Perbaikan, Renovasi, Pemeliharaan Aset)
+  const bookValue = Math.max(0, params.currentBookValue ?? 0);
+  let ratioPercent = 0;
+  let isCapitalized = false;
+
+  if (bookValue === 0) {
+    // Aset sudah susut penuh (book value 0 / salvage value) -> Renovasi material >= 1 juta dikapitalisasi
+    ratioPercent = 100;
+    isCapitalized = params.amount >= CAPITALIZATION_RULES.MIN_THRESHOLD_EQUIPMENT;
+  } else {
+    ratioPercent = Number(((params.amount / bookValue) * 100).toFixed(2));
+    isCapitalized = ratioPercent > CAPITALIZATION_RULES.SUBSEQUENT_EXPENSE_RATIO_PERCENT;
+  }
+
+  const accountingTreatment = isCapitalized ? 'CAPITALIZED_TO_ASSET' : 'EXPENSED_TO_MAINTENANCE';
+  const recommendedDebitCoa = isCapitalized
+    ? CAPITALIZATION_RULES.COA_MAPPING.ASSET_EQUIPMENT
+    : CAPITALIZATION_RULES.COA_MAPPING.MAINTENANCE_EXPENSE;
+
+  return {
+    type: 'SUBSEQUENT_EXPENDITURE',
+    amount: params.amount,
+    currentBookValue: bookValue,
+    thresholdRatioPercent: CAPITALIZATION_RULES.SUBSEQUENT_EXPENSE_RATIO_PERCENT,
+    ratioPercent,
+    isCapitalized,
+    accountingTreatment,
+    recommendedDebitCoa,
+    recommendedCreditCoa: CAPITALIZATION_RULES.COA_MAPPING.CREDIT_BANK_BRI,
+    status: isCapitalized ? 'CAPITALIZED' : 'EXPENSED',
+    explanation: isCapitalized
+      ? `Pengeluaran perbaikan/renovasi (Rp ${params.amount.toLocaleString('id-ID')}) sebesar ${ratioPercent}% (>10% dari nilai buku Rp ${bookValue.toLocaleString('id-ID')}). Memenuhi kriteria kapitalisasi: menambah masa manfaat / nilai aset sesuai ISAK 335 & Pertor 310.`
+      : `Pengeluaran pemeliharaan rutin (Rp ${params.amount.toLocaleString('id-ID')}) sebesar ${ratioPercent}% (<=10% dari nilai buku Rp ${bookValue.toLocaleString('id-ID')}). Diakui sebagai Beban Pemeliharaan tahun berjalan tanpa menambah nilai buku aset.`,
+  };
+}
+
 // Helper to seed realistic PMO assets including PBI UT loans and Mas Wildan as PIC
 async function ensureAssetSeedData() {
   try {
@@ -515,6 +601,307 @@ assetRouter.post('/depreciate', async (req, res, next) => {
       success: true,
       message: `Perhitungan penyusutan berhasil diperbarui untuk ${updatedCount} aset PMO (Milik & Pinjaman PBI UT).`,
       meta: { updatedCount, requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Schema for capitalization evaluation
+const evaluateSchema = z.object({
+  type: z.enum(['NEW_ACQUISITION', 'SUBSEQUENT_EXPENDITURE']),
+  category: z.string().optional(),
+  amount: z.number().positive('Nominal pengeluaran harus lebih besar dari 0'),
+  assetId: z.string().optional(),
+  currentBookValue: z.number().optional(),
+  additionalMonths: z.number().min(0).optional(),
+});
+
+// Schema for asset subsequent expenditure (perbaikan / renovasi)
+const createExpenditureSchema = z.object({
+  transactionDate: z.string().min(8, 'Tanggal transaksi wajib diisi'),
+  description: z.string().min(3, 'Deskripsi pengeluaran wajib diisi'),
+  amount: z.number().positive('Nominal pengeluaran harus lebih besar dari 0'),
+  additionalMonths: z.number().min(0).default(0),
+  vendorName: z.string().optional().nullable(),
+  invoiceDocNumber: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+// 5. GET CAPITALIZATION RULES & COA MAPPING
+assetRouter.get('/capitalization-rules', async (req, res, next) => {
+  try {
+    res.json({
+      success: true,
+      data: CAPITALIZATION_RULES,
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 6. POST EVALUATE CAPITALIZATION (Simulasi & Pengujian ISAK 335)
+assetRouter.post('/evaluate-capitalization', async (req, res, next) => {
+  try {
+    const parsed = evaluateSchema.parse(req.body);
+    let bookValue = parsed.currentBookValue;
+    let category = parsed.category;
+
+    if (parsed.type === 'SUBSEQUENT_EXPENDITURE' && parsed.assetId) {
+      const asset = await prisma.fixedAsset.findUnique({
+        where: { id: parsed.assetId },
+        select: { bookValue: true, category: true, name: true, assetCode: true },
+      });
+      if (asset) {
+        bookValue = toNumber(asset.bookValue);
+        category = category || asset.category;
+      }
+    }
+
+    const evaluation = evaluateCapitalization({
+      type: parsed.type,
+      category,
+      amount: parsed.amount,
+      currentBookValue: bookValue,
+      additionalMonths: parsed.additionalMonths,
+    });
+
+    res.json({
+      success: true,
+      data: evaluation,
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 7. GET EXPENDITURES SUMMARY (Rekapitulasi Pengeluaran Aset Tetap)
+assetRouter.get('/expenditures/summary', async (req, res, next) => {
+  try {
+    const expenditures = await prisma.assetExpenditure.findMany({
+      include: {
+        asset: {
+          select: { assetCode: true, name: true, businessUnitId: true },
+        },
+      },
+    });
+
+    const totalExpenditures = expenditures.length;
+    let totalAmount = 0;
+    let capitalizedCount = 0;
+    let capitalizedAmount = 0;
+    let expensedCount = 0;
+    let expensedAmount = 0;
+
+    for (const exp of expenditures) {
+      const amt = toNumber(exp.amount);
+      totalAmount += amt;
+      if (exp.isCapitalized) {
+        capitalizedCount += 1;
+        capitalizedAmount += amt;
+      } else {
+        expensedCount += 1;
+        expensedAmount += amt;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        totalExpenditures,
+        totalAmount,
+        capitalizedCount,
+        capitalizedAmount,
+        expensedCount,
+        expensedAmount,
+        capitalizationRatioThreshold: CAPITALIZATION_RULES.SUBSEQUENT_EXPENSE_RATIO_PERCENT,
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 8. GET ASSET BY ID
+assetRouter.get('/:id', async (req, res, next) => {
+  try {
+    const asset = await prisma.fixedAsset.findUnique({
+      where: { id: req.params.id },
+      include: {
+        businessUnit: { select: { id: true, code: true, name: true } },
+        expenditures: {
+          orderBy: { transactionDate: 'desc' },
+        },
+      },
+    });
+
+    if (!asset) {
+      throw new AppError(404, 'ASSET_NOT_FOUND', 'Aset tidak ditemukan.');
+    }
+
+    const cost = toNumber(asset.acquisitionCost);
+    const salvage = toNumber(asset.salvageValue);
+    const accum = toNumber(asset.accumulatedDepreciation);
+    const book = toNumber(asset.bookValue);
+    const months = asset.usefulLifeMonths || asset.usefulLifeYears * 12 || 48;
+    const monthlyDeprec = months > 0 ? Math.round((cost - salvage) / months) : 0;
+
+    res.json({
+      success: true,
+      data: {
+        ...asset,
+        acquisitionCost: cost,
+        salvageValue: salvage,
+        accumulatedDepreciation: accum,
+        bookValue: book,
+        monthlyDepreciation: monthlyDeprec,
+        expenditures: asset.expenditures.map((e) => ({
+          ...e,
+          amount: toNumber(e.amount),
+          currentBookValue: toNumber(e.currentBookValue),
+          ratioPercent: toNumber(e.ratioPercent),
+        })),
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 9. POST ASSET EXPENDITURE (Catat Perbaikan / Renovasi dengan Filter Ambang Batas 10%)
+assetRouter.post('/:id/expenditures', async (req, res, next) => {
+  try {
+    const parsed = createExpenditureSchema.parse(req.body);
+    const asset = await prisma.fixedAsset.findUnique({
+      where: { id: req.params.id },
+      include: { businessUnit: { select: { id: true, code: true, name: true } } },
+    });
+
+    if (!asset) {
+      throw new AppError(404, 'ASSET_NOT_FOUND', 'Aset tidak ditemukan.');
+    }
+
+    const currentBookValue = toNumber(asset.bookValue);
+    const evaluation = evaluateCapitalization({
+      type: 'SUBSEQUENT_EXPENDITURE',
+      category: asset.category,
+      amount: parsed.amount,
+      currentBookValue,
+      additionalMonths: parsed.additionalMonths,
+    });
+
+    const count = await prisma.assetExpenditure.count();
+    const d = new Date(parsed.transactionDate);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const expenditureNumber = `EXP-AST/${year}/${month}/${String(count + 1).padStart(4, '0')}`;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const expenditure = await tx.assetExpenditure.create({
+        data: {
+          expenditureNumber,
+          assetId: asset.id,
+          transactionDate: d,
+          description: parsed.description,
+          amount: parsed.amount,
+          currentBookValue,
+          ratioPercent: evaluation.ratioPercent,
+          isCapitalized: evaluation.isCapitalized,
+          accountingTreatment: evaluation.accountingTreatment,
+          coaDebit: evaluation.recommendedDebitCoa,
+          coaCredit: evaluation.recommendedCreditCoa,
+          additionalMonths: parsed.additionalMonths || 0,
+          vendorName: parsed.vendorName || null,
+          invoiceDocNumber: parsed.invoiceDocNumber || null,
+          approvedBy: req.user?.fullName || 'Manager Aset PMO',
+          notes: parsed.notes || null,
+        },
+      });
+
+      let updatedAsset = asset;
+      if (evaluation.isCapitalized) {
+        const newCost = toNumber(asset.acquisitionCost) + parsed.amount;
+        const newBook = currentBookValue + parsed.amount;
+        const newMonths = asset.usefulLifeMonths + (parsed.additionalMonths || 0);
+        const newYears = Math.round(newMonths / 12) || asset.usefulLifeYears;
+
+        updatedAsset = await tx.fixedAsset.update({
+          where: { id: asset.id },
+          data: {
+            acquisitionCost: newCost,
+            bookValue: newBook,
+            usefulLifeMonths: newMonths,
+            usefulLifeYears: newYears,
+          },
+          include: { businessUnit: { select: { id: true, code: true, name: true } } },
+        });
+      }
+
+      return { expenditure, updatedAsset };
+    });
+
+    await recordAuditLog({
+      action: evaluation.isCapitalized ? 'CAPITALIZE_ASSET' : 'EXPENSE_MAINTENANCE',
+      module: 'FIXED_ASSETS',
+      entityType: 'AssetExpenditure',
+      entityId: result.expenditure.id,
+      entityCode: result.expenditure.expenditureNumber,
+      actorId: req.user?.userId,
+      actorName: req.user?.fullName || 'User',
+      actorRole: req.user?.roleCode || 'USER',
+      summary: `Pencatatan pengeluaran ${result.expenditure.expenditureNumber} (${evaluation.accountingTreatment}) Rp ${parsed.amount.toLocaleString('id-ID')} untuk aset ${asset.assetCode}: ${parsed.description}`,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        ...result.expenditure,
+        amount: toNumber(result.expenditure.amount),
+        currentBookValue: toNumber(result.expenditure.currentBookValue),
+        ratioPercent: toNumber(result.expenditure.ratioPercent),
+        evaluation,
+        updatedAsset: {
+          id: result.updatedAsset.id,
+          assetCode: result.updatedAsset.assetCode,
+          name: result.updatedAsset.name,
+          acquisitionCost: toNumber(result.updatedAsset.acquisitionCost),
+          bookValue: toNumber(result.updatedAsset.bookValue),
+          usefulLifeMonths: result.updatedAsset.usefulLifeMonths,
+        },
+      },
+      message: evaluation.isCapitalized
+        ? `Pengeluaran berhasil dikapitalisasi ke Aset Tetap ${asset.assetCode} (Nilai Buku bertambah Rp ${parsed.amount.toLocaleString('id-ID')}).`
+        : `Pengeluaran berhasil dicatat sebagai Beban Pemeliharaan (Nilai Buku aset tidak berubah).`,
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 10. GET EXPENDITURES FOR ASSET
+assetRouter.get('/:id/expenditures', async (req, res, next) => {
+  try {
+    const expenditures = await prisma.assetExpenditure.findMany({
+      where: { assetId: req.params.id },
+      orderBy: { transactionDate: 'desc' },
+    });
+
+    const formatted = expenditures.map((e) => ({
+      ...e,
+      amount: toNumber(e.amount),
+      currentBookValue: toNumber(e.currentBookValue),
+      ratioPercent: toNumber(e.ratioPercent),
+    }));
+
+    res.json({
+      success: true,
+      data: formatted,
+      meta: { total: formatted.length, requestId: req.requestId },
     });
   } catch (err) {
     next(err);

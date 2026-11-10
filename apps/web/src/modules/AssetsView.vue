@@ -43,6 +43,27 @@ interface BusinessUnitOption {
   name: string;
 }
 
+interface AssetExpenditure {
+  id: string;
+  expenditureNumber: string;
+  assetId: string;
+  transactionDate: string;
+  description: string;
+  amount: number;
+  currentBookValue: number;
+  ratioPercent: number;
+  isCapitalized: boolean;
+  accountingTreatment: string;
+  coaDebit: string;
+  coaCredit: string;
+  additionalMonths: number;
+  vendorName?: string | null;
+  invoiceDocNumber?: string | null;
+  approvedBy?: string | null;
+  notes?: string | null;
+  createdAt: string;
+}
+
 const loading = ref(false);
 const saving = ref(false);
 const errorMessage = ref('');
@@ -97,6 +118,57 @@ const createForm = reactive({
 // Modal Detail
 const showDetailModal = ref(false);
 const selectedAsset = ref<AssetRecord | null>(null);
+const selectedAssetExpenditures = ref<AssetExpenditure[]>([]);
+const loadingExpenditures = ref(false);
+
+// Expenditure Summary State
+const expenditureSummary = reactive({
+  totalExpenditures: 0,
+  totalAmount: 0,
+  capitalizedCount: 0,
+  capitalizedAmount: 0,
+  expensedCount: 0,
+  expensedAmount: 0,
+  capitalizationRatioThreshold: 10,
+});
+
+// Modal Record Subsequent Expenditure (Perbaikan / Renovasi)
+const showExpenditureModal = ref(false);
+const targetAsset = ref<AssetRecord | null>(null);
+const expenditureForm = reactive({
+  transactionDate: new Date().toISOString().slice(0, 10),
+  description: '',
+  amount: 0,
+  additionalMonths: 0,
+  vendorName: '',
+  invoiceDocNumber: '',
+  notes: '',
+});
+
+// Live Capitalization Evaluator (>10% Net Book Value vs <=10%)
+const liveExpenditureEval = computed(() => {
+  if (!targetAsset.value) return null;
+  const bookVal = targetAsset.value.bookValue || 0;
+  const amount = Number(expenditureForm.amount) || 0;
+  if (amount <= 0) return null;
+
+  const ratio = bookVal > 0 ? Number(((amount / bookVal) * 100).toFixed(2)) : 100;
+  const isCapitalized = bookVal === 0 ? amount >= 1000000 : ratio > 10.0;
+
+  return {
+    amount,
+    bookValue: bookVal,
+    ratio,
+    isCapitalized,
+    treatment: isCapitalized ? 'KAPITALISASI KE ASET TETAP' : 'BEBAN PEMELIHARAAN (EXPENSED)',
+    badgeClass: isCapitalized ? 'erp-badge-success' : 'erp-badge-warn',
+    debitCoa: isCapitalized ? '120301010100 (Aset Tetap - Peralatan & Mesin)' : '520901060100 (Beban Pemeliharaan Unit Usaha)',
+    creditCoa: '110101020200 (Bank BRI Operasional PMO)',
+    impactDescription: isCapitalized
+      ? `Rasio pengeluaran ${ratio}% (>10% dari nilai buku). Memenuhi ISAK 335 & Pertor 310: Nilai buku bertambah dari ${formatCurrency(bookVal)} menjadi ${formatCurrency(bookVal + amount)}.`
+      : `Rasio pengeluaran ${ratio}% (<=10% dari nilai buku). Tidak memenuhi batas kapitalisasi: Diakui sebagai beban pemeliharaan operasional berjalan, nilai buku tetap ${formatCurrency(bookVal)}.`,
+  };
+});
 
 const filteredAssets = computed(() => {
   return assets.value.filter((item) => {
@@ -121,15 +193,19 @@ async function loadData() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const [summaryRes, listRes, buRes] = await Promise.all([
+    const [summaryRes, listRes, buRes, expSummaryRes] = await Promise.all([
       api.get<typeof summary>('/assets/summary'),
       api.get<AssetRecord[]>('/assets'),
-      api.get<{ businessUnits: BusinessUnitOption[] }>('/petty-cash/master-context')
+      api.get<{ businessUnits: BusinessUnitOption[] }>('/petty-cash/master-context'),
+      api.get<typeof expenditureSummary>('/assets/expenditures/summary').catch(() => ({ data: null })),
     ]);
 
     Object.assign(summary, summaryRes.data);
     assets.value = listRes.data || [];
     businessUnits.value = buRes.data?.businessUnits || [];
+    if (expSummaryRes && expSummaryRes.data) {
+      Object.assign(expenditureSummary, expSummaryRes.data);
+    }
 
     if (!createForm.businessUnitId && businessUnits.value.length > 0) {
       createForm.businessUnitId = businessUnits.value[0].id;
@@ -145,9 +221,68 @@ function openCreate() {
   showCreateModal.value = true;
 }
 
-function openDetail(item: AssetRecord) {
+async function openDetail(item: AssetRecord) {
   selectedAsset.value = item;
   showDetailModal.value = true;
+  selectedAssetExpenditures.value = [];
+  loadingExpenditures.value = true;
+  try {
+    const res = await api.get<AssetExpenditure[]>(`/assets/${item.id}/expenditures`);
+    selectedAssetExpenditures.value = res.data || [];
+  } catch {
+    selectedAssetExpenditures.value = [];
+  } finally {
+    loadingExpenditures.value = false;
+  }
+}
+
+function openExpenditure(item: AssetRecord) {
+  targetAsset.value = item;
+  expenditureForm.transactionDate = new Date().toISOString().slice(0, 10);
+  expenditureForm.description = '';
+  expenditureForm.amount = 0;
+  expenditureForm.additionalMonths = 0;
+  expenditureForm.vendorName = '';
+  expenditureForm.invoiceDocNumber = '';
+  expenditureForm.notes = '';
+  showExpenditureModal.value = true;
+}
+
+async function handleSaveExpenditure() {
+  if (!targetAsset.value) return;
+  if (!expenditureForm.description.trim()) {
+    errorMessage.value = 'Deskripsi perbaikan/renovasi wajib diisi.';
+    return;
+  }
+  if (expenditureForm.amount <= 0) {
+    errorMessage.value = 'Nominal pengeluaran harus lebih besar dari Rp 0.';
+    return;
+  }
+
+  saving.value = true;
+  errorMessage.value = '';
+  try {
+    const res = await api.post(`/assets/${targetAsset.value.id}/expenditures`, {
+      transactionDate: expenditureForm.transactionDate,
+      description: expenditureForm.description,
+      amount: Number(expenditureForm.amount),
+      additionalMonths: Number(expenditureForm.additionalMonths || 0),
+      vendorName: expenditureForm.vendorName || null,
+      invoiceDocNumber: expenditureForm.invoiceDocNumber || null,
+      notes: expenditureForm.notes || null,
+    });
+
+    await loadData();
+    showExpenditureModal.value = false;
+    successBanner.value = res.data?.message || 'Pengeluaran aset berhasil dicatat.';
+    setTimeout(() => {
+      successBanner.value = '';
+    }, 6000);
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : 'Gagal mencatat pengeluaran perbaikan';
+  } finally {
+    saving.value = false;
+  }
 }
 
 async function handleCreateAsset() {
@@ -323,6 +458,36 @@ onMounted(loadData);
       @dismiss="successBanner = ''"
     />
 
+    <!-- ISAK 335 & Pertor 310 Fixed Asset Capitalization Filter Widget -->
+    <div class="compliance-card">
+      <div class="compliance-header">
+        <div class="compliance-badge">ISAK 335 &amp; Pertor 310</div>
+        <div class="compliance-title">Filter Ambang Batas Kapitalisasi &amp; Perlakuan Akuntansi Aset Tetap</div>
+      </div>
+      <div class="compliance-grid">
+        <div class="compliance-item">
+          <span class="compliance-tag tag-blue">Perolehan Baru</span>
+          <div class="compliance-val">Min. Rp 1.000.000</div>
+          <p class="compliance-sub">Peralatan, Mesin &amp; TI &ge; Rp 1 Jt dikapitalisasi ke Aset Tetap (120301010100). Di bawah batas dibebankan langsung ke Beban Perlengkapan.</p>
+        </div>
+        <div class="compliance-item">
+          <span class="compliance-tag tag-emerald">Renovasi &gt; 10% Nilai Buku</span>
+          <div class="compliance-val">Kapitalisasi (Aset +)</div>
+          <p class="compliance-sub">Pengeluaran perbaikan &gt; 10% nilai buku bersih menambah nilai aset dan masa manfaat. Debet Aset Tetap, Kredit Kas/Bank BRI.</p>
+        </div>
+        <div class="compliance-item">
+          <span class="compliance-tag tag-amber">Perbaikan &le; 10% Nilai Buku</span>
+          <div class="compliance-val">Beban Pemeliharaan</div>
+          <p class="compliance-sub">Pengeluaran rutin &le; 10% nilai buku diakui sebagai Beban Pemeliharaan (520901060100) tanpa menambah nilai buku aset.</p>
+        </div>
+        <div class="compliance-item">
+          <span class="compliance-tag tag-purple">Rekap Pengeluaran</span>
+          <div class="compliance-val">{{ expenditureSummary.totalExpenditures }} Transaksi</div>
+          <p class="compliance-sub">Kapitalisasi: {{ expenditureSummary.capitalizedCount }} trx ({{ formatCurrency(expenditureSummary.capitalizedAmount) }}) | Beban: {{ expenditureSummary.expensedCount }} trx ({{ formatCurrency(expenditureSummary.expensedAmount) }})</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Metrics Strip: 4 Cohesive Cards -->
     <section class="metric-strip">
       <div class="metric-box focal">
@@ -464,9 +629,14 @@ onMounted(loadData);
                 </span>
               </td>
               <td style="text-align: right;">
-                <button type="button" class="btn btn-sm" @click="openDetail(asset)">
-                  Detail &amp; BAST
-                </button>
+                <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                  <button type="button" class="btn btn-sm" title="Catat Pengeluaran Pemeliharaan / Perbaikan" @click="openExpenditure(asset)">
+                    🔧 Perbaikan
+                  </button>
+                  <button type="button" class="btn btn-sm" @click="openDetail(asset)">
+                    Detail &amp; BAST
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -720,12 +890,200 @@ onMounted(loadData);
           <p>{{ selectedAsset.notes }}</p>
         </div>
 
+        <!-- Historical Expenditures / Maintenance Log -->
+        <div class="expenditures-history-box">
+          <div class="expenditures-history-header">
+            <h4 class="deprec-schedule-title">Riwayat Perbaikan &amp; Evaluasi Kapitalisasi</h4>
+            <span class="erp-badge erp-badge-info">{{ selectedAssetExpenditures.length }} Catatan</span>
+          </div>
+          <div v-if="loadingExpenditures" class="text-muted" style="padding: 12px 0;">Memuat riwayat pengeluaran...</div>
+          <div v-else-if="selectedAssetExpenditures.length === 0" class="text-muted" style="padding: 12px 0; font-size: 13px;">
+            Belum ada catatan perbaikan atau renovasi untuk aset ini.
+          </div>
+          <div v-else class="table-wrap" style="margin-top: 8px;">
+            <table class="erp-table">
+              <thead>
+                <tr>
+                  <th>No / Tanggal</th>
+                  <th>Uraian Perbaikan</th>
+                  <th class="money-col">Biaya</th>
+                  <th style="text-align: center;">Rasio</th>
+                  <th style="text-align: center;">Perlakuan Akuntansi</th>
+                  <th>Akun Debet</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="exp in selectedAssetExpenditures" :key="exp.id">
+                  <td>
+                    <div style="font-weight: 600;">{{ exp.expenditureNumber }}</div>
+                    <div class="table-sub">{{ formatDate(exp.transactionDate) }}</div>
+                  </td>
+                  <td>
+                    <div>{{ exp.description }}</div>
+                    <div class="table-sub" v-if="exp.vendorName">Vendor: {{ exp.vendorName }}</div>
+                  </td>
+                  <td class="money-col font-bold">{{ formatCurrency(exp.amount) }}</td>
+                  <td style="text-align: center;">
+                    <span :class="exp.isCapitalized ? 'text-emerald font-bold' : 'text-amber'">
+                      {{ exp.ratioPercent }}%
+                    </span>
+                  </td>
+                  <td style="text-align: center;">
+                    <span class="erp-badge" :class="exp.isCapitalized ? 'erp-badge-success' : 'erp-badge-warn'">
+                      {{ exp.isCapitalized ? 'Kapitalisasi (>10%)' : 'Beban Rutin (<=10%)' }}
+                    </span>
+                  </td>
+                  <td>
+                    <code style="font-size: 11px;">{{ exp.coaDebit }}</code>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="modal-action-row">
+          <button type="button" class="btn btn-outline-primary" @click="openExpenditure(selectedAsset); showDetailModal = false;">
+            🔧 Catat Pengeluaran Baru
+          </button>
           <button type="button" class="btn" @click="showDetailModal = false">
             Tutup
           </button>
         </div>
       </div>
+    </ModalDialog>
+
+    <!-- Modal Catat Perbaikan / Renovasi (Ambang Batas 10%) -->
+    <ModalDialog
+      :open="showExpenditureModal"
+      :title="targetAsset ? `Catat Pengeluaran Perbaikan: ${targetAsset.assetCode}` : 'Catat Pengeluaran Aset'"
+      @close="showExpenditureModal = false"
+    >
+      <form v-if="targetAsset" class="asset-modal-form" @submit.prevent="handleSaveExpenditure">
+        <div class="detail-header-card" style="margin-bottom: 16px;">
+          <div>
+            <strong style="font-size: 15px;">{{ targetAsset.name }}</strong>
+            <p class="text-muted">{{ targetAsset.category }} · {{ targetAsset.location }}</p>
+          </div>
+          <div style="text-align: right;">
+            <span class="detail-meta-label">Nilai Buku Saat Ini</span>
+            <div class="money detail-meta-val text-emerald">{{ formatCurrency(targetAsset.bookValue) }}</div>
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label">Tanggal Transaksi / Pengerjaan <span class="req">*</span></label>
+            <input
+              v-model="expenditureForm.transactionDate"
+              type="date"
+              class="input"
+              required
+            />
+          </div>
+
+          <div class="form-field">
+            <label class="form-label">Biaya Perbaikan / Pengeluaran (Rp) <span class="req">*</span></label>
+            <input
+              v-model.number="expenditureForm.amount"
+              type="number"
+              min="1000"
+              step="50000"
+              class="input money"
+              placeholder="Contoh: 5000000"
+              required
+            />
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label">Deskripsi Pekerjaan / Komponen yang Diganti <span class="req">*</span></label>
+          <input
+            v-model="expenditureForm.description"
+            type="text"
+            class="input"
+            placeholder="Contoh: Penggantian motherboard modul power amplifier & overhaul speaker"
+            required
+          />
+        </div>
+
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label">Penambahan Masa Manfaat (Bulan)</label>
+            <input
+              v-model.number="expenditureForm.additionalMonths"
+              type="number"
+              min="0"
+              class="input"
+              placeholder="0 (Jika renovasi memperpanjang usia aset)"
+            />
+          </div>
+
+          <div class="form-field">
+            <label class="form-label">Vendor / Bengkel Pelaksana</label>
+            <input
+              v-model="expenditureForm.vendorName"
+              type="text"
+              class="input"
+              placeholder="Contoh: PT Audio Visual Solusindo"
+            />
+          </div>
+
+          <div class="form-field">
+            <label class="form-label">No. Invoice / Kuitansi</label>
+            <input
+              v-model="expenditureForm.invoiceDocNumber"
+              type="text"
+              class="input"
+              placeholder="INV/2026/12/099"
+            />
+          </div>
+        </div>
+
+        <!-- Live ISAK 335 Decision Callout -->
+        <div v-if="liveExpenditureEval" class="eval-preview-box" :class="liveExpenditureEval.isCapitalized ? 'eval-cap' : 'eval-exp'">
+          <div class="eval-preview-header">
+            <div class="eval-preview-title">
+              Evaluasi Otomatis ISAK 335 &amp; Pertor 310
+            </div>
+            <span class="erp-badge" :class="liveExpenditureEval.badgeClass">
+              {{ liveExpenditureEval.treatment }}
+            </span>
+          </div>
+          <p class="eval-preview-desc">{{ liveExpenditureEval.impactDescription }}</p>
+          <div class="eval-coa-row">
+            <div><span class="text-muted">Debit:</span> <strong>{{ liveExpenditureEval.debitCoa }}</strong></div>
+            <div><span class="text-muted">Kredit:</span> <strong>{{ liveExpenditureEval.creditCoa }}</strong></div>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label">Catatan Tambahan</label>
+          <textarea
+            v-model="expenditureForm.notes"
+            rows="2"
+            class="textarea"
+            placeholder="Catatan garansi pekerjaan atau rekomendasi teknisi..."
+          ></textarea>
+        </div>
+
+        <div class="modal-action-row">
+          <button
+            type="button"
+            class="btn"
+            @click="showExpenditureModal = false"
+          >
+            Batal
+          </button>
+          <button
+            type="submit"
+            class="btn btn-primary"
+            :disabled="saving"
+          >
+            {{ saving ? 'Menyimpan...' : 'Simpan Pengeluaran' }}
+          </button>
+        </div>
+      </form>
     </ModalDialog>
   </div>
 </template>
@@ -1078,5 +1436,148 @@ onMounted(loadData);
   .deprec-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ISAK 335 Compliance Card */
+.compliance-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.compliance-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.compliance-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.compliance-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.compliance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.compliance-item {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compliance-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: inline-block;
+  align-self: flex-start;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.tag-blue { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.tag-emerald { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+.tag-amber { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.tag-purple { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+
+.compliance-val {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.compliance-sub {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* Expenditures History Box */
+.expenditures-history-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+
+.expenditures-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* Live Evaluation Preview Box */
+.eval-preview-box {
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+}
+
+.eval-cap {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.eval-exp {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.eval-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.eval-preview-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.eval-preview-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.eval-coa-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-subtle);
 }
 </style>

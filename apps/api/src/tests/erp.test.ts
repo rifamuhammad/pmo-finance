@@ -1585,4 +1585,165 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(finalCheck.body.error.code).toBe('ATTENDANCE_PERIOD_LOCKED');
     });
   });
+
+  describe('13. Filter Ambang Batas Kapitalisasi Aset Tetap (>10% Nilai Buku & Nilai Batas ISAK 335) (PMO-111 / KOI-119)', () => {
+    let targetAsset: { id: string; assetCode: string; name: string; bookValue: number; acquisitionCost: number };
+
+    beforeAll(async () => {
+      // Fetch existing assets to select a test asset
+      const assetsRes = await request(app)
+        .get('/api/v1/assets')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(assetsRes.status).toBe(200);
+      expect(assetsRes.body.data.length).toBeGreaterThan(0);
+
+      // Select PMO-owned or any active asset with non-zero book value
+      const found = assetsRes.body.data.find(
+        (a: any) => a.ownershipStatus === 'PMO_OWNED' && a.bookValue > 0
+      ) || assetsRes.body.data[0];
+
+      targetAsset = {
+        id: found.id,
+        assetCode: found.assetCode,
+        name: found.name,
+        bookValue: found.bookValue,
+        acquisitionCost: found.acquisitionCost,
+      };
+    });
+
+    it('validates initial acquisition capitalization thresholds and Pertor 310 COA mappings', async () => {
+      // 1. Get capitalization rules
+      const rulesRes = await request(app)
+        .get('/api/v1/assets/capitalization-rules')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(rulesRes.status).toBe(200);
+      expect(rulesRes.body.data.MIN_THRESHOLD_EQUIPMENT).toBe(1000000);
+      expect(rulesRes.body.data.MIN_THRESHOLD_BUILDING).toBe(20000000);
+      expect(rulesRes.body.data.SUBSEQUENT_EXPENSE_RATIO_PERCENT).toBe(10);
+      expect(rulesRes.body.data.COA_MAPPING.ASSET_EQUIPMENT).toBe('120301010100');
+      expect(rulesRes.body.data.COA_MAPPING.MAINTENANCE_EXPENSE).toBe('520901060100');
+      expect(rulesRes.body.data.COA_MAPPING.LOW_VALUE_EXPENSE).toBe('520901020100');
+
+      // 2. Evaluate sub-threshold acquisition (Rp 750.000 < Rp 1.000.000) -> Expensed
+      const lowValRes = await request(app)
+        .post('/api/v1/assets/evaluate-capitalization')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          type: 'NEW_ACQUISITION',
+          amount: 750000,
+          category: 'Peralatan & Furnitur Kantor',
+        });
+
+      expect(lowValRes.status).toBe(200);
+      expect(lowValRes.body.data.isCapitalized).toBe(false);
+      expect(lowValRes.body.data.accountingTreatment).toBe('EXPENSED_DIRECTLY');
+      expect(lowValRes.body.data.recommendedDebitCoa).toBe('520901020100');
+
+      // 3. Evaluate qualifying acquisition (Rp 18.500.000 >= Rp 1.000.000) -> Capitalized
+      const capValRes = await request(app)
+        .post('/api/v1/assets/evaluate-capitalization')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          type: 'NEW_ACQUISITION',
+          amount: 18500000,
+          category: 'Audio Visual & Event Equipment',
+        });
+
+      expect(capValRes.status).toBe(200);
+      expect(capValRes.body.data.isCapitalized).toBe(true);
+      expect(capValRes.body.data.accountingTreatment).toBe('CAPITALIZED_TO_ASSET');
+      expect(capValRes.body.data.recommendedDebitCoa).toBe('120301010100');
+    });
+
+    it('records routine subsequent maintenance expenditure <= 10% as EXPENSED_TO_MAINTENANCE without changing asset book value', async () => {
+      // Calculate 5% of asset's book value (<= 10% threshold)
+      const initialBookValue = targetAsset.bookValue;
+      const maintenanceAmount = Math.max(100000, Math.round(initialBookValue * 0.05));
+
+      const expRes = await request(app)
+        .post(`/api/v1/assets/${targetAsset.id}/expenditures`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          transactionDate: '2026-12-15',
+          description: 'Pemeliharaan rutin penggantian oli genset & pembersihan filter',
+          amount: maintenanceAmount,
+          additionalMonths: 0,
+          vendorName: 'CV Sumber Tehnik Mandiri',
+          invoiceDocNumber: 'INV-MTN/2026/12/045',
+          notes: 'Servis berkala operasional unit usaha PMO',
+        });
+
+      expect(expRes.status).toBe(201);
+      expect(expRes.body.data.isCapitalized).toBe(false);
+      expect(expRes.body.data.accountingTreatment).toBe('EXPENSED_TO_MAINTENANCE');
+      expect(expRes.body.data.coaDebit).toBe('520901060100');
+      expect(expRes.body.data.amount).toBe(maintenanceAmount);
+      expect(expRes.body.data.ratioPercent).toBeLessThanOrEqual(10.0);
+      // Asset book value must NOT change
+      expect(expRes.body.data.updatedAsset.bookValue).toBe(initialBookValue);
+
+      // Verify directly on GET /assets/:id
+      const assetCheck = await request(app)
+        .get(`/api/v1/assets/${targetAsset.id}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(assetCheck.status).toBe(200);
+      expect(assetCheck.body.data.bookValue).toBe(initialBookValue);
+    });
+
+    it('records major renovation/overhaul > 10% of net book value as CAPITALIZED_TO_ASSET and increases asset book value', async () => {
+      // Get fresh book value
+      const assetBefore = await request(app)
+        .get(`/api/v1/assets/${targetAsset.id}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      const currentBook = assetBefore.body.data.bookValue;
+      const currentAcq = assetBefore.body.data.acquisitionCost;
+
+      // Calculate 25% of current book value (> 10% threshold)
+      const majorOverhaulAmount = Math.round(currentBook * 0.25);
+      const additionalMonths = 12;
+
+      const capExpRes = await request(app)
+        .post(`/api/v1/assets/${targetAsset.id}/expenditures`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          transactionDate: '2026-12-20',
+          description: 'Upgrade modul kontroler digital & rekondisi mesin utama',
+          amount: majorOverhaulAmount,
+          additionalMonths,
+          vendorName: 'PT Multisarana Tehnik Solusindo',
+          invoiceDocNumber: 'INV-OVR/2026/12/088',
+          notes: 'Rekapitalisasi aset meningkatkan efisiensi dan masa manfaat 1 tahun',
+        });
+
+      expect(capExpRes.status).toBe(201);
+      expect(capExpRes.body.data.isCapitalized).toBe(true);
+      expect(capExpRes.body.data.accountingTreatment).toBe('CAPITALIZED_TO_ASSET');
+      expect(capExpRes.body.data.coaDebit).toBe('120301010100');
+      expect(capExpRes.body.data.ratioPercent).toBeGreaterThan(10.0);
+
+      // Book value and acquisition cost MUST increase by overhaul amount
+      const expectedNewBook = currentBook + majorOverhaulAmount;
+      const expectedNewAcq = currentAcq + majorOverhaulAmount;
+      expect(capExpRes.body.data.updatedAsset.bookValue).toBe(expectedNewBook);
+      expect(capExpRes.body.data.updatedAsset.acquisitionCost).toBe(expectedNewAcq);
+
+      // Verify expenditure listing contains both items
+      const listExpRes = await request(app)
+        .get(`/api/v1/assets/${targetAsset.id}/expenditures`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(listExpRes.status).toBe(200);
+      expect(listExpRes.body.data.length).toBeGreaterThanOrEqual(2);
+
+      // Verify expenditure summary totals
+      const sumRes = await request(app)
+        .get('/api/v1/assets/expenditures/summary')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(sumRes.status).toBe(200);
+      expect(sumRes.body.data.totalExpenditures).toBeGreaterThanOrEqual(2);
+      expect(sumRes.body.data.capitalizedCount).toBeGreaterThanOrEqual(1);
+      expect(sumRes.body.data.expensedCount).toBeGreaterThanOrEqual(1);
+      expect(sumRes.body.data.capitalizedAmount).toBeGreaterThan(0);
+    });
+  });
 });

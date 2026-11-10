@@ -25,6 +25,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-116` | [PMO-091] HRIS Gaji PUT PK: Perhitungan Standar Biaya Masukan (SBM) & PPh 21 | `feature/KOI-116-hris-gaji-put-pk-sbm-pph21` | `In Review` | [KOI-116-hris-gaji-put-pk-sbm-pph21.md](./KOI-116-hris-gaji-put-pk-sbm-pph21.md) |
 | `KOI-117` | [PMO-101] Database Karyawan, Riwayat Kontrak & Rekapitulasi Presensi Unit | `feature/KOI-117-hris-database-karyawan-kontrak-presensi` | `In Review` | [KOI-117-hris-database-karyawan-kontrak-presensi.md](./KOI-117-hris-database-karyawan-kontrak-presensi.md) |
 | `KOI-118` | [PMO-102] Engine Auto-Lock Presensi & Lembur HRIS Setiap Tanggal 25 Pukul 23:59 | `feature/KOI-118-hris-auto-lock-presensi-cutoff-tgl-25` | `In Review` | [KOI-118-hris-auto-lock-presensi-cutoff-tgl-25.md](./KOI-118-hris-auto-lock-presensi-cutoff-tgl-25.md) |
+| `KOI-119` | [PMO-111] Filter Ambang Batas Kapitalisasi Aset Tetap (>10% Nilai Buku & Nilai Batas ISAK 335) | `feature/KOI-119-aset-filter-ambang-batas-kapitalisasi` | `In Review` | [KOI-119-aset-filter-ambang-batas-kapitalisasi.md](./KOI-119-aset-filter-ambang-batas-kapitalisasi.md) |
 
 ---
 
