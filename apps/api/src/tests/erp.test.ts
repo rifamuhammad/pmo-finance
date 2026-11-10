@@ -1482,4 +1482,107 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(recheck.body.data.units[0].status).toBe('VERIFIED');
     });
   });
+
+  describe('12. Engine Auto-Lock Presensi & Lembur HRIS Tanggal 25 Pukul 23:59 (PMO-102 / KOI-118)', () => {
+    let testEmpId = '';
+
+    beforeAll(async () => {
+      const empRes = await request(app)
+        .get('/api/v1/hris/employees')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(empRes.status).toBe(200);
+      testEmpId = empRes.body.data[0].id;
+    });
+
+    it('retrieves attendance lock status and enforces cutoff rule for period 12/2026', async () => {
+      // Ensure period 12/2026 is locked as per cutoff date rule
+      await request(app)
+        .post('/api/v1/hris/attendance/lock-period')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ periodMonth: 12, periodYear: 2026, isLocked: true });
+
+      const statusRes = await request(app)
+        .get('/api/v1/hris/attendance/lock-status?periodMonth=12&periodYear=2026')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(statusRes.status).toBe(200);
+      expect(statusRes.body.data.periodMonth).toBe(12);
+      expect(statusRes.body.data.periodYear).toBe(2026);
+      expect(statusRes.body.data.cutoffRule).toContain('tanggal 25');
+      expect(statusRes.body.data.isLocked).toBe(true);
+      expect(statusRes.body.data.canOverride).toBe(true);
+    });
+
+    it('rejects recording or mutating attendance during locked period with ATTENDANCE_PERIOD_LOCKED (403)', async () => {
+      const failRes = await request(app)
+        .post('/api/v1/hris/attendance/record')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          employeeId: testEmpId,
+          date: '2026-12-24',
+          status: 'PRESENT',
+          overtimeHours: 4,
+          notes: 'Klaim lembur susulan setelah cutoff tanggal 25',
+        });
+
+      expect(failRes.status).toBe(403);
+      expect(failRes.body.error.code).toBe('ATTENDANCE_PERIOD_LOCKED');
+      expect(failRes.body.error.message).toContain('tanggal 25');
+    });
+
+    it('allows emergency unfreeze override by GM PMO and re-locks period after override window', async () => {
+      // 1. GM PMO issues temporary unfreeze override with official reason
+      const unlockRes = await request(app)
+        .post('/api/v1/hris/attendance/unlock-override')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          periodMonth: 12,
+          periodYear: 2026,
+          reason: 'Koreksi lembur darurat event wisuda dan konfirmasi kehadiran staf klinik UTama',
+          durationHours: 24,
+        });
+
+      expect(unlockRes.status).toBe(200);
+      expect(unlockRes.body.data.isLocked).toBe(false);
+      expect(unlockRes.body.data.unlockedUntil).toBeDefined();
+
+      // 2. Attendance recording now succeeds during unfreeze window
+      const okRes = await request(app)
+        .post('/api/v1/hris/attendance/record')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          employeeId: testEmpId,
+          date: '2026-12-24',
+          status: 'PRESENT',
+          overtimeHours: 2,
+          notes: 'Koreksi lembur resmi pasca approval GM PMO',
+        });
+
+      expect(okRes.status).toBe(201);
+      expect(okRes.body.data.status).toBe('PRESENT');
+      expect(okRes.body.data.overtimeHours).toBe(2);
+
+      // 3. Re-lock period to restore operational compliance
+      const relockRes = await request(app)
+        .post('/api/v1/hris/attendance/lock-period')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ periodMonth: 12, periodYear: 2026, isLocked: true });
+
+      expect(relockRes.status).toBe(200);
+      expect(relockRes.body.data.isLocked).toBe(true);
+
+      // 4. Verify mutations are once again forbidden
+      const finalCheck = await request(app)
+        .post('/api/v1/hris/attendance/record')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          employeeId: testEmpId,
+          date: '2026-12-24',
+          status: 'PRESENT',
+          overtimeHours: 5,
+        });
+      expect(finalCheck.status).toBe(403);
+      expect(finalCheck.body.error.code).toBe('ATTENDANCE_PERIOD_LOCKED');
+    });
+  });
 });

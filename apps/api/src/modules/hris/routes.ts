@@ -143,6 +143,73 @@ export function computeContractAlert(endDate: Date): { daysRemaining: number; al
   return { daysRemaining, alertStatus };
 }
 
+// Helper to evaluate HRIS Cut-Off & Auto-Lock on the 25th 23:59:59
+export async function isAttendancePeriodLocked(
+  date: Date,
+  businessUnitId?: string
+): Promise<{
+  isLocked: boolean;
+  reason: string;
+  cutoffTimestamp: Date;
+  activeOverride: any | null;
+}> {
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const cutoffTimestamp = new Date(Date.UTC(year, month - 1, 25, 23, 59, 59, 999));
+  const now = new Date();
+
+  // 1. Check if explicit lock entry exists in HrisPeriodLock
+  const explicitLock = await prisma.hrisPeriodLock.findFirst({
+    where: {
+      periodYear: year,
+      periodMonth: month,
+      OR: [
+        { businessUnitId: 'GLOBAL' },
+        ...(businessUnitId ? [{ businessUnitId }] : []),
+      ],
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (explicitLock) {
+    // If active unfreeze override exists
+    if (!explicitLock.isLocked && explicitLock.unlockedUntil && now < explicitLock.unlockedUntil) {
+      return {
+        isLocked: false,
+        reason: `Override unfreeze aktif oleh ${explicitLock.unlockedBy || 'GM PMO'} hingga ${explicitLock.unlockedUntil.toISOString()}`,
+        cutoffTimestamp,
+        activeOverride: explicitLock,
+      };
+    }
+
+    if (explicitLock.isLocked) {
+      return {
+        isLocked: true,
+        reason: 'Periode presensi dan lembur telah dikunci secara otomatis pada cutoff tanggal 25 pukul 23:59.',
+        cutoffTimestamp,
+        activeOverride: null,
+      };
+    }
+  }
+
+  // 2. Default cutoff check: if current time passed the 25th 23:59:59
+  if (now > cutoffTimestamp) {
+    return {
+      isLocked: true,
+      reason: 'Periode presensi dan lembur telah terkunci otomatis pada tanggal 25 pukul 23:59.',
+      cutoffTimestamp,
+      activeOverride: null,
+    };
+  }
+
+  return {
+    isLocked: false,
+    reason: 'Periode presensi masih dalam masa aktif sebelum batas cutoff tanggal 25.',
+    cutoffTimestamp,
+    activeOverride: null,
+  };
+}
+
 // Helper to seed realistic PMO HRIS & Payroll data
 async function ensureHrisSeedData() {
   try {
@@ -434,6 +501,24 @@ async function ensureHrisSeedData() {
           });
         }
       }
+    }
+
+    // Ensure December 2026 period lock is seeded
+    const lockCount = await prisma.hrisPeriodLock.count();
+    if (lockCount === 0) {
+      const cutoffDate = new Date(Date.UTC(2026, 11, 25));
+      await prisma.hrisPeriodLock.create({
+        data: {
+          periodYear: 2026,
+          periodMonth: 12,
+          businessUnitId: 'GLOBAL',
+          isLocked: true,
+          cutoffDate,
+          cutoffTime: '23:59:59',
+          lockedAt: new Date('2026-12-25T23:59:59.000Z'),
+          unlockReason: 'Kepatuhan Cut-Off Penggajian Bulanan Tanggal 25 Pukul 23:59',
+        },
+      });
     }
   } catch (err) {
     console.error('Failed to seed HRIS data:', err);
@@ -1100,6 +1185,21 @@ hrisRouter.post('/attendance/record', async (req, res, next) => {
     const parsed = RecordAttendanceSchema.parse(req.body);
     const attDate = new Date(parsed.date);
 
+    const emp = await prisma.employee.findUnique({
+      where: { id: parsed.employeeId },
+      select: { id: true, businessUnitId: true, fullName: true, nip: true },
+    });
+    if (!emp) throw new AppError(404, 'EMPLOYEE_NOT_FOUND', 'Data pegawai tidak ditemukan.');
+
+    const lockStatus = await isAttendancePeriodLocked(attDate, emp.businessUnitId || undefined);
+    if (lockStatus.isLocked) {
+      throw new AppError(
+        403,
+        'ATTENDANCE_PERIOD_LOCKED',
+        'Periode presensi dan lembur bulan ini telah dikunci pada tanggal 25 pukul 23:59. Pengubahan data dilarang tanpa otorisasi unfreeze dari GM PMO.'
+      );
+    }
+
     const record = await prisma.attendance.upsert({
       where: {
         employeeId_date: {
@@ -1196,6 +1296,174 @@ hrisRouter.post('/attendance/verify-unit', async (req, res, next) => {
         updatedCount: updated.count,
         verifiedBy: req.user?.fullName || 'Koordinator Presensi Unit',
       },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 2.4 GET ATTENDANCE LOCK STATUS
+hrisRouter.get('/attendance/lock-status', async (req, res, next) => {
+  try {
+    await ensureHrisSeedData();
+
+    const month = req.query.periodMonth ? parseInt(String(req.query.periodMonth), 10) : 12;
+    const year = req.query.periodYear ? parseInt(String(req.query.periodYear), 10) : 2026;
+    const { businessUnitId } = req.query;
+
+    const sampleDate = new Date(Date.UTC(year, month - 1, 15));
+    const status = await isAttendancePeriodLocked(
+      sampleDate,
+      typeof businessUnitId === 'string' && businessUnitId !== 'ALL' ? businessUnitId : undefined
+    );
+
+    res.json({
+      success: true,
+      data: {
+        periodMonth: month,
+        periodYear: year,
+        cutoffTimestamp: status.cutoffTimestamp.toISOString(),
+        cutoffRule: 'Setiap tanggal 25 pukul 23:59:59',
+        isLocked: status.isLocked,
+        reason: status.reason,
+        activeOverride: status.activeOverride,
+        canOverride: ['GM_PMO', 'FINANCE_MANAGER', 'UNIT_MANAGER', 'ADMIN', 'SUPER_ADMIN', 'HR_MGR', 'HR_MANAGER'].includes(
+          req.user?.roleCode || ''
+        ),
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 2.5 POST UNLOCK OVERRIDE (GM PMO / HR Manager Emergency Unfreeze)
+hrisRouter.post('/attendance/unlock-override', async (req, res, next) => {
+  try {
+    const UnlockOverrideSchema = z.object({
+      periodMonth: z.number().int().min(1).max(12),
+      periodYear: z.number().int().min(2020),
+      businessUnitId: z.string().uuid().optional().nullable(),
+      reason: z.string().min(5),
+      durationHours: z.number().int().min(1).max(168).default(24),
+    });
+
+    const parsed = UnlockOverrideSchema.parse(req.body);
+    const now = new Date();
+    const unlockedUntil = new Date(now.getTime() + parsed.durationHours * 3600000);
+    const cutoffDate = new Date(Date.UTC(parsed.periodYear, parsed.periodMonth - 1, 25));
+
+    const lock = await prisma.hrisPeriodLock.upsert({
+      where: {
+        periodYear_periodMonth_businessUnitId: {
+          periodYear: parsed.periodYear,
+          periodMonth: parsed.periodMonth,
+          businessUnitId: parsed.businessUnitId || 'GLOBAL',
+        },
+      },
+      update: {
+        isLocked: false,
+        unlockedAt: now,
+        unlockedBy: req.user?.fullName || 'GM PMO UTama',
+        unlockReason: parsed.reason,
+        unlockedUntil,
+      },
+      create: {
+        periodYear: parsed.periodYear,
+        periodMonth: parsed.periodMonth,
+        businessUnitId: parsed.businessUnitId || 'GLOBAL',
+        isLocked: false,
+        cutoffDate,
+        cutoffTime: '23:59:59',
+        lockedAt: cutoffDate,
+        unlockedAt: now,
+        unlockedBy: req.user?.fullName || 'GM PMO UTama',
+        unlockReason: parsed.reason,
+        unlockedUntil,
+      },
+    });
+
+    await recordAuditLog({
+      actorId: req.user!.userId,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: 'ATTENDANCE_OVERRIDE_UNLOCKED',
+      module: 'HRIS',
+      entityType: 'HrisPeriodLock',
+      entityId: lock.id,
+      entityCode: `LOCK/${parsed.periodYear}/${parsed.periodMonth}`,
+      summary: `Membuka kunci sementara presensi & lembur periode ${parsed.periodMonth}/${parsed.periodYear} selama ${parsed.durationHours} jam. Alasan: ${parsed.reason}`,
+      requestId: req.requestId,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        ...lock,
+        unlockedUntil: lock.unlockedUntil?.toISOString(),
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 2.6 POST LOCK / RELOCK PERIOD
+hrisRouter.post('/attendance/lock-period', async (req, res, next) => {
+  try {
+    const LockPeriodSchema = z.object({
+      periodMonth: z.number().int().min(1).max(12),
+      periodYear: z.number().int().min(2020),
+      businessUnitId: z.string().uuid().optional().nullable(),
+      isLocked: z.boolean().default(true),
+    });
+
+    const parsed = LockPeriodSchema.parse(req.body);
+    const cutoffDate = new Date(Date.UTC(parsed.periodYear, parsed.periodMonth - 1, 25));
+
+    const lock = await prisma.hrisPeriodLock.upsert({
+      where: {
+        periodYear_periodMonth_businessUnitId: {
+          periodYear: parsed.periodYear,
+          periodMonth: parsed.periodMonth,
+          businessUnitId: parsed.businessUnitId || 'GLOBAL',
+        },
+      },
+      update: {
+        isLocked: parsed.isLocked,
+        lockedAt: new Date(),
+        unlockedUntil: null,
+      },
+      create: {
+        periodYear: parsed.periodYear,
+        periodMonth: parsed.periodMonth,
+        businessUnitId: parsed.businessUnitId || 'GLOBAL',
+        isLocked: parsed.isLocked,
+        cutoffDate,
+        cutoffTime: '23:59:59',
+        lockedAt: new Date(),
+      },
+    });
+
+    await recordAuditLog({
+      actorId: req.user!.userId,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: parsed.isLocked ? 'ATTENDANCE_PERIOD_LOCKED' : 'ATTENDANCE_PERIOD_UNLOCKED',
+      module: 'HRIS',
+      entityType: 'HrisPeriodLock',
+      entityId: lock.id,
+      entityCode: `LOCK/${parsed.periodYear}/${parsed.periodMonth}`,
+      summary: `${parsed.isLocked ? 'Mengunci' : 'Membuka'} periode presensi & lembur ${parsed.periodMonth}/${parsed.periodYear}`,
+      requestId: req.requestId,
+    });
+
+    res.json({
+      success: true,
+      data: lock,
       meta: { requestId: req.requestId },
     });
   } catch (err) {

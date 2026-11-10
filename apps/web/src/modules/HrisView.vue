@@ -291,6 +291,7 @@ async function loadUnitRecap() {
     }).toString();
     const res = await api.get<UnitRecapResponse>(`/hris/attendance/unit-recap?${query}`);
     unitRecapData.value = res.data;
+    await loadLockStatus();
   } catch (err: any) {
     errorMessage.value = err.message || 'Gagal memuat rekapitulasi presensi unit.';
   } finally {
@@ -313,6 +314,74 @@ async function verifyUnit(unitId: string) {
     errorMessage.value = err.message || 'Gagal memverifikasi presensi unit.';
   } finally {
     verifyingUnit.value = false;
+  }
+}
+
+// Attendance Period Lock State (PMO-102)
+const lockStatus = ref<{
+  periodMonth: number;
+  periodYear: number;
+  cutoffTimestamp: string;
+  cutoffRule: string;
+  isLocked: boolean;
+  reason: string;
+  activeOverride?: any;
+  canOverride?: boolean;
+} | null>(null);
+
+const showUnlockModal = ref(false);
+const submittingUnlock = ref(false);
+const unlockForm = reactive({
+  reason: '',
+  durationHours: 24,
+});
+
+async function loadLockStatus() {
+  try {
+    const res = await api.get<any>(`/hris/attendance/lock-status?periodMonth=${recapMonth.value}&periodYear=${recapYear.value}`);
+    lockStatus.value = res.data;
+  } catch (err: any) {
+    console.error('Failed to load lock status:', err);
+  }
+}
+
+async function submitUnlockOverride() {
+  if (!unlockForm.reason || unlockForm.reason.length < 5) {
+    errorMessage.value = 'Mohon isi alasan unfreeze darurat minimal 5 karakter.';
+    return;
+  }
+  submittingUnlock.value = true;
+  errorMessage.value = '';
+  try {
+    await api.post('/hris/attendance/unlock-override', {
+      periodMonth: Number(recapMonth.value),
+      periodYear: Number(recapYear.value),
+      reason: unlockForm.reason,
+      durationHours: Number(unlockForm.durationHours),
+    });
+    feedbackMessage.value = `Periode ${recapMonth.value}/${recapYear.value} berhasil dibuka kunci sementara selama ${unlockForm.durationHours} jam.`;
+    showUnlockModal.value = false;
+    unlockForm.reason = '';
+    await loadLockStatus();
+  } catch (err: any) {
+    errorMessage.value = err.message || 'Gagal membuka kunci presensi.';
+  } finally {
+    submittingUnlock.value = false;
+  }
+}
+
+async function relockPeriod() {
+  errorMessage.value = '';
+  try {
+    await api.post('/hris/attendance/lock-period', {
+      periodMonth: Number(recapMonth.value),
+      periodYear: Number(recapYear.value),
+      isLocked: true,
+    });
+    feedbackMessage.value = `Periode ${recapMonth.value}/${recapYear.value} berhasil dikunci kembali.`;
+    await loadLockStatus();
+  } catch (err: any) {
+    errorMessage.value = err.message || 'Gagal mengunci periode.';
   }
 }
 
@@ -638,6 +707,51 @@ onMounted(loadData);
 
     <!-- TAB 2: ATTENDANCE RECAP -->
     <div v-if="currentTab === 'ATTENDANCE'" class="tab-pane">
+      <!-- Cut-off & Auto-Lock Status Banner (PMO-102) -->
+      <div v-if="lockStatus" class="lock-status-banner" :class="lockStatus.isLocked ? 'locked-box' : 'unlocked-box'">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="lock-icon" style="font-size: 1.6rem;">
+            {{ lockStatus.isLocked ? '🔒' : '🔓' }}
+          </div>
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <strong style="font-size: 0.95rem;">
+                {{ lockStatus.isLocked ? `Periode Presensi & Lembur ${recapMonth}/${recapYear} Terkunci (Cutoff Tanggal 25)` : `Periode Presensi ${recapMonth}/${recapYear} Terbuka / Unfrozen` }}
+              </strong>
+              <span class="erp-badge" :class="lockStatus.isLocked ? 'erp-badge-danger' : 'erp-badge-success'">
+                {{ lockStatus.isLocked ? 'AUTO-LOCKED TGL 25 23:59' : 'OVERRIDE UNLOCKED' }}
+              </span>
+            </div>
+            <p style="margin: 3px 0 0; font-size: 0.82rem; color: var(--text-secondary);">
+              <span v-if="lockStatus.isLocked">
+                Pengubahan data kehadiran dan klaim lembur dibekukan otomatis demi kepatuhan cut-off payroll bulanan PMO UTama.
+              </span>
+              <span v-else>
+                Dibuka sementara oleh {{ lockStatus.activeOverride?.unlockedBy || 'GM PMO' }} (Alasan: "{{ lockStatus.activeOverride?.unlockReason || 'Koreksi resmi' }}"). Berlaku hingga {{ lockStatus.activeOverride?.unlockedUntil ? formatDate(lockStatus.activeOverride.unlockedUntil) : 'Selesai' }}.
+              </span>
+            </p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button
+            v-if="lockStatus.isLocked"
+            type="button"
+            class="btn btn-sm btn-outline-primary"
+            @click="showUnlockModal = true"
+          >
+            🔓 Override Buka Kunci (GM PMO)
+          </button>
+          <button
+            v-else
+            type="button"
+            class="btn btn-sm btn-warn"
+            @click="relockPeriod"
+          >
+            🔒 Kunci Kembali Periode
+          </button>
+        </div>
+      </div>
+
       <!-- Unit Recap Controls & Filters -->
       <div class="filter-bar">
         <div class="filter-item">
@@ -1336,6 +1450,50 @@ onMounted(loadData);
         </div>
       </div>
     </ModalDialog>
+
+    <!-- Modal Override Buka Kunci Presensi (PMO-102) -->
+    <ModalDialog
+      :open="showUnlockModal"
+      title="Otorisasi Override Buka Kunci Presensi &amp; Lembur (GM PMO)"
+      @close="showUnlockModal = false"
+    >
+      <div class="contract-modal-content">
+        <p style="margin: 0; font-size: 0.85rem; color: var(--text-secondary);">
+          Sesuai SOP Keuangan &amp; HR PMO UTama, pembukaan kunci periode pasca cut-off tanggal 25 hanya diperkenankan untuk koreksi data mendesak dan wajib menyertakan alasan yang sah serta tercatat pada Audit Trail SPI.
+        </p>
+
+        <div class="form-group" style="margin-top: 12px;">
+          <label class="form-label">Alasan Pembukaan Kunci Sementara *</label>
+          <textarea
+            v-model="unlockForm.reason"
+            rows="3"
+            class="input"
+            placeholder="Contoh: Koreksi jam lembur operasional event wisuda dan konfirmasi kehadiran staf klinik..."
+          ></textarea>
+        </div>
+
+        <div class="form-group" style="margin-top: 12px;">
+          <label class="form-label">Durasi Masa Berlaku Unfreeze *</label>
+          <select v-model="unlockForm.durationHours" class="select">
+            <option :value="12">12 Jam</option>
+            <option :value="24">24 Jam (1 Hari)</option>
+            <option :value="48">48 Jam (2 Hari)</option>
+          </select>
+        </div>
+
+        <div class="modal-action-row" style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px;">
+          <button type="button" class="btn btn-sm" @click="showUnlockModal = false">Batal</button>
+          <button
+            type="button"
+            class="btn btn-sm btn-primary"
+            :disabled="submittingUnlock || unlockForm.reason.length < 5"
+            @click="submitUnlockOverride"
+          >
+            {{ submittingUnlock ? 'Membuka Kunci...' : 'Setujui &amp; Buka Kunci Sementara' }}
+          </button>
+        </div>
+      </div>
+    </ModalDialog>
   </div>
 </template>
 
@@ -1369,6 +1527,28 @@ onMounted(loadData);
   font-weight: 700;
   border-radius: var(--radius-full);
   line-height: 1.2;
+}
+
+.lock-status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.locked-box {
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning-text);
+}
+
+.unlocked-box {
+  background: var(--status-info-bg);
+  border: 1px solid var(--status-info-border);
+  color: var(--status-info-text);
 }
 
 .erp-badge-warn {

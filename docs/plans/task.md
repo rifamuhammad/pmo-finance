@@ -1,8 +1,8 @@
 | id | task | status | notes |
 | --- | --- | --- | --- |
-| koi117-1 | Prisma Schema Model EmployeeContract & Attendance overtimeHours | completed | Model EmployeeContract, relasi Employee, kolom overtimeHours |
-| koi117-2 | Backend HRIS Engine: CRUD Employee, Contracts, Alert Expiry & Unit Recap | completed | /employees, /contracts, /attendance/unit-recap, /attendance/verify-unit |
-| koi117-3 | UI HrisView.vue: Badge Masa Kontrak, Modal Riwayat SK & Rekapitulasi Presensi Unit | completed | Filter periode & unit, SBM KPI strip, breakdown tabel unit, modal perpanjangan SK |
-| koi117-4 | Integration Testing Section 11 erp.test.ts (3 tes baru) | completed | 36/36 Vitest tests passing 100% |
-| koi117-5 | Quality Gate: Typecheck 0 error, Vitest pass, Vite build clean (5.12s) | completed | Vue-tsc 0 error, tsc 0 error, production bundle clean |
-| koi117-6 | Dokumentasi docs/tasks/KOI-117, Git commit, Push & Jira In Review | completed | Strictly In Review (anti-Done) |
+| koi118-1 | Prisma Schema Model HrisPeriodLock & Constraint Compound Unique | completed | Field cutoffDate, cutoffTime, isLocked, unlockedUntil, dsb. |
+| koi118-2 | Backend Lock Engine: isAttendancePeriodLocked & Validasi 403 di Record Attendance | completed | Penolakan mutasi kehadiran/lembur pasca cut-off tanggal 25 |
+| koi118-3 | Endpoints Lock Status, Unlock Override GM PMO & Lock Period | completed | /attendance/lock-status, /attendance/unlock-override, /attendance/lock-period |
+| koi118-4 | UI HrisView.vue: Banner Status Kunci Otomatis & Modal Otorisasi Override Unfreeze | completed | Indikator visual lock/unlocked, form unfreeze darurat GM PMO |
+| koi118-5 | Integration Testing Section 12 erp.test.ts (3 tes baru) | completed | 39/39 Vitest tests passing 100% |
+| koi118-6 | Quality Gate & Dokumentasi: build clean, docs/tasks/KOI-118, Git commit, Push & Jira In Review | in_progress | Menunggu git push & Jira transition |
