@@ -5,4 +5,4 @@
 | koi118-3 | Endpoints Lock Status, Unlock Override GM PMO & Lock Period | completed | /attendance/lock-status, /attendance/unlock-override, /attendance/lock-period |
 | koi118-4 | UI HrisView.vue: Banner Status Kunci Otomatis & Modal Otorisasi Override Unfreeze | completed | Indikator visual lock/unlocked, form unfreeze darurat GM PMO |
 | koi118-5 | Integration Testing Section 12 erp.test.ts (3 tes baru) | completed | 39/39 Vitest tests passing 100% |
-| koi118-6 | Quality Gate & Dokumentasi: build clean, docs/tasks/KOI-118, Git commit, Push & Jira In Review | in_progress | Menunggu git push & Jira transition |
+| koi118-6 | Quality Gate & Dokumentasi: build clean, docs/tasks/KOI-118, Git commit, Push & Jira In Review | completed | Strictly In Review (anti-Done) |
