@@ -5,4 +5,4 @@
 | s3-rev-3 | Quality Gate: Monorepo typecheck & Vite build verification | completed | 29/29 tests pass, tsc 0 errors, Vite build clean (6.92s) |
 | s3-rev-4 | Berita Acara Sprint 3 Review & Dokumentasi Teknis di docs/tasks/KOI-113 | completed | Rekap 7 tiket transaksi kas & daftar Pull Request untuk Manager |
 | s3-rev-5 | Update indeks docs/tasks/README.md & JIRA-SPRINT-SCHEDULE-AND-TIMELINE.md | completed | Sinkronisasi status SPRINT-3-REV KOI-113 ke In Review |
-| s3-rev-6 | Git commit, push origin, PR GitHub & transisi Jira ke In Review | in_progress | strictly In Review (anti-Done) |
+| s3-rev-6 | Git commit, push origin, PR GitHub & transisi Jira ke In Review | completed | strictly In Review (anti-Done) |
