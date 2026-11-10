@@ -5,7 +5,7 @@ import ModalDialog from '../components/ModalDialog.vue';
 import { api } from '../services/api';
 import { formatRupiah as formatCurrency, formatDate } from '../utils/format';
 
-type ActiveTab = 'EMPLOYEES' | 'ATTENDANCE' | 'PAYROLL';
+type ActiveTab = 'EMPLOYEES' | 'ATTENDANCE' | 'PAYROLL' | 'CALCULATOR_SBM';
 
 interface EmployeeRecord {
   id: string;
@@ -79,10 +79,60 @@ interface SalarySlipRecord {
 const currentTab = ref<ActiveTab>('EMPLOYEES');
 const loading = ref(false);
 const errorMessage = ref('');
+const feedbackMessage = ref('');
 
 const employees = ref<EmployeeRecord[]>([]);
 const attendances = ref<AttendanceRecord[]>([]);
 const salarySlips = ref<SalarySlipRecord[]>([]);
+
+// SBM Calculator State
+const calcEmployeeId = ref('');
+const calcWorkDays = ref(22);
+const calcOvertimeHours = ref(0);
+const calcPtkpCategory = ref<'TER_A' | 'TER_B' | 'TER_C'>('TER_A');
+const calcResult = ref<any>(null);
+const calcLoading = ref(false);
+const generateBatchLoading = ref(false);
+
+async function calculateSbm() {
+  if (!calcEmployeeId.value) return;
+  calcLoading.value = true;
+  errorMessage.value = '';
+  try {
+    const res = await api.post<any>('/hris/payroll/calculate', {
+      employeeId: calcEmployeeId.value,
+      workDays: Number(calcWorkDays.value),
+      overtimeHours: Number(calcOvertimeHours.value),
+      ptkpCategory: calcPtkpCategory.value,
+    });
+    calcResult.value = res.data;
+  } catch (err: any) {
+    errorMessage.value = err.message || 'Gagal menghitung simulasi SBM & PPh 21 TER.';
+  } finally {
+    calcLoading.value = false;
+  }
+}
+
+async function generateBatchPayroll() {
+  generateBatchLoading.value = true;
+  errorMessage.value = '';
+  feedbackMessage.value = '';
+  try {
+    const res = await api.post<any>('/hris/payroll/generate', {
+      periodMonth: 12,
+      periodYear: 2026,
+      workDays: 22,
+      ptkpCategory: 'TER_A',
+    });
+    feedbackMessage.value = `Berhasil menerbitkan ${res.data.totalGenerated} slip gaji periode 12/2026 berbasis SBM 2026 & PPh 21 TER.`;
+    await loadData();
+    currentTab.value = 'PAYROLL';
+  } catch (err: any) {
+    errorMessage.value = err.message || 'Gagal memproses batch slip gaji.';
+  } finally {
+    generateBatchLoading.value = false;
+  }
+}
 
 // Filter
 const searchQuery = ref('');
@@ -125,6 +175,10 @@ async function loadData() {
     employees.value = empRes.data || [];
     attendances.value = attRes.data || [];
     salarySlips.value = slipRes.data || [];
+    if (!calcEmployeeId.value && employees.value.length > 0) {
+      calcEmployeeId.value = employees.value[0].id;
+      calculateSbm();
+    }
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : 'Gagal memuat data HRIS & Payroll PMO';
   } finally {
@@ -224,6 +278,14 @@ onMounted(loadData);
           >
             Slip Gaji &amp; Payroll
           </button>
+          <button
+            type="button"
+            class="tab-btn"
+            :class="{ active: currentTab === 'CALCULATOR_SBM' }"
+            @click="currentTab = 'CALCULATOR_SBM'"
+          >
+            Kalkulator SBM 2026 &amp; PPh 21 TER
+          </button>
         </div>
       </div>
     </header>
@@ -260,7 +322,7 @@ onMounted(loadData);
           <span class="erp-badge erp-badge-success">Disbursed</span>
         </div>
         <div class="metric-value text-emerald">Terbayar Lunas</div>
-        <div class="metric-sub">Payroll via Bank Mandiri Payroll System</div>
+        <div class="metric-sub">Payroll via Bank BRI Operasional 110101020200</div>
       </div>
     </section>
 
@@ -270,6 +332,14 @@ onMounted(loadData);
       title="Pemberitahuan Sistem HRIS"
       :message="errorMessage"
       @dismiss="errorMessage = ''"
+    />
+
+    <AlertBanner
+      v-if="feedbackMessage"
+      variant="success"
+      title="Operasi Payroll Berhasil"
+      :message="feedbackMessage"
+      @dismiss="feedbackMessage = ''"
     />
 
     <!-- TAB 1: EMPLOYEES DATABASE -->
@@ -439,7 +509,15 @@ onMounted(loadData);
               Rincian gaji bruto, tunjangan operasional, potongan BPJS/PPh 21, dan take home pay netto yang ditransfer ke rekening bank pegawai.
             </p>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <button
+              type="button"
+              class="btn btn-sm btn-success"
+              :disabled="generateBatchLoading"
+              @click="generateBatchPayroll"
+            >
+              {{ generateBatchLoading ? 'Memproses Batch...' : '+ Terbitkan Slip Gaji SBM 2026' }}
+            </button>
             <button
               type="button"
               class="btn btn-sm btn-primary"
@@ -517,6 +595,173 @@ onMounted(loadData);
           </table>
         </div>
       </section>
+    </div>
+
+    <!-- TAB 4: SBM 2026 & PPH 21 CALCULATOR -->
+    <div v-if="currentTab === 'CALCULATOR_SBM'" class="tab-pane">
+      <!-- Pertor 310 SBM Compliance Alert Banner -->
+      <div class="panel" style="background: linear-gradient(135deg, rgba(30, 64, 175, 0.08) 0%, rgba(14, 165, 233, 0.05) 100%); border-left: 4px solid var(--primary); padding: 14px 18px; margin-bottom: 4px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="doc-code" style="background: var(--primary); color: #fff; font-weight: 700;">SBM 2026 · PMK 168/2023</span>
+              <strong>Standar Biaya Masukan &amp; PPh 21 TER Pegawai PUT PK PMO</strong>
+            </div>
+            <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--text-muted);">
+              Perhitungan gaji pokok, uang makan SBM (Rp 37.000/hari), uang lembur (Rp 20.000/jam), potongan BPJS 4%, dan pemotongan PPh 21 Tarif Efektif Rata-rata (TER). Pembebanan otomatis ke akun Pertor 310: Beban Gaji <code>520101030100</code>, Utang PPh 21 <code>210201010100</code>, dan Bank BRI <code>110101020200</code>.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-grid" style="grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.4fr); gap: 18px;">
+        <!-- Input Form Parameters -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Parameter Perhitungan Pegawai</h3>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="form-field">
+              <label for="calc-emp" class="form-label">Pilih Pegawai PUT PK</label>
+              <select id="calc-emp" v-model="calcEmployeeId" class="select" @change="calculateSbm">
+                <option v-for="e in employees" :key="e.id" :value="e.id">
+                  {{ e.nip }} - {{ e.fullName }} ({{ e.department }})
+                </option>
+              </select>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="calc-days" class="form-label">Hari Kerja Efektif</label>
+                <input
+                  id="calc-days"
+                  v-model.number="calcWorkDays"
+                  type="number"
+                  min="0"
+                  max="31"
+                  class="input"
+                  @input="calculateSbm"
+                />
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Uang Makan Rp 37.000/hari</span>
+              </div>
+
+              <div class="form-field">
+                <label for="calc-ot" class="form-label">Jam Lembur (Bulan Ini)</label>
+                <input
+                  id="calc-ot"
+                  v-model.number="calcOvertimeHours"
+                  type="number"
+                  min="0"
+                  max="100"
+                  class="input"
+                  @input="calculateSbm"
+                />
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Tarif Lembur Rp 20.000/jam</span>
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label for="calc-ptkp" class="form-label">Kategori Status PTKP (PPh 21 TER)</label>
+              <select id="calc-ptkp" v-model="calcPtkpCategory" class="select" @change="calculateSbm">
+                <option value="TER_A">Kategori A (TK/0, TK/1, K/0)</option>
+                <option value="TER_B">Kategori B (TK/2, TK/3, K/1, K/2)</option>
+                <option value="TER_C">Kategori C (K/3)</option>
+              </select>
+            </div>
+
+            <div class="btn-row" style="margin-top: 8px;">
+              <button
+                type="button"
+                class="btn btn-primary"
+                :disabled="calcLoading"
+                @click="calculateSbm"
+              >
+                {{ calcLoading ? 'Menghitung...' : 'Hitung Ulang Payroll SBM' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Result Card Breakdown -->
+        <div v-if="calcResult" class="panel">
+          <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <h3>Rincian Slip Gaji SBM: {{ calcResult.employee.fullName }}</h3>
+              <span class="text-muted" style="font-size: 0.8rem;">{{ calcResult.employee.nip }} · {{ calcResult.employee.position }}</span>
+            </div>
+            <span class="erp-badge erp-badge-info">{{ calcResult.employee.employmentStatus }}</span>
+          </div>
+
+          <div class="slip-grid" style="margin-top: 10px;">
+            <!-- Earnings -->
+            <div class="slip-col">
+              <h4 class="slip-col-title">Penghasilan SBM 2026</h4>
+              <div class="slip-row">
+                <span>Gaji Pokok:</span>
+                <strong class="money">{{ formatCurrency(calcResult.calculation.baseSalary) }}</strong>
+              </div>
+              <div class="slip-row">
+                <span>Tunjangan Jabatan:</span>
+                <strong class="money">{{ formatCurrency(calcResult.calculation.positionAllowance) }}</strong>
+              </div>
+              <div class="slip-row">
+                <span>Tunjangan Transport:</span>
+                <strong class="money">{{ formatCurrency(calcResult.calculation.transportAllowance) }}</strong>
+              </div>
+              <div class="slip-row">
+                <span>Uang Makan SBM ({{ calcResult.calculation.workDays }} hr):</span>
+                <strong class="money">{{ formatCurrency(calcResult.calculation.mealAllowance) }}</strong>
+              </div>
+              <div class="slip-row" v-if="calcResult.calculation.overtimeAmount > 0">
+                <span>Uang Lembur ({{ calcResult.calculation.overtimeHours }} jam):</span>
+                <strong class="money">{{ formatCurrency(calcResult.calculation.overtimeAmount) }}</strong>
+              </div>
+              <div class="slip-row subtotal-row">
+                <span>Penghasilan Bruto:</span>
+                <strong class="money" style="color: var(--primary);">{{ formatCurrency(calcResult.calculation.grossSalary) }}</strong>
+              </div>
+            </div>
+
+            <!-- Deductions -->
+            <div class="slip-col">
+              <h4 class="slip-col-title">Potongan Pajak &amp; Iuran</h4>
+              <div class="slip-row">
+                <span>Iuran BPJS Pegawai (4%):</span>
+                <strong class="money text-danger">- {{ formatCurrency(calcResult.calculation.deductionBpjs) }}</strong>
+              </div>
+              <div class="slip-row">
+                <span>PPh 21 TER ({{ calcResult.calculation.pph21RatePercent }}%):</span>
+                <strong class="money text-danger">- {{ formatCurrency(calcResult.calculation.deductionPph21) }}</strong>
+              </div>
+              <div class="slip-row subtotal-row">
+                <span>Total Potongan:</span>
+                <strong class="money text-danger">
+                  - {{ formatCurrency(calcResult.calculation.deductionBpjs + calcResult.calculation.deductionPph21) }}
+                </strong>
+              </div>
+
+              <div class="panel" style="margin-top: 14px; padding: 10px; background: var(--bg-canvas); text-align: right;">
+                <span class="slip-meta-label">Take Home Pay (THP Bersih)</span>
+                <div class="money text-emerald" style="font-size: 1.4rem; font-weight: 700;">
+                  {{ formatCurrency(calcResult.calculation.netSalary) }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pertor 310 COA Mapping Card -->
+          <div class="panel" style="margin-top: 14px; background: var(--bg-canvas); padding: 12px;">
+            <strong style="font-size: 0.82rem;">Pembebanan Jurnal Akuntansi Pertor 310:</strong>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 0.78rem;">
+              <span class="doc-code">Debit Gaji: {{ calcResult.accountingMapping.bebanGajiCoa }}</span>
+              <span class="doc-code">Debit Uang Makan: {{ calcResult.accountingMapping.bebanUangMakanCoa }}</span>
+              <span class="doc-code">Kredit Utang PPh 21: {{ calcResult.accountingMapping.utangPph21Coa }}</span>
+              <span class="doc-code">Kredit Kas Bank: {{ calcResult.accountingMapping.bankBriCoa }} (Bank BRI)</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Modal Slip Gaji Pegawai -->

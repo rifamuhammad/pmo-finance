@@ -1306,4 +1306,79 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       );
     });
   });
+
+  describe('10. HRIS Gaji PUT PK, SBM 2026 & PPh 21 TER (PMO-091 / KOI-116)', () => {
+    let testEmployeeId = '';
+
+    beforeAll(async () => {
+      const empRes = await request(app)
+        .get('/api/v1/hris/employees')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(empRes.status).toBe(200);
+      expect(empRes.body.data.length).toBeGreaterThan(0);
+      testEmployeeId = empRes.body.data[0].id;
+    });
+
+    it('retrieves SBM 2026 reference standards and summary calculations', async () => {
+      const res = await request(app)
+        .get('/api/v1/hris/payroll/summary-sbm')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.activeEmployeesCount).toBeGreaterThan(0);
+      expect(res.body.data.sbmStandards.MEAL_ALLOWANCE_PER_DAY).toBe(37000);
+      expect(res.body.data.sbmStandards.OVERTIME_RATE_PER_HOUR).toBe(20000);
+      expect(res.body.data.sbmStandards.COA_BEBAN_GAJI_PUT_PK).toBe('520101030100');
+      expect(res.body.data.sbmStandards.COA_UTANG_PPH21).toBe('210201010100');
+      expect(res.body.data.sbmStandards.COA_BANK_BRI).toBe('110101020200');
+      expect(res.body.data.summary.totalGross).toBeGreaterThan(0);
+      expect(res.body.data.summary.totalNetTakeHome).toBeGreaterThan(0);
+    });
+
+    it('calculates employee payroll with SBM allowances, BPJS deduction & PPh 21 TER (PMO-091)', async () => {
+      const res = await request(app)
+        .post('/api/v1/hris/payroll/calculate')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          employeeId: testEmployeeId,
+          workDays: 22,
+          overtimeHours: 5,
+          ptkpCategory: 'TER_A',
+        });
+
+      expect(res.status).toBe(200);
+      const { calculation, accountingMapping } = res.body.data;
+      expect(calculation.mealAllowance).toBe(22 * 37000); // 814.000
+      expect(calculation.overtimeAmount).toBe(5 * 20000); // 100.000
+      expect(calculation.deductionBpjs).toBeGreaterThan(0);
+      expect(calculation.pph21RatePercent).toBeGreaterThanOrEqual(0);
+      expect(calculation.netSalary).toBe(
+        calculation.grossSalary - calculation.deductionBpjs - calculation.deductionPph21
+      );
+      expect(accountingMapping.bebanGajiCoa).toBe('520101030100');
+      expect(accountingMapping.utangPph21Coa).toBe('210201010100');
+      expect(accountingMapping.bankBriCoa).toBe('110101020200');
+    });
+
+    it('generates batch salary slips for period 12/2026 based on SBM 2026 & PPh 21 TER', async () => {
+      const res = await request(app)
+        .post('/api/v1/hris/payroll/generate')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          periodMonth: 12,
+          periodYear: 2026,
+          workDays: 22,
+          ptkpCategory: 'TER_A',
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.totalGenerated).toBeGreaterThan(0);
+      expect(res.body.data.slips.length).toBeGreaterThan(0);
+
+      const sampleSlip = res.body.data.slips[0];
+      expect(sampleSlip.status).toBe('APPROVED');
+      expect(sampleSlip.notes).toContain('SBM 2026');
+      expect(sampleSlip.notes).toContain('PPh 21 TER');
+    });
+  });
 });

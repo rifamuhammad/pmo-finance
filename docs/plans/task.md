@@ -1,8 +1,8 @@
 | id | task | status | notes |
 | --- | --- | --- | --- |
-| koi115-1 | Parser Rekening Koran Bank BRI (CSV / TSV / Format Mutasi BRI) di Backend & Helper | completed | Parsing kolom Tanggal, Uraian, No. Referensi, Debet, Kredit, Saldo |
-| koi115-2 | Peningkatan Engine Auto-Matching Pertor 310 (Deposit POS, Pelunasan LS, UMK Panjar) | completed | Matching multi-dokumen (Payment, CashDeposit, Expense, PettyCash) |
-| koi115-3 | UI ReconciliationView.vue: File Upload Reader, Parser BRI & Banner Kepatuhan 110101020200 | completed | Drag & drop / file input, eliminasi dummy slop, indikator selisih buku vs bank |
-| koi115-4 | Integration Test di erp.test.ts untuk Bank BRI statement import & auto-matching | completed | 30/30 vitest passed, verifikasi auto-matching & deteksi duplikasi SHA-256 |
-| koi115-5 | Quality Gate: typecheck 0 error, Vitest passing, Vite build clean | completed | tsc 0 error, vue-tsc 0 error, Vite build clean (3.31s) |
-| koi115-6 | Dokumentasi docs/tasks/KOI-115, Git Commit, Push Origin & Jira In Review | completed | Strictly In Review (anti-Done) |
+| koi116-1 | Engine Standar Biaya Masukan (SBM) 2026 & Pemetaan COA Pertor 310 di Backend | completed | Gaji PUT PK 520101030100, Lembur 520101050200, Uang Makan 520101060200, PPh 21 210201010100 |
+| koi116-2 | Kalkulator PPh 21 TER (PP 58/2023 & PMK 168/2023) Kategori A, B, C | completed | Perhitungan tarif efektif rata-rata bulanan otomatis & akurat |
+| koi116-3 | Endpoint HRIS Gaji PUT PK (/payroll/summary-sbm, /payroll/calculate, /payroll/generate) | completed | API komputasi payroll lengkap dengan BPJS 4% dan balanced journal entry |
+| koi116-4 | UI HrisView.vue: Tab Kalkulator SBM 2026 & PPh 21 TER, Card Rincian Jurnal & Batch Slip | completed | Interaktif form, live breakdown, modal slip gaji, batch generator |
+| koi116-5 | Integration Testing Section 10 erp.test.ts (3 tes baru) | completed | 33/33 Vitest tests passing 100% |
+| koi116-6 | Quality Gate & Dokumentasi: build clean, docs/tasks/KOI-116, Git commit, Push & Jira In Review | in_progress | Menunggu git push dan transisi Jira |

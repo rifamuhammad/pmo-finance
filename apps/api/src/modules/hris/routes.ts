@@ -1,13 +1,133 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../shared/prisma.js';
-import { toNumber } from '../../shared/decimal.js';
+import { toNumber, toCents, fromCents } from '../../shared/decimal.js';
 import { recordAuditLog } from '../../shared/audit.js';
-import { AppError, requireAuth } from '../../middleware/auth.js';
+import { AppError, requireAuth, requirePermission } from '../../middleware/auth.js';
 
 export const hrisRouter = Router();
 
 hrisRouter.use(requireAuth);
+
+// Standar Biaya Masukan (SBM) 2026 Reference Constants
+export const SBM_2026 = {
+  MEAL_ALLOWANCE_PER_DAY: 37000, // Uang makan SBM per hari kerja
+  OVERTIME_RATE_PER_HOUR: 20000, // Upah lembur SBM per jam
+  OVERTIME_MEAL_RATE: 30000, // Uang makan lembur (min. 2 jam)
+  BPJS_EMPLOYEE_RATE: 0.04, // 4% (Kesehatan 1% + Ketenagakerjaan JHT/JP 3%)
+  COA_BEBAN_GAJI_PUT_PK: '520101030100', // Beban Gaji Tenaga Kependidikan PUT PK
+  COA_BEBAN_LEMBUR_NON_PNS: '520101050200', // Beban Lembur Pendukung Kegiatan Operasional - Non PNS
+  COA_BEBAN_UANG_MAKAN_NON_PNS: '520101060200', // Beban Uang Makan Tenaga Kependidikan - Non PNS
+  COA_UTANG_PPH21: '210201010100', // Utang Pajak PPh Pasal 21
+  COA_UTANG_TITIPAN_BPJS: '210301010100', // Beban Akrual / Yang Masih Harus Dibayar (Titipan BPJS)
+  COA_BANK_BRI: '110101020200', // Bank BRI Penerimaan Komersial PMO
+};
+
+// PPh 21 Tarif Efektif Rata-rata (TER) PMK 168/2023 & PP 58/2023
+export function calculatePph21Ter(grossMonthly: number, ptkpCategory: 'TER_A' | 'TER_B' | 'TER_C' = 'TER_A'): { ratePercent: number; pph21Amount: number } {
+  let rate = 0;
+
+  if (ptkpCategory === 'TER_A') {
+    // PTKP: TK/0 (54jt), TK/1 (58.5jt), K/0 (58.5jt)
+    if (grossMonthly <= 5400000) rate = 0;
+    else if (grossMonthly <= 5650000) rate = 0.25;
+    else if (grossMonthly <= 5950000) rate = 0.50;
+    else if (grossMonthly <= 6300000) rate = 0.75;
+    else if (grossMonthly <= 6750000) rate = 1.00;
+    else if (grossMonthly <= 7500000) rate = 1.25;
+    else if (grossMonthly <= 8550000) rate = 1.50;
+    else if (grossMonthly <= 9650000) rate = 1.75;
+    else if (grossMonthly <= 10050000) rate = 2.00;
+    else if (grossMonthly <= 10350000) rate = 2.25;
+    else if (grossMonthly <= 10700000) rate = 2.50;
+    else if (grossMonthly <= 11050000) rate = 3.00;
+    else if (grossMonthly <= 11600000) rate = 3.50;
+    else if (grossMonthly <= 12500000) rate = 4.00;
+    else if (grossMonthly <= 13750000) rate = 5.00;
+    else if (grossMonthly <= 15100000) rate = 6.00;
+    else if (grossMonthly <= 16950000) rate = 7.00;
+    else if (grossMonthly <= 19750000) rate = 8.00;
+    else if (grossMonthly <= 24100000) rate = 9.00;
+    else rate = 10.00;
+  } else if (ptkpCategory === 'TER_B') {
+    // PTKP: TK/2, TK/3, K/1, K/2
+    if (grossMonthly <= 6200000) rate = 0;
+    else if (grossMonthly <= 6500000) rate = 0.25;
+    else if (grossMonthly <= 6850000) rate = 0.50;
+    else if (grossMonthly <= 7300000) rate = 0.75;
+    else if (grossMonthly <= 9200000) rate = 1.50;
+    else if (grossMonthly <= 10750000) rate = 2.50;
+    else if (grossMonthly <= 12600000) rate = 4.00;
+    else if (grossMonthly <= 15200000) rate = 6.00;
+    else if (grossMonthly <= 18500000) rate = 8.00;
+    else rate = 10.00;
+  } else {
+    // TER_C: K/3
+    if (grossMonthly <= 6600000) rate = 0;
+    else if (grossMonthly <= 6950000) rate = 0.25;
+    else if (grossMonthly <= 7350000) rate = 0.50;
+    else if (grossMonthly <= 9550000) rate = 1.50;
+    else if (grossMonthly <= 13050000) rate = 4.00;
+    else rate = 7.00;
+  }
+
+  const pph21Amount = Math.round(grossMonthly * (rate / 100));
+  return { ratePercent: rate, pph21Amount };
+}
+
+export interface PayrollSbmCalculation {
+  baseSalary: number;
+  positionAllowance: number;
+  transportAllowance: number;
+  workDays: number;
+  mealAllowance: number;
+  overtimeHours: number;
+  overtimeAmount: number;
+  allowanceTotal: number;
+  grossSalary: number;
+  deductionBpjs: number;
+  pph21RatePercent: number;
+  deductionPph21: number;
+  netSalary: number;
+}
+
+export function computeEmployeePayrollSbm(
+  baseSalary: number,
+  positionAllowance: number,
+  transportAllowance: number,
+  workDays = 22,
+  overtimeHours = 0,
+  ptkpCategory: 'TER_A' | 'TER_B' | 'TER_C' = 'TER_A'
+): PayrollSbmCalculation {
+  const mealAllowance = workDays * SBM_2026.MEAL_ALLOWANCE_PER_DAY;
+  const overtimeAmount = overtimeHours * SBM_2026.OVERTIME_RATE_PER_HOUR;
+  const allowanceTotal = positionAllowance + transportAllowance + mealAllowance + overtimeAmount;
+  const grossSalary = baseSalary + allowanceTotal;
+
+  // BPJS 4% dari Gaji Pokok + Tunjangan Tetap
+  const deductionBpjs = Math.round((baseSalary + positionAllowance) * SBM_2026.BPJS_EMPLOYEE_RATE);
+
+  // PPh 21 TER
+  const { ratePercent, pph21Amount } = calculatePph21Ter(grossSalary, ptkpCategory);
+
+  const netSalary = grossSalary - deductionBpjs - pph21Amount;
+
+  return {
+    baseSalary,
+    positionAllowance,
+    transportAllowance,
+    workDays,
+    mealAllowance,
+    overtimeHours,
+    overtimeAmount,
+    allowanceTotal,
+    grossSalary,
+    deductionBpjs,
+    pph21RatePercent: ratePercent,
+    deductionPph21: pph21Amount,
+    netSalary,
+  };
+}
 
 // Helper to seed realistic PMO HRIS & Payroll data
 async function ensureHrisSeedData() {
@@ -338,6 +458,220 @@ hrisRouter.get('/payroll', async (req, res, next) => {
       success: true,
       data: formatted,
       meta: { total: formatted.length, requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 4. GET SBM 2026 SUMMARY & RECAP
+hrisRouter.get('/payroll/summary-sbm', async (req, res, next) => {
+  try {
+    await ensureHrisSeedData();
+    const activeEmployees = await prisma.employee.findMany({ where: { status: 'ACTIVE' } });
+
+    let totalBaseSalary = 0;
+    let totalPositionAllowance = 0;
+    let totalTransportAllowance = 0;
+    let totalMealAllowance = 0;
+    let totalGross = 0;
+    let totalPph21 = 0;
+    let totalBpjs = 0;
+    let totalNetTakeHome = 0;
+
+    for (const emp of activeEmployees) {
+      const calc = computeEmployeePayrollSbm(
+        toNumber(emp.baseSalary),
+        toNumber(emp.positionAllowance),
+        toNumber(emp.transportAllowance),
+        22,
+        0,
+        'TER_A'
+      );
+      totalBaseSalary += calc.baseSalary;
+      totalPositionAllowance += calc.positionAllowance;
+      totalTransportAllowance += calc.transportAllowance;
+      totalMealAllowance += calc.mealAllowance;
+      totalGross += calc.grossSalary;
+      totalPph21 += calc.deductionPph21;
+      totalBpjs += calc.deductionBpjs;
+      totalNetTakeHome += calc.netSalary;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        activeEmployeesCount: activeEmployees.length,
+        sbmStandards: SBM_2026,
+        summary: {
+          totalBaseSalary,
+          totalPositionAllowance,
+          totalTransportAllowance,
+          totalMealAllowance,
+          totalGross,
+          totalPph21,
+          totalBpjs,
+          totalNetTakeHome,
+        },
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 5. CALCULATE SIMULATION PAYROLL SBM & PPH 21 TER
+const calculatePayrollSchema = z.object({
+  employeeId: z.string().min(1),
+  workDays: z.number().int().min(0).max(31).default(22),
+  overtimeHours: z.number().min(0).max(100).default(0),
+  ptkpCategory: z.enum(['TER_A', 'TER_B', 'TER_C']).default('TER_A'),
+});
+
+hrisRouter.post('/payroll/calculate', async (req, res, next) => {
+  try {
+    const parsed = calculatePayrollSchema.parse(req.body);
+    const emp = await prisma.employee.findUnique({
+      where: { id: parsed.employeeId },
+      include: { businessUnit: true },
+    });
+    if (!emp) throw new AppError(404, 'EMPLOYEE_NOT_FOUND', 'Pegawai tidak ditemukan.');
+
+    const calc = computeEmployeePayrollSbm(
+      toNumber(emp.baseSalary),
+      toNumber(emp.positionAllowance),
+      toNumber(emp.transportAllowance),
+      parsed.workDays,
+      parsed.overtimeHours,
+      parsed.ptkpCategory
+    );
+
+    res.json({
+      success: true,
+      data: {
+        employee: {
+          id: emp.id,
+          nip: emp.nip,
+          fullName: emp.fullName,
+          position: emp.position,
+          department: emp.department,
+          employmentStatus: emp.employmentStatus,
+          bankName: emp.bankName,
+          bankAccountNo: emp.bankAccountNo,
+          bankAccountHolder: emp.bankAccountHolder,
+        },
+        calculation: calc,
+        accountingMapping: {
+          bebanGajiCoa: SBM_2026.COA_BEBAN_GAJI_PUT_PK,
+          bebanLemburCoa: SBM_2026.COA_BEBAN_LEMBUR_NON_PNS,
+          bebanUangMakanCoa: SBM_2026.COA_BEBAN_UANG_MAKAN_NON_PNS,
+          utangPph21Coa: SBM_2026.COA_UTANG_PPH21,
+          utangBpjsCoa: SBM_2026.COA_UTANG_TITIPAN_BPJS,
+          bankBriCoa: SBM_2026.COA_BANK_BRI,
+        },
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 6. GENERATE BATCH SLIP GAJI SBM 2026
+const generatePayrollSchema = z.object({
+  periodMonth: z.number().int().min(1).max(12),
+  periodYear: z.number().int().min(2025).max(2030),
+  employeeIds: z.array(z.string()).optional(),
+  workDays: z.number().int().min(1).max(31).default(22),
+  ptkpCategory: z.enum(['TER_A', 'TER_B', 'TER_C']).default('TER_A'),
+});
+
+hrisRouter.post('/payroll/generate', async (req, res, next) => {
+  try {
+    const parsed = generatePayrollSchema.parse(req.body);
+    const where: Record<string, unknown> = { status: 'ACTIVE' };
+    if (parsed.employeeIds && parsed.employeeIds.length > 0) {
+      where.id = { in: parsed.employeeIds };
+    }
+
+    const activeEmployees = await prisma.employee.findMany({ where });
+    if (activeEmployees.length === 0) {
+      throw new AppError(400, 'NO_ACTIVE_EMPLOYEES', 'Tidak ditemukan pegawai aktif untuk diproses slip gajinya.');
+    }
+
+    const createdSlips = [];
+    for (const emp of activeEmployees) {
+      const calc = computeEmployeePayrollSbm(
+        toNumber(emp.baseSalary),
+        toNumber(emp.positionAllowance),
+        toNumber(emp.transportAllowance),
+        parsed.workDays,
+        0,
+        parsed.ptkpCategory
+      );
+
+      const slipNumber = `PAY/PMO/${parsed.periodYear}/${String(parsed.periodMonth).padStart(2, '0')}/${emp.nip.slice(-3)}`;
+
+      const slip = await prisma.salarySlip.upsert({
+        where: { slipNumber },
+        update: {
+          baseSalary: calc.baseSalary,
+          allowanceTotal: calc.allowanceTotal,
+          overtimeAmount: calc.overtimeAmount,
+          deductionBpjs: calc.deductionBpjs,
+          deductionPph21: calc.deductionPph21,
+          grossSalary: calc.grossSalary,
+          netSalary: calc.netSalary,
+          status: 'APPROVED',
+          paymentDate: new Date(`${parsed.periodYear}-${String(parsed.periodMonth).padStart(2, '0')}-25`),
+          notes: `Payroll SBM 2026 & PPh 21 TER (${calc.pph21RatePercent}%) ditransfer ke ${emp.bankName} a.n ${emp.bankAccountHolder || emp.fullName}`,
+        },
+        create: {
+          slipNumber,
+          employeeId: emp.id,
+          periodMonth: parsed.periodMonth,
+          periodYear: parsed.periodYear,
+          baseSalary: calc.baseSalary,
+          allowanceTotal: calc.allowanceTotal,
+          overtimeAmount: calc.overtimeAmount,
+          deductionAbsence: 0,
+          deductionBpjs: calc.deductionBpjs,
+          deductionPph21: calc.deductionPph21,
+          grossSalary: calc.grossSalary,
+          netSalary: calc.netSalary,
+          status: 'APPROVED',
+          paymentDate: new Date(`${parsed.periodYear}-${String(parsed.periodMonth).padStart(2, '0')}-25`),
+          paymentMethod: 'TRANSFER_BANK',
+          notes: `Payroll SBM 2026 & PPh 21 TER (${calc.pph21RatePercent}%) ditransfer ke ${emp.bankName} a.n ${emp.bankAccountHolder || emp.fullName}`,
+        },
+      });
+
+      createdSlips.push(slip);
+    }
+
+    await recordAuditLog({
+      actorId: req.user!.userId,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: 'PAYROLL_GENERATED',
+      module: 'HRIS',
+      entityType: 'SalarySlipBatch',
+      entityId: `BATCH-${parsed.periodYear}-${parsed.periodMonth}`,
+      entityCode: `PAY/PMO/${parsed.periodYear}/${String(parsed.periodMonth).padStart(2, '0')}`,
+      summary: `Menerbitkan ${createdSlips.length} slip gaji PUT PK periode ${parsed.periodMonth}/${parsed.periodYear} berbasis SBM 2026 & PPh 21 TER`,
+      requestId: req.requestId,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        periodMonth: parsed.periodMonth,
+        periodYear: parsed.periodYear,
+        totalGenerated: createdSlips.length,
+        slips: createdSlips,
+      },
+      meta: { requestId: req.requestId },
     });
   } catch (err) {
     next(err);
