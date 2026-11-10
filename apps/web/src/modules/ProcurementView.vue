@@ -522,7 +522,8 @@ async function submitGoodsReceipt() {
       }),
     });
     receiptModalOpen.value = false;
-    feedbackMsg.value = `Bukti penerimaan barang ${res.data.goodsReceipt.docNumber} tercatat (Status PO: ${res.data.poStatus}).`;
+    const jrnMsg = res.data.journal ? ` & Jurnal akrual ${res.data.journal.journalNumber} diposting (Utang 210101010100)` : '';
+    feedbackMsg.value = `Bukti penerimaan barang (BAST) ${res.data.goodsReceipt.docNumber} tercatat (Status PO: ${res.data.poStatus})${jrnMsg}.`;
     await loadAllProcurementData();
   } catch (err: any) {
     receiptModalError.value = err.message || 'Gagal mencatat penerimaan barang.';
@@ -954,7 +955,9 @@ onMounted(() => {
                   <strong>Diterima {{ line.receivedQuantity }} / {{ line.quantity }} {{ line.unit }}</strong>
                 </div>
                 <div v-if="po.goodsReceipts?.length > 0" class="text-muted" style="font-size: 0.76rem; margin-top: 4px">
-                  Bukti GR: {{ po.goodsReceipts.map((g: any) => g.docNumber).join(', ') }}
+                  <span class="badge" style="background: rgba(30, 41, 59, 0.08); font-weight: 500">
+                    BAST: {{ po.goodsReceipts.map((g: any) => g.docNumber).join(', ') }}
+                  </span>
                 </div>
               </td>
               <td class="money-col"><strong>{{ formatRupiah(po.totalAmount) }}</strong></td>
@@ -1555,6 +1558,12 @@ onMounted(() => {
           title="Kendala Pencatatan Penerimaan"
           :message="receiptModalError"
           @dismiss="receiptModalError = ''"
+        />
+
+        <AlertBanner
+          variant="info"
+          title="Ketentuan Akrual BAST (Pertor 310)"
+          message="Penerimaan barang/jasa otomatis memposting jurnal akrual (Dr. Beban vs Cr. 210101010100 Utang Pengadaan Barang dan Jasa Rekanan) dengan nomor BAST sebagai referensi audit BPK."
         />
 
         <p>PO Referensi: <strong>{{ selectedPoForReceipt.docNumber }}</strong> ({{ selectedPoForReceipt.vendor?.name }})</p>

@@ -524,6 +524,9 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
         });
       expect(grPartial.status).toBe(201);
       expect(grPartial.body.data.poStatus).toBe('PARTIALLY_RECEIVED');
+      expect(grPartial.body.data.journal).toBeDefined();
+      expect(grPartial.body.data.journal.status).toBe('POSTED');
+      expect(Number(grPartial.body.data.journal.totalDebit)).toBe(Number(grPartial.body.data.journal.totalCredit));
 
       // Attempt full Vendor Invoice (100% value) while only 50% received without exception -> must fail 3-way match
       const vendorInvNo = `INV-VND-${runTag}`;

@@ -726,7 +726,13 @@ procurementRouter.post('/purchase-orders/:id/goods-receipts', requirePermission(
     const parsed = goodsReceiptSchema.parse(req.body);
     const po = await prisma.purchaseOrder.findUnique({
       where: { id: req.params.id },
-      include: { lines: true },
+      include: {
+        lines: true,
+        vendor: true,
+        purchaseRequest: {
+          include: { budgetLine: true, costCenter: true },
+        },
+      },
     });
     if (!po) throw new AppError(404, 'PO_NOT_FOUND', 'Purchase Order tidak ditemukan.');
     if (po.status === 'CANCELLED') {
@@ -734,6 +740,8 @@ procurementRouter.post('/purchase-orders/:id/goods-receipts', requirePermission(
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      let receivedTotalCents = 0n;
+
       for (const item of parsed.items) {
         const line = po.lines.find((l) => l.id === item.purchaseOrderLineId);
         if (!line) throw new AppError(404, 'PO_LINE_NOT_FOUND', 'Baris PO tidak ditemukan.');
@@ -751,6 +759,9 @@ procurementRouter.post('/purchase-orders/:id/goods-receipts', requirePermission(
             receivedQuantity: addMoney(line.receivedQuantity, item.quantityReceived),
           },
         });
+
+        const lineVal = (toCents(item.quantityReceived) * toCents(line.unitPrice)) / 100n;
+        receivedTotalCents += lineVal;
       }
 
       const freshLines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
@@ -787,6 +798,58 @@ procurementRouter.post('/purchase-orders/:id/goods-receipts', requirePermission(
         data: { status: newPoStatus },
       });
 
+      // Auto-post balanced double-entry accrual journal for BAST (Pertor 310)
+      let journal = null;
+      const totalReceivedAmount = fromCents(receivedTotalCents);
+      if (receivedTotalCents > 0n) {
+        let debitAccount = po.purchaseRequest?.budgetLine?.accountCode;
+        if (!debitAccount || debitAccount.includes('-')) {
+          const officialExpense = await tx.chartOfAccount.findUnique({ where: { code: '520901020100' } });
+          if (officialExpense) {
+            debitAccount = '520901020100';
+          } else if (!debitAccount) {
+            debitAccount = '5-1100';
+          }
+        }
+
+        let creditAccount = '210101010100';
+        const checkCredit = await tx.chartOfAccount.findUnique({ where: { code: creditAccount } });
+        if (!checkCredit) {
+          creditAccount = debitAccount.includes('-') ? '2-1110' : '210101010100';
+        }
+
+        journal = await createOrGetBalancedJournal(
+          {
+            entryDate: new Date(),
+            businessUnitId: po.businessUnitId,
+            sourceType: 'GOODS_RECEIPT',
+            sourceId: gr.id,
+            sourceDocNumber: gr.docNumber,
+            idempotencyKey: `GR_ACCRUAL_${gr.id}`,
+            description: `Akrual Utang Pengadaan BAST ${gr.docNumber} atas PO ${po.docNumber} (${po.vendor?.name || 'Rekanan'})`,
+            createdById: req.user!.userId,
+            createdByName: req.user!.fullName,
+            lines: [
+              {
+                accountCode: debitAccount,
+                costCenterId: po.purchaseRequest?.costCenterId || null,
+                description: `Akrual Beban/Aset BAST ${gr.docNumber}: ${parsed.deliveryNoteRef}`,
+                debit: totalReceivedAmount,
+                credit: 0,
+              },
+              {
+                accountCode: creditAccount,
+                costCenterId: po.purchaseRequest?.costCenterId || null,
+                description: `Utang Pengadaan Rekanan BAST ${gr.docNumber}: ${po.vendor?.name || 'Rekanan'}`,
+                debit: 0,
+                credit: totalReceivedAmount,
+              },
+            ],
+          },
+          tx as any
+        );
+      }
+
       await recordAuditLog(
         {
           actorId: req.user!.userId,
@@ -797,14 +860,14 @@ procurementRouter.post('/purchase-orders/:id/goods-receipts', requirePermission(
           entityType: 'PurchaseOrder',
           entityId: po.id,
           entityCode: po.docNumber,
-          summary: `Mencatat penerimaan barang ${gr.docNumber} untuk PO ${po.docNumber} (Status PO: ${newPoStatus})`,
-          afterData: { grDocNumber: gr.docNumber, poStatus: newPoStatus },
+          summary: `Mencatat penerimaan barang ${gr.docNumber} untuk PO ${po.docNumber} (Status PO: ${newPoStatus}, Jurnal Akrual: ${journal?.journalNumber || '-'})`,
+          afterData: { grDocNumber: gr.docNumber, poStatus: newPoStatus, journalNumber: journal?.journalNumber },
           requestId: req.requestId,
         },
         tx as any
       );
 
-      return { goodsReceipt: gr, poStatus: newPoStatus };
+      return { goodsReceipt: gr, poStatus: newPoStatus, journal };
     });
 
     res.status(201).json({ success: true, data: result, meta: { requestId: req.requestId } });
@@ -1325,9 +1388,13 @@ procurementRouter.post('/expenses/:id/pay', requirePermission('expense:pay'), as
 
       // Auto-post balanced double-entry journal idempotently
       let debitAccount = freshLine.accountCode;
-      if (!debitAccount) {
+      if (!debitAccount || debitAccount.includes('-')) {
         const officialExpense = await tx.chartOfAccount.findUnique({ where: { code: '520901020100' } });
-        debitAccount = officialExpense ? '520901020100' : '5-1100';
+        if (officialExpense) {
+          debitAccount = '520901020100';
+        } else if (!debitAccount) {
+          debitAccount = '5-1100';
+        }
       }
 
       let creditAccount = expense.paymentMethod === 'PETTY_CASH' ? '110501010100' : '110101020200';

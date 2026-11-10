@@ -1,7 +1,7 @@
 | id | task | status | notes |
 | --- | --- | --- | --- |
-| s3-proc-1 | Audit & perbarui alur akun COA Pertor 310 pada modul procurement routes | completed | Ganti fallback akun lama dengan 110101020200 & 110501010100 secara adaptif |
-| s3-proc-2 | Optimasi query pengambilan BudgetLine pada PR & Expense | completed | Relasi budgetLine & costCenter terhubung lengkap di purchase-requests |
-| s3-proc-3 | UI BudgetLinePicker cerdas pada ProcurementView.vue | completed | Search cepat 296 pos, filter unit bisnis, visualisasi sisa pagu anti-slop |
-| s3-proc-4 | Pengujian integrasi alur PR -> BudgetCommitment & verifikasi pagu | completed | Validasi pembuatan PR, pemotongan komitmen, dan pencegahan defisit |
-| s3-proc-5 | Verifikasi test suite, typecheck, dokumentasi task & Jira update | completed | 24 tests pass, docs/tasks/KOI-105-*.md dibuat, transisi Jira ke In Review |
+| s3-bast-1 | Evaluasi alur Goods Receipt / BAST pada procurement routes | completed | Menelaah kebutuhan posting jurnal akrual saat BAST dicatat |
+| s3-bast-2 | Implementasi auto-posting jurnal akrual BAST Pertor 310 | completed | Dr Akun Beban/Aset (520901020100) vs Cr 210101010100 Utang Pengadaan Rekanan |
+| s3-bast-3 | Visualisasi jurnal akrual BAST & status penerimaan di ProcurementView.vue | completed | Menampilkan nomor dokumen jurnal, badge BAST, dan alert akrual Pertor 310 |
+| s3-bast-4 | Pengujian komprehensif alur BAST -> Jurnal Akrual di vitest suite | completed | Validasi pembuatan BAST, debit/kredit seimbang, dan idempotency |
+| s3-bast-5 | Verifikasi test suite, typecheck, dokumentasi task & Jira update | completed | 24 tests passed (100%), typecheck 0 error, build 0 error, docs/tasks/KOI-106 created |
