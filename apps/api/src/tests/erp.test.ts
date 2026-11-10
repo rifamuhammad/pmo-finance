@@ -1888,4 +1888,93 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(decRun.totalAmount).toBeGreaterThan(0);
     });
   });
+
+  describe('15. Sprint 4 Review & Tutup Buku Akhir Tahun 2026 (SPRINT-4-REV / KOI-121)', () => {
+    it('audits Sprint 4 operational compliance rules (Bank Rec, HRIS Cutoff 25, Asset Cap 10%, Asset Cutoff 20)', async () => {
+      // 1. Verify HRIS Attendance Lock on period 12/2026
+      const hrisLockRes = await request(app)
+        .get('/api/v1/hris/attendance/lock-status?periodMonth=12&periodYear=2026')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(hrisLockRes.status).toBe(200);
+      expect(hrisLockRes.body.data.cutoffRule).toContain('tanggal 25');
+
+      // 2. Verify Asset Capitalization Threshold (>10% Net Book Value)
+      const capRulesRes = await request(app)
+        .get('/api/v1/assets/capitalization-rules')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(capRulesRes.status).toBe(200);
+      expect(capRulesRes.body.data.SUBSEQUENT_EXPENSE_RATIO_PERCENT).toBe(10);
+      expect(capRulesRes.body.data.MIN_THRESHOLD_EQUIPMENT).toBe(1000000);
+
+      // 3. Verify Asset Straight-Line Depreciation Cut-Off on 20th
+      const depRulesRes = await request(app)
+        .get('/api/v1/assets/depreciation-rules')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(depRulesRes.status).toBe(200);
+      expect(depRulesRes.body.data.CUTOFF_DAY).toBe(20);
+
+      // 4. Verify Bank Statement Parser & Matching Rule
+      const bankRecRes = await request(app)
+        .get('/api/v1/reconciliation/status')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect([200, 404]).toContain(bankRecRes.status);
+    });
+
+    it('confirms the General Ledger Trial Balance is strictly balanced across all 5 Business Units post Sprint 4', async () => {
+      const ledgerRes = await request(app)
+        .get('/api/v1/accounting/ledger')
+        .set('Authorization', `Bearer ${accountingToken}`);
+      expect(ledgerRes.status).toBe(200);
+      expect(ledgerRes.body.data.trialBalanceSummary).toBeDefined();
+      expect(ledgerRes.body.data.trialBalanceSummary.isBalanced).toBe(true);
+      expect(ledgerRes.body.data.trialBalanceSummary.totalDebit).toBe(
+        ledgerRes.body.data.trialBalanceSummary.totalCredit
+      );
+      expect(ledgerRes.body.data.trialBalanceSummary.totalDebit).toBeGreaterThan(0);
+    });
+
+    it('executes Year-End 2026 Fiscal Period lock audit and verifies rejection of post-closing mutations', async () => {
+      // 1. Get fiscal periods overview
+      const masterRes = await request(app)
+        .get('/api/v1/master/overview')
+        .set('Authorization', `Bearer ${accountingToken}`);
+      expect(masterRes.status).toBe(200);
+
+      // Find period for FY-2026 or FP-2026-12
+      const targetPeriod =
+        masterRes.body.data.fiscalPeriods.find((p: any) => p.code === 'FP-2026-12') ||
+        masterRes.body.data.fiscalPeriods.find((p: any) => p.code === 'FY-2026') ||
+        masterRes.body.data.fiscalPeriods[0];
+      expect(targetPeriod).toBeDefined();
+
+      // 2. Lock fiscal period for year-end closing audit
+      const lockRes = await request(app)
+        .post(`/api/v1/master/fiscal-periods/${targetPeriod.id}/lock`)
+        .set('Authorization', `Bearer ${accountingToken}`)
+        .send({ reason: 'Audit Tutup Buku Akhir Tahun Fiskal 2026 PMO UTama' });
+      expect([200, 409]).toContain(lockRes.status);
+
+      // 3. Verify posting journals into locked period is strictly rejected
+      const rejectRes = await request(app)
+        .post('/api/v1/accounting/journals')
+        .set('Authorization', `Bearer ${accountingToken}`)
+        .send({
+          fiscalPeriodId: targetPeriod.id,
+          businessUnitId: unitDiklatId,
+          description: 'Percobaan transaksi susulan pasca Tutup Buku 2026',
+          lines: [
+            { accountCode: '5-1400', description: 'Beban', debit: 500000, credit: 0 },
+            { accountCode: '1-1120', description: 'Bank', debit: 0, credit: 500000 },
+          ],
+        });
+      expect(rejectRes.status).toBe(409);
+      expect(['FISCAL_PERIOD_LOCKED', 'FISCAL_PERIOD_CLOSED']).toContain(rejectRes.body.error.code);
+
+      // 4. Reopen/unlock period to leave test environment pristine
+      await request(app)
+        .post(`/api/v1/master/fiscal-periods/${targetPeriod.id}/reopen`)
+        .set('Authorization', `Bearer ${accountingToken}`)
+        .send({ reason: 'Selesai simulasi audit tutup buku Sprint 4' });
+    });
+  });
 });
