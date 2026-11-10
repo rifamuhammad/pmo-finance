@@ -113,6 +113,60 @@ revenueRouter.post('/payments/webhook', async (req, res, next) => {
   }
 });
 
+// Helper to resolve official 12-digit Chart of Accounts (Pertor 310) for Revenue & POS Engines
+async function resolveRevenueAccounts(tx: any, buCode?: string) {
+  // 1. AR Account (Piutang Usaha Pihak Ketiga)
+  let arAccount = '110301010100';
+  const checkAr = await tx.chartOfAccount.findUnique({ where: { code: arAccount } });
+  if (!checkAr) arAccount = '1-1210';
+
+  // 2. Output Tax Account (Utang Pajak PPN Keluaran)
+  let ppnAccount = '210202010100';
+  const checkPpn = await tx.chartOfAccount.findUnique({ where: { code: ppnAccount } });
+  if (!checkPpn) ppnAccount = '2-1210';
+
+  // 3. Bank Account (Bank BRI Penerimaan Komersial PMO)
+  let bankAccount = '110101020200';
+  const checkBank = await tx.chartOfAccount.findUnique({ where: { code: bankAccount } });
+  if (!checkBank) bankAccount = '1-1120';
+
+  // 4. Cash Account (Kas di Bendahara Penerimaan / Kas Tunai Kasir)
+  let cashAccount = '110101010100';
+  const checkCash = await tx.chartOfAccount.findUnique({ where: { code: cashAccount } });
+  if (!checkCash) cashAccount = '1-1110';
+
+  // 5. Merchant Fee Expense Account (Beban Administrasi Bank & Payment Gateway)
+  let feeAccount = '590101010100';
+  const checkFee = await tx.chartOfAccount.findUnique({ where: { code: feeAccount } });
+  if (!checkFee) feeAccount = '5-1500';
+
+  // 6. Revenue Account based on Business Unit (Pertor 310)
+  let revenueAccount = '420301090100'; // Default: Pendapatan Jasa Manajemen / Konsultansi
+  if (buCode === 'BU-TCI') revenueAccount = '420301010200'; // Pendapatan Pelatihan (Diklat) Profesional
+  else if (buCode === 'BU-ITS') revenueAccount = '420301040200'; // Pendapatan Aplikasi Promise & Software Solution
+  else if (buCode === 'BU-KLINIK') revenueAccount = '420301060100'; // Pendapatan Jasa Dokter Umum
+  else if (buCode === 'BU-MICE') revenueAccount = '420301070202'; // Pendapatan Sewa Ballroom & Gedung UTCC
+  else if (buCode === 'BU-PMO-MGMT') revenueAccount = '420301090100';
+
+  const checkRev = await tx.chartOfAccount.findUnique({ where: { code: revenueAccount } });
+  if (!checkRev) revenueAccount = '4-1100';
+
+  // 7. Service Charge Account (MICE / Hospitality)
+  let serviceChargeAccount = '420301070300'; // Pendapatan Fasilitas & Layanan Tambahan
+  const checkSc = await tx.chartOfAccount.findUnique({ where: { code: serviceChargeAccount } });
+  if (!checkSc) serviceChargeAccount = checkRev ? revenueAccount : '4-1200';
+
+  return {
+    arAccount,
+    ppnAccount,
+    bankAccount,
+    cashAccount,
+    feeAccount,
+    revenueAccount,
+    serviceChargeAccount,
+  };
+}
+
 // Protect all subsequent routes
 revenueRouter.use(requireAuth);
 
@@ -481,25 +535,26 @@ revenueRouter.post('/sales-orders', requirePermission('revenue:create'), async (
           include: { customer: true, businessUnit: true, lines: true },
         });
 
-        // Auto-post AR & Revenue Recognition Journal
+        // Auto-post AR & Revenue Recognition Journal (Pertor 310)
+        const accs = await resolveRevenueAccounts(tx, order.businessUnit?.code);
         const netRevenue = subMoney(subtotal, discountAmount);
         const journalLines = [
           {
-            accountCode: '1-1210', // Piutang Usaha
+            accountCode: accs.arAccount, // 110301010100 Piutang Usaha Pihak Ketiga
             description: `Tagihan pelanggan ${invoice.docNumber} (${order.customer.name})`,
             debit: totalAmount,
             credit: '0.00',
           },
           {
-            accountCode: '4-1100', // Pendapatan Layanan
-            description: `Pendapatan pesanan ${order.docNumber}`,
+            accountCode: accs.revenueAccount, // 4203xxxxxx Pendapatan Usaha Unit Bisnis
+            description: `Pendapatan pesanan ${order.docNumber} (${order.businessUnit?.name || 'PMO UTama'})`,
             debit: '0.00',
             credit: netRevenue,
           },
         ];
         if (toCents(serviceChargeAmount) > 0n) {
           journalLines.push({
-            accountCode: '4-1200', // Pendapatan Jasa & Layanan Lainnya / Service Charge
+            accountCode: accs.serviceChargeAccount, // 420301070300 Pendapatan Fasilitas & Layanan Tambahan
             description: `Service Charge MICE atas ${invoice.docNumber}`,
             debit: '0.00',
             credit: serviceChargeAmount,
@@ -507,7 +562,7 @@ revenueRouter.post('/sales-orders', requirePermission('revenue:create'), async (
         }
         if (toCents(taxAmount) > 0n) {
           journalLines.push({
-            accountCode: '2-1210', // Utang PPN Keluaran
+            accountCode: accs.ppnAccount, // 210202010100 Utang Pajak Pertambahan Nilai (PPN Keluaran)
             description: `PPN Keluaran atas ${invoice.docNumber}`,
             debit: '0.00',
             credit: taxAmount,
@@ -726,7 +781,7 @@ revenueRouter.post('/payments', requirePermission('payment:create'), async (req,
 
     const invoice = await prisma.customerInvoice.findUnique({
       where: { id: parsed.customerInvoiceId },
-      include: { customer: true },
+      include: { customer: true, businessUnit: true },
     });
     if (!invoice) throw new AppError(404, 'INVOICE_NOT_FOUND', 'Invoice pelanggan tidak ditemukan.');
     if (invoice.status === 'PAID') {
@@ -790,16 +845,17 @@ revenueRouter.post('/payments', requirePermission('payment:create'), async (req,
       }
 
       // Post balanced journal: Debit Kas/Bank (net) + Debit Beban Fee (if fee > 0) vs Credit Piutang Usaha (gross)
-      const cashOrBankAccount = parsed.method === 'CASH' ? '1-1110' : '1-1120';
+      const accs = await resolveRevenueAccounts(tx, invoice.businessUnit?.code);
+      const cashOrBankAccount = parsed.method === 'CASH' ? accs.cashAccount : accs.bankAccount;
       const journalLines = [
         {
-          accountCode: cashOrBankAccount,
+          accountCode: cashOrBankAccount, // 110101010100 Kasir Tunai / 110101020200 Bank BRI PMO
           description: `Penerimaan bersih pembayaran ${invoice.docNumber} (${parsed.method})`,
           debit: net,
           credit: '0.00',
         },
         {
-          accountCode: '1-1210', // Piutang Usaha
+          accountCode: accs.arAccount, // 110301010100 Piutang Usaha Pihak Ketiga
           description: `Pelunasan piutang ${invoice.docNumber} (${invoice.customer.name})`,
           debit: '0.00',
           credit: gross,
@@ -807,7 +863,7 @@ revenueRouter.post('/payments', requirePermission('payment:create'), async (req,
       ];
       if (toCents(fee) > 0n) {
         journalLines.push({
-          accountCode: '5-1500', // Beban Administrasi Bank & Payment Gateway
+          accountCode: accs.feeAccount, // 520501010100 Beban Administrasi Bank & Payment Gateway
           description: `Potongan merchant/provider fee atas pembayaran ${invoice.docNumber}`,
           debit: fee,
           credit: '0.00',
@@ -903,7 +959,7 @@ revenueRouter.post('/payments/:id/refund', requirePermission('payment:approve'),
     const parsed = refundSchema.parse(req.body);
     const payment = await prisma.payment.findUnique({
       where: { id: req.params.id },
-      include: { customerInvoice: true },
+      include: { customerInvoice: { include: { businessUnit: true } } },
     });
     if (!payment) throw new AppError(404, 'PAYMENT_NOT_FOUND', 'Pembayaran asal tidak ditemukan.');
     if (payment.status !== 'CONFIRMED') {
@@ -950,6 +1006,8 @@ revenueRouter.post('/payments/:id/refund', requirePermission('payment:approve'),
         },
       });
 
+      const accs = await resolveRevenueAccounts(tx, payment.customerInvoice?.businessUnit?.code);
+
       await createOrGetBalancedJournal(
         {
           entryDate: new Date(),
@@ -963,13 +1021,13 @@ revenueRouter.post('/payments/:id/refund', requirePermission('payment:approve'),
           createdByName: req.user!.fullName,
           lines: [
             {
-              accountCode: '4-1100',
+              accountCode: accs.revenueAccount, // 4203xxxxxx
               description: `Koreksi pendapatan atas refund ${refund.refundNumber}`,
               debit: refundAmount,
               credit: '0.00',
             },
             {
-              accountCode: '1-1120',
+              accountCode: accs.bankAccount, // 110101020200
               description: `Pengeluaran kas/bank untuk refund ${refund.refundNumber}`,
               debit: '0.00',
               credit: refundAmount,
@@ -1275,7 +1333,10 @@ const createDepositSchema = z.object({
 revenueRouter.post('/cashier/deposits', requirePermission('cashier:operate'), async (req, res, next) => {
   try {
     const parsed = createDepositSchema.parse(req.body);
-    const session = await prisma.cashierSession.findUnique({ where: { id: parsed.cashierSessionId } });
+    const session = await prisma.cashierSession.findUnique({
+      where: { id: parsed.cashierSessionId },
+      include: { businessUnit: true },
+    });
     if (!session) throw new AppError(404, 'SESSION_NOT_FOUND', 'Sesi kasir tidak ditemukan.');
 
     const amountStr = fromCents(toCents(parsed.amount));
@@ -1298,6 +1359,12 @@ revenueRouter.post('/cashier/deposits', requirePermission('cashier:operate'), as
         include: { cashierSession: true, bankAccount: true },
       });
 
+      const accs = await resolveRevenueAccounts(tx, session.businessUnit?.code);
+      let targetBankAcc = dep.bankAccount.glAccountCode;
+      if (!targetBankAcc || targetBankAcc.includes('-')) {
+        targetBankAcc = accs.bankAccount;
+      }
+
       await createOrGetBalancedJournal(
         {
           entryDate: new Date(),
@@ -1311,13 +1378,13 @@ revenueRouter.post('/cashier/deposits', requirePermission('cashier:operate'), as
           createdByName: req.user!.fullName,
           lines: [
             {
-              accountCode: dep.bankAccount.glAccountCode || '1-1120',
-              description: `Setoran tunai kasir ${dep.depositNumber}`,
+              accountCode: targetBankAcc,
+              description: `Setoran tunai kasir ${dep.depositNumber} ke ${dep.bankAccount.bankName}`,
               debit: amountStr,
               credit: '0.00',
             },
             {
-              accountCode: '1-1110',
+              accountCode: accs.cashAccount,
               description: `Pengurangan kas kasir untuk setoran ${dep.depositNumber}`,
               debit: '0.00',
               credit: amountStr,

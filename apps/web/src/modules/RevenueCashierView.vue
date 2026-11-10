@@ -417,6 +417,13 @@ onMounted(loadRevenueAndCashier);
       @dismiss="errorMsg = ''"
     />
 
+    <div class="pertor-revenue-banner">
+      <div class="banner-badge">Pertor No. 310/2025</div>
+      <div class="banner-text">
+        <strong>Pengakuan Pendapatan &amp; Kasir POS E-Revenue:</strong> Seluruh penerbitan invoice dan pelunasan kasir otomatis memposting jurnal ke akun Piutang Usaha (<code>110301010100</code>), Pendapatan Usaha 5 Unit Bisnis (<code>4203xxxxxx</code>), PPN Keluaran 11% (<code>210202010100</code>), dan Bank Operasional BRI PMO (<code>110101020200</code>) / Kasir Tunai (<code>110101010100</code>).
+      </div>
+    </div>
+
     <div class="tab-bar" role="tablist">
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'invoices' }" @click="activeTab = 'invoices'">
         Faktur Tagihan & Pembayaran ({{ customerInvoices.length }})
@@ -864,6 +871,9 @@ onMounted(loadRevenueAndCashier);
               {{ p.sku }} - {{ p.name }} ({{ formatRupiah(p.unitPrice) }})
             </option>
           </select>
+          <div v-if="orderForm.productServiceId" class="coa-revenue-tag" style="margin-top: 4px; font-size: 0.76rem; color: #64748b;">
+            Akun Pendapatan COA: <code style="color: #0284c7; font-weight: 600;">{{ products.find(p => p.id === orderForm.productServiceId)?.revenueAccountCode || '4203xxxxxx' }}</code>
+          </div>
         </div>
 
         <div class="form-grid">
@@ -1525,6 +1535,37 @@ onMounted(loadRevenueAndCashier);
 .sig-role {
   font-size: 0.72rem;
   color: #64748b;
+}
+
+.pertor-revenue-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 0.82rem;
+  color: #166534;
+}
+
+.pertor-revenue-banner .banner-badge {
+  background: #15803d;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.pertor-revenue-banner code {
+  background: #dcfce7;
+  color: #14532d;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
 }
 
 @media print {
