@@ -121,14 +121,45 @@ flowchart TD
 
 ### [PMO-032] Master Data 5 Unit Bisnis PMO & Cost Center Hierarchy
 * **Issue Type:** Task | **Priority:** High | **Estimasi:** 3 SP
-* **Status:** `[ ] HARUS DIKERJAKAN`
+* **Jira Key:** `KOI-84` | **Status:** `[x] IN REVIEW (Board 3)`
 * **Acceptance Criteria:**
   1. Terdaftar 5 unit bisnis resmi: `BU-ITS`, `BU-KLINIK`, `BU-MICE`, `BU-TCI`, `PMO-MGMT`.
   2. Setiap unit memiliki mapping Cost Center untuk isolasi beban anggaran.
 * **Subtasks:**
-  * [ ] `PMO-032-1`: Tambahkan 5 kode unit bisnis resmi ke `prisma/seed.ts`.
-  * [ ] `PMO-032-2`: Relasikan unit bisnis ke model `CostCenter` dan `User`.
-  * [ ] `PMO-032-3`: Sediakan filter unit bisnis di dropdown master UI.
+  * [x] `PMO-032-1`: Tambahkan 5 kode unit bisnis resmi ke `prisma/seed.ts`.
+  * [x] `PMO-032-2`: Relasikan unit bisnis ke model `CostCenter` dan `User`.
+  * [x] `PMO-032-3`: Sediakan filter unit bisnis di dropdown master UI.
+
+### [PMO-033] Master Periode Fiskal & Skema Locking Tutup Buku
+* **Issue Type:** Story | **Priority:** Medium | **Estimasi:** 3 SP
+* **Jira Key:** `KOI-87` | **Status:** `[x] IN REVIEW (Board 3)`
+* **Acceptance Criteria:**
+  1. Periode fiskal bulanan dan tahunan terdaftar di tabel `FiscalPeriod`.
+  2. Status periode (`OPEN`, `CLOSED`, `LOCKED`) mengontrol permission posting jurnal.
+* **Subtasks:**
+  * [x] `PMO-033-1`: Buat model `FiscalPeriod` di `prisma/schema.prisma`.
+  * [x] `PMO-033-2`: Sediakan endpoint CRUD & locking `/api/v1/master/fiscal-periods`.
+  * [x] `PMO-033-3`: Validasi guard penolakan posting transaksi pada periode yang berstatus `LOCKED`.
+
+### [PMO-034] Integration Testing DB & Smoke Test Sesi RBAC (9 Role)
+* **Issue Type:** Task | **Priority:** High | **Estimasi:** 2 SP
+* **Jira Key:** `KOI-90` | **Status:** `[x] IN REVIEW (Board 3)`
+* **Acceptance Criteria:**
+  1. Suite pengujian integrasi database memverifikasi relasi foreign key dan constraint.
+  2. Smoke test memverifikasi sesi login dan token untuk seluruh 9 peran (role).
+* **Subtasks:**
+  * [x] `PMO-034-1`: Setup skrip automated integration test di `tests/integration/db.test.ts`.
+  * [x] `PMO-034-2`: Uji otentikasi dan token expiry untuk 9 peran pengguna.
+
+### [PMO-035] Penyelarasan UI/UX Fondasi: Fast Search 70 Akun COA & Indikator Fiskal
+* **Issue Type:** Story | **Priority:** High | **Estimasi:** 3 SP
+* **Jira Key:** `KOI-101` | **Status:** `[x] IN REVIEW (Board 3)`
+* **Acceptance Criteria:**
+  1. Komponen dropdown COA mendukung pengetikan cepat (fast search) dengan fuzzy search kode atau nama akun.
+  2. Banner indikator status periode fiskal aktif tampil di header aplikasi.
+* **Subtasks:**
+  * [x] `PMO-035-1`: Refactor `CoaCombobox.vue` dengan virtualized list dan highlight keyword.
+  * [x] `PMO-035-2`: Tampilkan status periode fiskal berjalan di navbar utama.
 
 ---
 
