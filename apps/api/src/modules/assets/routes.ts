@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../shared/prisma.js';
 import { toNumber } from '../../shared/decimal.js';
 import { recordAuditLog } from '../../shared/audit.js';
+import { createOrGetBalancedJournal } from '../../shared/accounting-engine.js';
 import { AppError, requireAuth } from '../../middleware/auth.js';
 
 export const assetRouter = Router();
@@ -95,9 +96,144 @@ export function evaluateCapitalization(params: {
   };
 }
 
+// Aturan Depresiasi Garis Lurus & Cut-off Tanggal 20 (ISAK 335 & Pertor 310)
+export const DEPRECIATION_RULES = {
+  CUTOFF_DAY: 20, // Batas cut-off tanggal 20 perolehan aset
+  METHOD: 'STRAIGHT_LINE',
+  COA_DEBIT: '520901030100', // Beban Penyusutan Aset Tetap - Peralatan & Mesin
+  COA_CREDIT: '120301020100', // Akumulasi Penyusutan Peralatan & Mesin
+  STANDARDS_REFERENCE: 'ISAK 335 & Peraturan Rektor UT No. 310 Tahun 2024 tentang Tata Kelola Aset Tetap PTN-BH',
+};
+
+// Helper: Kalkulator Depresiasi Garis Lurus dengan Cut-off Perolehan Tanggal 20
+export function computeStraightLineDepreciation(params: {
+  acquisitionCost: number;
+  salvageValue: number;
+  usefulLifeMonths: number;
+  acquisitionDate: Date | string;
+  targetYear: number;
+  targetMonth: number; // 1-12
+  cutoffDay?: number;
+}) {
+  const cutoff = params.cutoffDay ?? DEPRECIATION_RULES.CUTOFF_DAY;
+  const acq = new Date(params.acquisitionDate);
+  const acqDay = acq.getDate();
+  const acqYear = acq.getFullYear();
+  const acqMonth = acq.getMonth() + 1; // 1-12
+
+  // Cut-off rule:
+  // Jika perolehan <= tgl 20: mulai disusutkan pada bulan perolehan itu sendiri
+  // Jika perolehan > tgl 20: mulai disusutkan pada bulan berikutnya
+  let startYear = acqYear;
+  let startMonth = acqMonth;
+  if (acqDay > cutoff) {
+    if (acqMonth === 12) {
+      startYear = acqYear + 1;
+      startMonth = 1;
+    } else {
+      startMonth = acqMonth + 1;
+    }
+  }
+
+  const depreciableCost = Math.max(0, params.acquisitionCost - params.salvageValue);
+  const monthlyDepreciation =
+    params.usefulLifeMonths > 0 ? Math.round(depreciableCost / params.usefulLifeMonths) : 0;
+
+  // Cek apakah periode target sebelum periode mulai penyusutan
+  const isBeforeStart =
+    params.targetYear < startYear ||
+    (params.targetYear === startYear && params.targetMonth < startMonth);
+
+  if (isBeforeStart) {
+    return {
+      eligible: false,
+      cutoffApplied: true,
+      cutoffDay: cutoff,
+      acqDay,
+      startYear,
+      startMonth,
+      monthsElapsed: 0,
+      effectiveMonths: 0,
+      depreciableCost,
+      monthlyDepreciation,
+      priorAccumulated: 0,
+      depreciationThisMonth: 0,
+      endingAccumulated: 0,
+      endingBookValue: params.acquisitionCost,
+      isFullyDepreciated: false,
+      reason: `Aset diperoleh tanggal ${acqDay} (> batas cut-off tanggal ${cutoff}). Penyusutan ditunda dan baru diakui pada periode ${startMonth}/${startYear}.`,
+    };
+  }
+
+  // Bulan berjalan dari awal penyusutan s.d. periode target
+  const monthsElapsed =
+    (params.targetYear - startYear) * 12 + (params.targetMonth - startMonth) + 1;
+  const effectiveMonths = Math.min(params.usefulLifeMonths, monthsElapsed);
+
+  // Akumulasi s.d. bulan sebelum periode target
+  const priorEffectiveMonths = Math.min(params.usefulLifeMonths, Math.max(0, monthsElapsed - 1));
+  const priorAccumulated = Math.min(depreciableCost, monthlyDepreciation * priorEffectiveMonths);
+
+  // Akumulasi penyusutan setelah periode target
+  const endingAccumulated = Math.min(depreciableCost, monthlyDepreciation * effectiveMonths);
+  const depreciationThisMonth = Math.max(0, endingAccumulated - priorAccumulated);
+  const endingBookValue = Math.max(
+    params.salvageValue,
+    params.acquisitionCost - endingAccumulated
+  );
+
+  return {
+    eligible: true,
+    cutoffApplied: true,
+    cutoffDay: cutoff,
+    acqDay,
+    startYear,
+    startMonth,
+    monthsElapsed,
+    effectiveMonths,
+    depreciableCost,
+    monthlyDepreciation,
+    priorAccumulated,
+    depreciationThisMonth,
+    endingAccumulated,
+    endingBookValue,
+    isFullyDepreciated: effectiveMonths >= params.usefulLifeMonths,
+    reason:
+      acqDay <= cutoff
+        ? `Aset diperoleh tanggal ${acqDay} (<= batas tanggal ${cutoff}). Penyusutan diakui sejak bulan perolehan (${startMonth}/${startYear}).`
+        : `Aset diperoleh tanggal ${acqDay} (> batas tanggal ${cutoff}). Penyusutan diakui mulai bulan berikutnya (${startMonth}/${startYear}).`,
+  };
+}
+
 // Helper to seed realistic PMO assets including PBI UT loans and Mas Wildan as PIC
 async function ensureAssetSeedData() {
   try {
+    // Ensure Depreciation COA exists
+    await prisma.chartOfAccount.upsert({
+      where: { code: '520901030100' },
+      update: { name: 'Beban Penyusutan Aset Tetap - Peralatan & Mesin', isActive: true },
+      create: {
+        code: '520901030100',
+        name: 'Beban Penyusutan Aset Tetap - Peralatan & Mesin',
+        type: 'EXPENSE',
+        normalBalance: 'DEBIT',
+        isControlAccount: false,
+        isActive: true,
+      },
+    });
+    await prisma.chartOfAccount.upsert({
+      where: { code: '120301020100' },
+      update: { name: 'Akumulasi Penyusutan Peralatan & Mesin', isActive: true },
+      create: {
+        code: '120301020100',
+        name: 'Akumulasi Penyusutan Peralatan & Mesin',
+        type: 'ASSET',
+        normalBalance: 'CREDIT',
+        isControlAccount: false,
+        isActive: true,
+      },
+    });
+
     const count = await prisma.fixedAsset.count();
     if (count > 0) return;
 
@@ -559,48 +695,375 @@ assetRouter.post('/', async (req, res, next) => {
   }
 });
 
-// 4. POST CALCULATE DEPRECIATION (Simulasi & Update Penyusutan Aset)
-assetRouter.post('/depreciate', async (req, res, next) => {
+// Schema for depreciation simulation / preview
+const depreciationPreviewSchema = z.object({
+  assetId: z.string().optional(),
+  acquisitionCost: z.number().min(0).optional(),
+  salvageValue: z.number().min(0).default(0),
+  usefulLifeMonths: z.number().min(1).default(48),
+  acquisitionDate: z.string().optional(),
+  targetYear: z.number().default(() => new Date().getFullYear()),
+  targetMonth: z.number().min(1).max(12).default(() => new Date().getMonth() + 1),
+  cutoffDay: z.number().default(20),
+});
+
+// Schema for executing depreciation run for a period
+const depreciatePeriodSchema = z.object({
+  periodYear: z.number().default(() => new Date().getFullYear()),
+  periodMonth: z.number().min(1).max(12).default(() => new Date().getMonth() + 1),
+  postJournal: z.boolean().default(true),
+  businessUnitId: z.string().optional(),
+});
+
+// 4. GET DEPRECIATION RULES & CUTOFF POLICY (ISAK 335 / Pertor 310)
+assetRouter.get('/depreciation-rules', async (req, res, next) => {
   try {
-    const assets = await prisma.fixedAsset.findMany({
-      where: { status: 'ACTIVE' },
+    res.json({
+      success: true,
+      data: DEPRECIATION_RULES,
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 4b. POST DEPRECIATION PREVIEW (Simulasi Depresiasi & Verifikasi Cut-Off Tgl 20)
+assetRouter.post('/depreciation-preview', async (req, res, next) => {
+  try {
+    await ensureAssetSeedData();
+    const parsed = depreciationPreviewSchema.parse(req.body);
+
+    let cost = parsed.acquisitionCost ?? 0;
+    let salvage = parsed.salvageValue ?? 0;
+    let months = parsed.usefulLifeMonths ?? 48;
+    let acqDate = parsed.acquisitionDate || new Date().toISOString();
+    let assetCode = 'SIMULASI-ASET';
+    let assetName = 'Simulasi Aset Tetap';
+
+    if (parsed.assetId) {
+      const asset = await prisma.fixedAsset.findUnique({
+        where: { id: parsed.assetId },
+      });
+      if (asset) {
+        cost = toNumber(asset.acquisitionCost);
+        salvage = toNumber(asset.salvageValue);
+        months = asset.usefulLifeMonths || asset.usefulLifeYears * 12 || 48;
+        acqDate = asset.acquisitionDate.toISOString();
+        assetCode = asset.assetCode;
+        assetName = asset.name;
+      }
+    }
+
+    const calc = computeStraightLineDepreciation({
+      acquisitionCost: cost,
+      salvageValue: salvage,
+      usefulLifeMonths: months,
+      acquisitionDate: acqDate,
+      targetYear: parsed.targetYear,
+      targetMonth: parsed.targetMonth,
+      cutoffDay: parsed.cutoffDay,
     });
 
-    let updatedCount = 0;
-    const now = new Date();
+    res.json({
+      success: true,
+      data: {
+        assetCode,
+        assetName,
+        targetPeriod: `${parsed.targetMonth}/${parsed.targetYear}`,
+        ...calc,
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 4c. POST DEPRECIATE PERIOD (Eksekusi Batch Depresiasi Garis Lurus & Cut-off Tanggal 20)
+assetRouter.post('/depreciate-period', async (req, res, next) => {
+  try {
+    await ensureAssetSeedData();
+    const parsed = depreciatePeriodSchema.parse(req.body);
+    const { periodYear, periodMonth, postJournal, businessUnitId } = parsed;
+
+    const where: Record<string, unknown> = { status: 'ACTIVE' };
+    if (businessUnitId && businessUnitId !== 'ALL') {
+      where.businessUnitId = businessUnitId;
+    }
+
+    const assets = await prisma.fixedAsset.findMany({
+      where,
+      include: { businessUnit: { select: { id: true, code: true, name: true } } },
+    });
+
+    const lastDayOfMonth = new Date(periodYear, periodMonth, 0).getDate();
+    const depreciationDate = new Date(
+      `${periodYear}-${String(periodMonth).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`
+    );
+
+    let totalDepreciationAmount = 0;
+    const depreciatedRecords: Array<{
+      assetId: string;
+      assetCode: string;
+      name: string;
+      amount: number;
+      accumulated: number;
+      bookValue: number;
+      reason: string;
+    }> = [];
+    const excludedByCutoff: Array<{
+      assetId: string;
+      assetCode: string;
+      name: string;
+      reason: string;
+    }> = [];
 
     for (const a of assets) {
       const cost = toNumber(a.acquisitionCost);
       const salvage = toNumber(a.salvageValue);
       const monthsTotal = a.usefulLifeMonths || a.usefulLifeYears * 12 || 48;
-      const acqDate = new Date(a.acquisitionDate);
 
-      // Hitung bulan berjalan sejak perolehan
-      const monthsElapsed = Math.max(
-        1,
-        (now.getFullYear() - acqDate.getFullYear()) * 12 + (now.getMonth() - acqDate.getMonth())
-      );
+      const calc = computeStraightLineDepreciation({
+        acquisitionCost: cost,
+        salvageValue: salvage,
+        usefulLifeMonths: monthsTotal,
+        acquisitionDate: a.acquisitionDate,
+        targetYear: periodYear,
+        targetMonth: periodMonth,
+      });
 
-      const effectiveMonths = Math.min(monthsTotal, monthsElapsed);
-      const monthlyDeprec = monthsTotal > 0 ? (cost - salvage) / monthsTotal : 0;
-      const newAccum = Math.round(monthlyDeprec * effectiveMonths);
-      const newBook = Math.max(salvage, cost - newAccum);
+      if (!calc.eligible || calc.depreciationThisMonth === 0) {
+        if (!calc.eligible) {
+          excludedByCutoff.push({
+            assetId: a.id,
+            assetCode: a.assetCode,
+            name: a.name,
+            reason: calc.reason,
+          });
+        }
+        continue;
+      }
 
-      await prisma.fixedAsset.update({
-        where: { id: a.id },
-        data: {
-          accumulatedDepreciation: newAccum,
-          bookValue: newBook,
+      totalDepreciationAmount += calc.depreciationThisMonth;
+
+      // Upsert AssetDepreciation record
+      await prisma.assetDepreciation.upsert({
+        where: {
+          assetId_periodYear_periodMonth: {
+            assetId: a.id,
+            periodYear,
+            periodMonth,
+          },
+        },
+        update: {
+          depreciationDate,
+          depreciableCost: calc.depreciableCost,
+          monthlyDepreciation: calc.monthlyDepreciation,
+          priorAccumulated: calc.priorAccumulated,
+          depreciationAmount: calc.depreciationThisMonth,
+          endingAccumulated: calc.endingAccumulated,
+          endingBookValue: calc.endingBookValue,
+          status: 'POSTED',
+          notes: calc.reason,
+        },
+        create: {
+          assetId: a.id,
+          periodYear,
+          periodMonth,
+          depreciationDate,
+          cutoffApplied: true,
+          acquisitionDate: a.acquisitionDate,
+          depreciableCost: calc.depreciableCost,
+          monthlyDepreciation: calc.monthlyDepreciation,
+          priorAccumulated: calc.priorAccumulated,
+          depreciationAmount: calc.depreciationThisMonth,
+          endingAccumulated: calc.endingAccumulated,
+          endingBookValue: calc.endingBookValue,
+          coaDebit: DEPRECIATION_RULES.COA_DEBIT,
+          coaCredit: DEPRECIATION_RULES.COA_CREDIT,
+          status: 'POSTED',
+          notes: calc.reason,
         },
       });
 
-      updatedCount += 1;
+      // Update FixedAsset accumulated depreciation and book value
+      await prisma.fixedAsset.update({
+        where: { id: a.id },
+        data: {
+          accumulatedDepreciation: calc.endingAccumulated,
+          bookValue: calc.endingBookValue,
+        },
+      });
+
+      depreciatedRecords.push({
+        assetId: a.id,
+        assetCode: a.assetCode,
+        name: a.name,
+        amount: calc.depreciationThisMonth,
+        accumulated: calc.endingAccumulated,
+        bookValue: calc.endingBookValue,
+        reason: calc.reason,
+      });
+    }
+
+    // Auto-Post Balanced Journal to General Ledger if enabled and amount > 0
+    let journalResult: any = null;
+    if (postJournal && totalDepreciationAmount > 0) {
+      const defaultBu =
+        (await prisma.businessUnit.findFirst({
+          where: { code: { in: ['PMO-MGMT', 'BU-PUSAT', 'BU-CORP'] } },
+          select: { id: true },
+        })) ||
+        (await prisma.businessUnit.findFirst({ select: { id: true } }));
+
+      const targetBuId = defaultBu ? defaultBu.id : 'BU-DEFAULT';
+      const amountStr = totalDepreciationAmount.toFixed(2);
+      const lines = [
+        {
+          accountCode: DEPRECIATION_RULES.COA_DEBIT,
+          description: `Beban penyusutan aset tetap PMO periode ${periodMonth}/${periodYear} (${depreciatedRecords.length} unit)`,
+          debit: amountStr,
+          credit: '0.00',
+        },
+        {
+          accountCode: DEPRECIATION_RULES.COA_CREDIT,
+          description: `Akumulasi penyusutan aset tetap PMO periode ${periodMonth}/${periodYear}`,
+          debit: '0.00',
+          credit: amountStr,
+        },
+      ];
+
+      journalResult = await createOrGetBalancedJournal({
+        entryDate: depreciationDate,
+        businessUnitId: targetBuId,
+        sourceType: 'ASSET_DEPRECIATION',
+        sourceId: `DEPR-${periodYear}-${periodMonth}`,
+        sourceDocNumber: `DEPR/${periodYear}/${String(periodMonth).padStart(2, '0')}`,
+        idempotencyKey: `ASSET_DEPRECIATION_${periodYear}_${periodMonth}`,
+        description: `Pencatatan beban penyusutan garis lurus aset tetap PMO periode ${periodMonth}/${periodYear} (Cut-Off Tgl 20)`,
+        createdById: req.user?.userId || 'SYSTEM',
+        createdByName: req.user?.fullName || 'Asset Depreciation Engine',
+        lines,
+      });
+
+      // Update AssetDepreciation records with journalEntryId
+      await prisma.assetDepreciation.updateMany({
+        where: {
+          periodYear,
+          periodMonth,
+          assetId: { in: depreciatedRecords.map((r) => r.assetId) },
+        },
+        data: {
+          journalEntryId: journalResult.id,
+        },
+      });
+    }
+
+    await recordAuditLog({
+      action: 'CALCULATE_DEPRECIATION',
+      module: 'FIXED_ASSETS',
+      entityType: 'AssetDepreciation',
+      entityId: `DEPR-${periodYear}-${periodMonth}`,
+      entityCode: `DEPR/${periodYear}/${String(periodMonth).padStart(2, '0')}`,
+      actorId: req.user?.userId,
+      actorName: req.user?.fullName || 'User',
+      actorRole: req.user?.roleCode || 'USER',
+      summary: `Eksekusi depresiasi garis lurus periode ${periodMonth}/${periodYear}: ${depreciatedRecords.length} aset disusutkan (Total Rp ${totalDepreciationAmount.toLocaleString('id-ID')}), ${excludedByCutoff.length} aset ditunda karena cut-off tanggal 20.`,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        periodYear,
+        periodMonth,
+        depreciationDate: depreciationDate.toISOString().slice(0, 10),
+        cutoffRule: 'Perolehan s.d. tanggal 20 disusutkan bulan berjalan, setelah tanggal 20 disusutkan bulan berikutnya.',
+        totalAssetsEvaluated: assets.length,
+        depreciatedCount: depreciatedRecords.length,
+        excludedByCutoffCount: excludedByCutoff.length,
+        totalDepreciationAmount,
+        depreciatedRecords,
+        excludedByCutoff,
+        journalEntry: journalResult
+          ? {
+              id: journalResult.id,
+              journalNumber: journalResult.journalNumber,
+              totalDebit: toNumber(journalResult.totalDebit),
+              totalCredit: toNumber(journalResult.totalCredit),
+              status: journalResult.status,
+            }
+          : null,
+      },
+      message: `Depresiasi periode ${periodMonth}/${periodYear} berhasil dihitung untuk ${depreciatedRecords.length} aset (Total: Rp ${totalDepreciationAmount.toLocaleString('id-ID')}).`,
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Backward compatibility endpoint POST /depreciate
+assetRouter.post('/depreciate', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const periodYear = req.body?.periodYear || now.getFullYear();
+    const periodMonth = req.body?.periodMonth || now.getMonth() + 1;
+    req.body = { ...req.body, periodYear, periodMonth };
+    return (assetRouter as any).handle(
+      { ...req, url: '/depreciate-period', method: 'POST' },
+      res,
+      next
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 4d. GET DEPRECIATIONS HISTORY (Rekap Riwayat Eksekusi Depresiasi Periodik)
+assetRouter.get('/depreciations/history', async (req, res, next) => {
+  try {
+    const depreciations = await prisma.assetDepreciation.findMany({
+      include: {
+        asset: { select: { assetCode: true, name: true } },
+        journalEntry: { select: { journalNumber: true, status: true } },
+      },
+      orderBy: [{ periodYear: 'desc' }, { periodMonth: 'desc' }],
+    });
+
+    // Group by periodYear & periodMonth
+    const groups: Record<
+      string,
+      {
+        periodYear: number;
+        periodMonth: number;
+        depreciationDate: string;
+        assetCount: number;
+        totalAmount: number;
+        journalNumber?: string | null;
+      }
+    > = {};
+
+    for (const d of depreciations) {
+      const key = `${d.periodYear}-${d.periodMonth}`;
+      if (!groups[key]) {
+        groups[key] = {
+          periodYear: d.periodYear,
+          periodMonth: d.periodMonth,
+          depreciationDate: d.depreciationDate.toISOString().slice(0, 10),
+          assetCount: 0,
+          totalAmount: 0,
+          journalNumber: d.journalEntry?.journalNumber || null,
+        };
+      }
+      groups[key].assetCount += 1;
+      groups[key].totalAmount += toNumber(d.depreciationAmount);
     }
 
     res.json({
       success: true,
-      message: `Perhitungan penyusutan berhasil diperbarui untuk ${updatedCount} aset PMO (Milik & Pinjaman PBI UT).`,
-      meta: { updatedCount, requestId: req.requestId },
+      data: Object.values(groups),
+      meta: { total: Object.keys(groups).length, requestId: req.requestId },
     });
   } catch (err) {
     next(err);
@@ -896,6 +1359,38 @@ assetRouter.get('/:id/expenditures', async (req, res, next) => {
       amount: toNumber(e.amount),
       currentBookValue: toNumber(e.currentBookValue),
       ratioPercent: toNumber(e.ratioPercent),
+    }));
+
+    res.json({
+      success: true,
+      data: formatted,
+      meta: { total: formatted.length, requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 11. GET DEPRECIATIONS FOR ASSET
+assetRouter.get('/:id/depreciations', async (req, res, next) => {
+  try {
+    const depreciations = await prisma.assetDepreciation.findMany({
+      where: { assetId: req.params.id },
+      include: {
+        journalEntry: { select: { journalNumber: true, status: true } },
+      },
+      orderBy: [{ periodYear: 'desc' }, { periodMonth: 'desc' }],
+    });
+
+    const formatted = depreciations.map((d) => ({
+      ...d,
+      depreciableCost: toNumber(d.depreciableCost),
+      monthlyDepreciation: toNumber(d.monthlyDepreciation),
+      priorAccumulated: toNumber(d.priorAccumulated),
+      depreciationAmount: toNumber(d.depreciationAmount),
+      endingAccumulated: toNumber(d.endingAccumulated),
+      endingBookValue: toNumber(d.endingBookValue),
+      journalDocNo: d.journalEntry?.journalNumber || null,
     }));
 
     res.json({

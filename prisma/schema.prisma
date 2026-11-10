@@ -904,7 +904,8 @@ model JournalEntry {
   isDemoData      Boolean      @default(true)
   createdAt       DateTime     @default(now())
 
-  lines JournalLine[]
+  lines               JournalLine[]
+  assetDepreciations  AssetDepreciation[]
 
   @@index([fiscalPeriodId, status])
   @@index([sourceType, sourceId])
@@ -970,9 +971,37 @@ model FixedAsset {
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @default(now()) @updatedAt
 
-  expenditures AssetExpenditure[]
+  expenditures   AssetExpenditure[]
+  depreciations  AssetDepreciation[]
 
   @@index([businessUnitId, ownershipStatus])
+}
+
+model AssetDepreciation {
+  id                  String       @id @default(uuid())
+  assetId             String
+  asset               FixedAsset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  periodYear          Int
+  periodMonth         Int
+  depreciationDate    DateTime     @db.Date
+  cutoffApplied       Boolean      @default(true)
+  acquisitionDate     DateTime     @db.Date
+  depreciableCost     Decimal      @db.Decimal(18, 2)
+  monthlyDepreciation Decimal      @db.Decimal(18, 2)
+  priorAccumulated    Decimal      @db.Decimal(18, 2)
+  depreciationAmount  Decimal      @db.Decimal(18, 2)
+  endingAccumulated   Decimal      @db.Decimal(18, 2)
+  endingBookValue     Decimal      @db.Decimal(18, 2)
+  journalEntryId      String?
+  journalEntry        JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  coaDebit            String       @default("520901030100")
+  coaCredit           String       @default("120301020100")
+  status              String       @default("POSTED")
+  notes               String?
+  createdAt           DateTime     @default(now())
+
+  @@unique([assetId, periodYear, periodMonth])
+  @@index([periodYear, periodMonth])
 }
 
 model AssetExpenditure {

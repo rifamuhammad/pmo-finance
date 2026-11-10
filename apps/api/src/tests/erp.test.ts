@@ -1746,4 +1746,146 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(sumRes.body.data.capitalizedAmount).toBeGreaterThan(0);
     });
   });
+
+  describe('14. Kalkulator Depresiasi Garis Lurus & Cut-off Penyusutan Tanggal 20 (PMO-112 / KOI-120)', () => {
+    let testAssetId: string;
+
+    beforeAll(async () => {
+      const assetsRes = await request(app)
+        .get('/api/v1/assets')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(assetsRes.status).toBe(200);
+      testAssetId = assetsRes.body.data[0].id;
+    });
+
+    it('evaluates cut-off rule on the 20th under ISAK 335 / Pertor 310 (<= 20th depreciates current month, > 20th defers to next month)', async () => {
+      // 1. Verify depreciation rules constants
+      const rulesRes = await request(app)
+        .get('/api/v1/assets/depreciation-rules')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(rulesRes.status).toBe(200);
+      expect(rulesRes.body.data.CUTOFF_DAY).toBe(20);
+      expect(rulesRes.body.data.METHOD).toBe('STRAIGHT_LINE');
+      expect(rulesRes.body.data.COA_DEBIT).toBe('520901030100');
+      expect(rulesRes.body.data.COA_CREDIT).toBe('120301020100');
+
+      // 2. Asset acquired on 2026-03-15 (<= 20th) evaluating for period March 2026 -> Eligible
+      const beforeCutoffRes = await request(app)
+        .post('/api/v1/assets/depreciation-preview')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          acquisitionCost: 48000000,
+          salvageValue: 4800000,
+          usefulLifeMonths: 48,
+          acquisitionDate: '2026-03-15',
+          targetYear: 2026,
+          targetMonth: 3,
+        });
+
+      expect(beforeCutoffRes.status).toBe(200);
+      expect(beforeCutoffRes.body.data.eligible).toBe(true);
+      expect(beforeCutoffRes.body.data.startMonth).toBe(3);
+      expect(beforeCutoffRes.body.data.monthsElapsed).toBe(1);
+      expect(beforeCutoffRes.body.data.depreciationThisMonth).toBe(900000); // (48M - 4.8M) / 48 = 900.000
+
+      // 3. Asset acquired on 2026-03-24 (> 20th) evaluating for period March 2026 -> Deferred
+      const afterCutoffRes = await request(app)
+        .post('/api/v1/assets/depreciation-preview')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          acquisitionCost: 48000000,
+          salvageValue: 4800000,
+          usefulLifeMonths: 48,
+          acquisitionDate: '2026-03-24',
+          targetYear: 2026,
+          targetMonth: 3,
+        });
+
+      expect(afterCutoffRes.status).toBe(200);
+      expect(afterCutoffRes.body.data.eligible).toBe(false);
+      expect(afterCutoffRes.body.data.startMonth).toBe(4);
+      expect(afterCutoffRes.body.data.depreciationThisMonth).toBe(0);
+      expect(afterCutoffRes.body.data.reason).toContain('20');
+
+      // 4. Same asset evaluated in April 2026 -> First month of depreciation starts
+      const nextMonthRes = await request(app)
+        .post('/api/v1/assets/depreciation-preview')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          acquisitionCost: 48000000,
+          salvageValue: 4800000,
+          usefulLifeMonths: 48,
+          acquisitionDate: '2026-03-24',
+          targetYear: 2026,
+          targetMonth: 4,
+        });
+
+      expect(nextMonthRes.status).toBe(200);
+      expect(nextMonthRes.body.data.eligible).toBe(true);
+      expect(nextMonthRes.body.data.startMonth).toBe(4);
+      expect(nextMonthRes.body.data.monthsElapsed).toBe(1);
+      expect(nextMonthRes.body.data.depreciationThisMonth).toBe(900000);
+    });
+
+    it('executes periodic depreciation run with cut-off rule, updating asset book value and recording AssetDepreciation', async () => {
+      const depRes = await request(app)
+        .post('/api/v1/assets/depreciate-period')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          periodYear: 2026,
+          periodMonth: 12,
+          postJournal: false,
+        });
+
+      expect(depRes.status).toBe(200);
+      expect(depRes.body.data.periodYear).toBe(2026);
+      expect(depRes.body.data.periodMonth).toBe(12);
+      expect(depRes.body.data.depreciatedCount).toBeGreaterThan(0);
+      expect(depRes.body.data.totalDepreciationAmount).toBeGreaterThan(0);
+
+      // Verify asset depreciation record exists
+      const assetDepRes = await request(app)
+        .get(`/api/v1/assets/${testAssetId}/depreciations`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(assetDepRes.status).toBe(200);
+      expect(assetDepRes.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(assetDepRes.body.data[0].periodYear).toBe(2026);
+      expect(assetDepRes.body.data[0].periodMonth).toBe(12);
+    });
+
+    it('posts balanced double-entry journal to General Ledger (Debet 520901030100 vs Kredit 120301020100)', async () => {
+      const depWithJournalRes = await request(app)
+        .post('/api/v1/assets/depreciate-period')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          periodYear: 2026,
+          periodMonth: 12,
+          postJournal: true,
+        });
+
+      expect(depWithJournalRes.status).toBe(200);
+      expect(depWithJournalRes.body.data.journalEntry).toBeDefined();
+      expect(depWithJournalRes.body.data.journalEntry.journalNumber).toMatch(/^JRN-/);
+      expect(depWithJournalRes.body.data.journalEntry.totalDebit).toBe(
+        depWithJournalRes.body.data.journalEntry.totalCredit
+      );
+      expect(depWithJournalRes.body.data.journalEntry.totalDebit).toBeGreaterThan(0);
+
+      // Verify batch history endpoint
+      const histRes = await request(app)
+        .get('/api/v1/assets/depreciations/history')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(histRes.status).toBe(200);
+      expect(histRes.body.data.length).toBeGreaterThanOrEqual(1);
+      const decRun = histRes.body.data.find(
+        (h: any) => h.periodYear === 2026 && h.periodMonth === 12
+      );
+      expect(decRun).toBeDefined();
+      expect(decRun.journalNumber).toBeDefined();
+      expect(decRun.totalAmount).toBeGreaterThan(0);
+    });
+  });
 });

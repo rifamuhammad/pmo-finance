@@ -64,6 +64,25 @@ interface AssetExpenditure {
   createdAt: string;
 }
 
+interface AssetDepreciationRecord {
+  id: string;
+  assetId: string;
+  periodYear: number;
+  periodMonth: number;
+  depreciationDate: string;
+  cutoffApplied: boolean;
+  acquisitionDate: string;
+  depreciableCost: number;
+  monthlyDepreciation: number;
+  priorAccumulated: number;
+  depreciationAmount: number;
+  endingAccumulated: number;
+  endingBookValue: number;
+  journalDocNo?: string | null;
+  status: string;
+  notes?: string | null;
+}
+
 const loading = ref(false);
 const saving = ref(false);
 const errorMessage = ref('');
@@ -120,6 +139,51 @@ const showDetailModal = ref(false);
 const selectedAsset = ref<AssetRecord | null>(null);
 const selectedAssetExpenditures = ref<AssetExpenditure[]>([]);
 const loadingExpenditures = ref(false);
+const selectedAssetDepreciations = ref<AssetDepreciationRecord[]>([]);
+const loadingDepreciations = ref(false);
+
+// Modal Batch Depreciation Period (Cut-Off Tanggal 20)
+const showDepreciateModal = ref(false);
+const depreciateForm = reactive({
+  periodYear: 2026,
+  periodMonth: 12,
+  postJournal: true,
+  businessUnitId: 'ALL',
+});
+const depreciationExecutionSummary = ref<any>(null);
+
+function openDepreciateModal() {
+  depreciateForm.periodYear = 2026;
+  depreciateForm.periodMonth = 12;
+  depreciateForm.postJournal = true;
+  depreciateForm.businessUnitId = 'ALL';
+  depreciationExecutionSummary.value = null;
+  showDepreciateModal.value = true;
+}
+
+async function handleExecuteDepreciationPeriod() {
+  saving.value = true;
+  errorMessage.value = '';
+  try {
+    const res = await api.post<{ data: any; message: string }>('/assets/depreciate-period', {
+      periodYear: Number(depreciateForm.periodYear),
+      periodMonth: Number(depreciateForm.periodMonth),
+      postJournal: depreciateForm.postJournal,
+      businessUnitId: depreciateForm.businessUnitId !== 'ALL' ? depreciateForm.businessUnitId : undefined,
+    });
+
+    depreciationExecutionSummary.value = res.data?.data || null;
+    await loadData();
+    successBanner.value = res.data?.message || 'Depresiasi garis lurus periode berhasil dihitung dan dibukukan.';
+    setTimeout(() => {
+      successBanner.value = '';
+    }, 6000);
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : 'Gagal mengeksekusi penyusutan periode';
+  } finally {
+    saving.value = false;
+  }
+}
 
 // Expenditure Summary State
 const expenditureSummary = reactive({
@@ -225,14 +289,19 @@ async function openDetail(item: AssetRecord) {
   selectedAsset.value = item;
   showDetailModal.value = true;
   selectedAssetExpenditures.value = [];
+  selectedAssetDepreciations.value = [];
   loadingExpenditures.value = true;
+  loadingDepreciations.value = true;
   try {
-    const res = await api.get<AssetExpenditure[]>(`/assets/${item.id}/expenditures`);
-    selectedAssetExpenditures.value = res.data || [];
-  } catch {
-    selectedAssetExpenditures.value = [];
+    const [expRes, depRes] = await Promise.all([
+      api.get<AssetExpenditure[]>(`/assets/${item.id}/expenditures`).catch(() => ({ data: [] })),
+      api.get<AssetDepreciationRecord[]>(`/assets/${item.id}/depreciations`).catch(() => ({ data: [] })),
+    ]);
+    selectedAssetExpenditures.value = expRes.data || [];
+    selectedAssetDepreciations.value = depRes.data || [];
   } finally {
     loadingExpenditures.value = false;
+    loadingDepreciations.value = false;
   }
 }
 
@@ -392,7 +461,7 @@ onMounted(loadData);
           type="button"
           class="btn btn-sm"
           :disabled="saving"
-          @click="handleDepreciate"
+          @click="openDepreciateModal"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
@@ -484,6 +553,11 @@ onMounted(loadData);
           <span class="compliance-tag tag-purple">Rekap Pengeluaran</span>
           <div class="compliance-val">{{ expenditureSummary.totalExpenditures }} Transaksi</div>
           <p class="compliance-sub">Kapitalisasi: {{ expenditureSummary.capitalizedCount }} trx ({{ formatCurrency(expenditureSummary.capitalizedAmount) }}) | Beban: {{ expenditureSummary.expensedCount }} trx ({{ formatCurrency(expenditureSummary.expensedAmount) }})</p>
+        </div>
+        <div class="compliance-item">
+          <span class="compliance-tag tag-blue">Cut-Off Tanggal 20</span>
+          <div class="compliance-val">Perolehan &le; Tgl 20</div>
+          <p class="compliance-sub">Aset dibeli s.d. tanggal 20 disusutkan bulan berjalan. Pembelian setelah tanggal 20 disusutkan mulai bulan berikutnya (ISAK 335).</p>
         </div>
       </div>
     </div>
@@ -942,6 +1016,50 @@ onMounted(loadData);
           </div>
         </div>
 
+        <!-- Historical Monthly Depreciation Log (Cut-Off Tgl 20) -->
+        <div class="expenditures-history-box" style="margin-top: 14px;">
+          <div class="expenditures-history-header">
+            <h4 class="deprec-schedule-title">Riwayat Penyusutan Garis Lurus (Cut-Off Tgl 20)</h4>
+            <span class="erp-badge erp-badge-info">{{ selectedAssetDepreciations.length }} Periode</span>
+          </div>
+          <div v-if="loadingDepreciations" class="text-muted" style="padding: 12px 0;">Memuat riwayat penyusutan...</div>
+          <div v-else-if="selectedAssetDepreciations.length === 0" class="text-muted" style="padding: 12px 0; font-size: 13px;">
+            Belum ada eksekusi penyusutan bulanan yang tercatat untuk aset ini.
+          </div>
+          <div v-else class="table-wrap" style="margin-top: 8px;">
+            <table class="erp-table">
+              <thead>
+                <tr>
+                  <th>Periode / Tgl</th>
+                  <th class="money-col">Beban Depresiasi</th>
+                  <th class="money-col">Akumulasi Depresiasi</th>
+                  <th class="money-col">Nilai Buku Akhir</th>
+                  <th>Jurnal GL</th>
+                  <th>Catatan Cut-off</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="dep in selectedAssetDepreciations" :key="dep.id">
+                  <td>
+                    <div style="font-weight: 600;">Periode {{ dep.periodMonth }}/{{ dep.periodYear }}</div>
+                    <div class="table-sub">{{ formatDate(dep.depreciationDate) }}</div>
+                  </td>
+                  <td class="money-col text-danger font-bold">- {{ formatCurrency(dep.depreciationAmount) }}</td>
+                  <td class="money-col">- {{ formatCurrency(dep.endingAccumulated) }}</td>
+                  <td class="money-col font-bold text-emerald">{{ formatCurrency(dep.endingBookValue) }}</td>
+                  <td>
+                    <span v-if="dep.journalDocNo" class="doc-code">{{ dep.journalDocNo }}</span>
+                    <span v-else class="text-muted">-</span>
+                  </td>
+                  <td>
+                    <span style="font-size: 12px; color: var(--text-muted);">{{ dep.notes || 'Normal' }}</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="modal-action-row">
           <button type="button" class="btn btn-outline-primary" @click="openExpenditure(selectedAsset); showDetailModal = false;">
             🔧 Catat Pengeluaran Baru
@@ -1081,6 +1199,115 @@ onMounted(loadData);
             :disabled="saving"
           >
             {{ saving ? 'Menyimpan...' : 'Simpan Pengeluaran' }}
+          </button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- Modal Eksekusi Depresiasi Periode & Cut-off Tanggal 20 -->
+    <ModalDialog
+      :open="showDepreciateModal"
+      title="Kalkulator & Eksekusi Depresiasi Periode (Cut-off Tanggal 20)"
+      @close="showDepreciateModal = false"
+    >
+      <form class="asset-modal-form" @submit.prevent="handleExecuteDepreciationPeriod">
+        <div class="compliance-card" style="margin-bottom: 16px; background: var(--bg-surface);">
+          <div class="compliance-header">
+            <span class="compliance-badge">SOP ISAK 335</span>
+            <div class="compliance-title">Aturan Batas Waktu Cut-Off Tanggal 20</div>
+          </div>
+          <p class="compliance-sub" style="font-size: 0.85rem; color: var(--text-primary); margin-top: 4px;">
+            Aset yang diperoleh sampai dengan <strong>tanggal 20</strong> disusutkan penuh pada bulan perolehan berjalan.
+            Aset yang diperoleh setelah tanggal 20 ditunda penyusutannya hingga bulan berikutnya.
+          </p>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label">Bulan Periode Depresiasi <span class="req">*</span></label>
+            <select v-model.number="depreciateForm.periodMonth" class="select" required>
+              <option :value="1">Januari</option>
+              <option :value="2">Februari</option>
+              <option :value="3">Maret</option>
+              <option :value="4">April</option>
+              <option :value="5">Mei</option>
+              <option :value="6">Juni</option>
+              <option :value="7">Juli</option>
+              <option :value="8">Agustus</option>
+              <option :value="9">September</option>
+              <option :value="10">Oktober</option>
+              <option :value="11">November</option>
+              <option :value="12">Desember</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label class="form-label">Tahun Periode <span class="req">*</span></label>
+            <input
+              v-model.number="depreciateForm.periodYear"
+              type="number"
+              min="2024"
+              max="2030"
+              class="input"
+              required
+            />
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label">Unit Bisnis PMO</label>
+          <select v-model="depreciateForm.businessUnitId" class="select">
+            <option value="ALL">Semua Unit Bisnis (MICE, TCI, ITS, Klinik, Manajemen)</option>
+            <option v-for="u in businessUnits" :key="u.id" :value="u.id">
+              {{ u.name }}
+            </option>
+          </select>
+        </div>
+
+        <div class="form-field" style="display: flex; align-items: center; gap: 10px; margin: 12px 0;">
+          <input
+            id="chkPostJournal"
+            v-model="depreciateForm.postJournal"
+            type="checkbox"
+            style="width: 18px; height: 18px; cursor: pointer;"
+          />
+          <label for="chkPostJournal" style="cursor: pointer; font-size: 0.9rem;">
+            <strong>Posting Jurnal Otomatis ke Buku Besar (General Ledger)</strong>
+            <div class="table-sub">Debet: Beban Penyusutan (520901030100) | Kredit: Akumulasi Penyusutan (120301020100)</div>
+          </label>
+        </div>
+
+        <!-- Result Execution Summary Callout if available -->
+        <div v-if="depreciationExecutionSummary" class="eval-preview-box eval-cap" style="margin-top: 10px;">
+          <div class="eval-preview-header">
+            <strong>Hasil Eksekusi Penyusutan Periode {{ depreciationExecutionSummary.periodMonth }}/{{ depreciationExecutionSummary.periodYear }}</strong>
+            <span class="erp-badge erp-badge-success">{{ depreciationExecutionSummary.depreciatedCount }} Aset Disusutkan</span>
+          </div>
+          <div style="font-size: 0.85rem; margin-top: 4px;">
+            Total Nilai Depresiasi: <strong class="text-danger">- {{ formatCurrency(depreciationExecutionSummary.totalDepreciationAmount) }}</strong>
+          </div>
+          <div v-if="depreciationExecutionSummary.journalEntry" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">
+            Nomor Jurnal Terposting: <code>{{ depreciationExecutionSummary.journalEntry.journalNumber }}</code>
+          </div>
+          <div v-if="depreciationExecutionSummary.excludedByCutoffCount > 0" style="font-size: 0.8rem; color: #b45309; margin-top: 4px;">
+            ⚠️ {{ depreciationExecutionSummary.excludedByCutoffCount }} aset ditunda penyusutannya sesuai aturan batas cut-off perolehan tanggal 20.
+          </div>
+        </div>
+
+        <div class="modal-action-row">
+          <button
+            type="button"
+            class="btn"
+            @click="showDepreciateModal = false"
+          >
+            Tutup
+          </button>
+          <button
+            type="submit"
+            class="btn btn-primary"
+            :disabled="saving"
+          >
+            {{ saving ? 'Memproses Depresiasi...' : 'Eksekusi Depresiasi Garis Lurus' }}
           </button>
         </div>
       </form>
