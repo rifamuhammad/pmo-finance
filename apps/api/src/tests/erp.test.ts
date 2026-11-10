@@ -2262,4 +2262,91 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(check2.body.data.status).toBe('APPROVED');
     });
   });
+
+  describe('17. [KOI-124] [PMO-131] Core Double-Entry Ledger Engine & Validasi Keseimbangan Debet/Kredit (4)', () => {
+    let testJournalId = '';
+
+    it('validates strictly balanced double-entry manual journal and calculates running balance per account', async () => {
+      const res = await request(app)
+        .post('/api/v1/accounting/journals')
+        .set('Authorization', `Bearer ${accountingToken}`)
+        .send({
+          businessUnitId: unitDiklatId,
+          description: 'Pengadaan Perlengkapan Kebersihan Lab Unit Diklat',
+          lines: [
+            { accountCode: '520101030100', description: 'Beban Operasional Kebersihan Lab', debit: 750000, credit: 0 },
+            { accountCode: '110101020200', description: 'Kas Bank BRI Operasional Diklat', debit: 0, credit: 750000 },
+          ],
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.status).toBe('POSTED');
+      expect(Number(res.body.data.totalDebit)).toBe(750000);
+      expect(Number(res.body.data.totalCredit)).toBe(750000);
+      testJournalId = res.body.data.id;
+
+      // Inspect General Ledger for this account and verify running balance
+      const ledgerRes = await request(app)
+        .get('/api/v1/accounting/ledger?accountCode=520101030100')
+        .set('Authorization', `Bearer ${accountingToken}`);
+
+      expect(ledgerRes.status).toBe(200);
+      const acc = ledgerRes.body.data.accounts.find((a: any) => a.accountCode === '520101030100');
+      expect(acc).toBeDefined();
+      expect(acc.endingBalance).toBeGreaterThanOrEqual(750000);
+      const entry = acc.entries.find((e: any) => e.journalId === testJournalId);
+      expect(entry).toBeDefined();
+      expect(entry.debit).toBe(750000);
+      expect(entry.credit).toBe(0);
+    });
+
+    it('filters General Ledger by businessUnitId and confirms isolated Trial Balance balance', async () => {
+      const unitLedgerRes = await request(app)
+        .get(`/api/v1/accounting/ledger?businessUnitId=${unitDiklatId}`)
+        .set('Authorization', `Bearer ${accountingToken}`);
+
+      expect(unitLedgerRes.status).toBe(200);
+      expect(unitLedgerRes.body.data.trialBalanceSummary).toBeDefined();
+      expect(unitLedgerRes.body.data.trialBalanceSummary.isBalanced).toBe(true);
+      expect(unitLedgerRes.body.data.trialBalanceSummary.totalDebit).toBe(
+        unitLedgerRes.body.data.trialBalanceSummary.totalCredit
+      );
+    });
+
+    it('enforces journal immutability and forbids direct deletion via DELETE /journals/:id', async () => {
+      const delRes = await request(app)
+        .delete(`/api/v1/accounting/journals/${testJournalId}`)
+        .set('Authorization', `Bearer ${accountingToken}`);
+
+      expect(delRes.status).toBe(403);
+      expect(delRes.body.error.code).toBe('POSTED_JOURNAL_IMMUTABLE');
+    });
+
+    it('executes reversal storno, updates original journal status to REVERSED, and forbids re-reversal', async () => {
+      const revRes = await request(app)
+        .post(`/api/v1/accounting/journals/${testJournalId}/reverse`)
+        .set('Authorization', `Bearer ${accountingToken}`)
+        .send({
+          reason: 'Koreksi salah unit bisnis atas pengadaan perlengkapan lab',
+        });
+
+      expect(revRes.status).toBe(201);
+      expect(revRes.body.data.original.status).toBe('REVERSED');
+      expect(revRes.body.data.reversal).toBeDefined();
+      expect(revRes.body.data.reversal.reversedFromId).toBe(testJournalId);
+      expect(Number(revRes.body.data.reversal.totalDebit)).toBe(750000);
+      expect(Number(revRes.body.data.reversal.totalCredit)).toBe(750000);
+
+      // Attempt re-reversing the same journal -> must fail with 409 ALREADY_REVERSED
+      const doubleRev = await request(app)
+        .post(`/api/v1/accounting/journals/${testJournalId}/reverse`)
+        .set('Authorization', `Bearer ${accountingToken}`)
+        .send({
+          reason: 'Mencoba membalik ulang jurnal yang sudah dibalik',
+        });
+
+      expect(doubleRev.status).toBe(409);
+      expect(doubleRev.body.error.code).toBe('ALREADY_REVERSED');
+    });
+  });
 });

@@ -127,10 +127,22 @@
           <div class="erp-card-header">
             <div>
               <h3 class="erp-section-title">Ringkasan Neraca Saldo &amp; Buku Besar per Akun</h3>
-              <p class="erp-subtitle">Pilih akun untuk meninjau rincian mutasi transaksi (Running Balance)</p>
+              <p class="erp-subtitle">Pilih unit bisnis dan akun untuk meninjau rincian mutasi transaksi (Running Balance)</p>
             </div>
-            <div class="erp-row">
-              <select v-model="selectedLedgerAccount" class="erp-select" style="max-width: 300px;" aria-label="Filter Akun Buku Besar">
+            <div class="erp-row" style="gap: 10px; flex-wrap: wrap;">
+              <select
+                v-model="selectedLedgerBusinessUnit"
+                class="erp-select"
+                style="max-width: 220px;"
+                aria-label="Filter Unit Bisnis Buku Besar"
+                @change="loadLedger"
+              >
+                <option value="">Semua Unit Bisnis</option>
+                <option v-for="u in masterUnits" :key="u.id" :value="u.id">
+                  {{ u.code }} - {{ u.name }}
+                </option>
+              </select>
+              <select v-model="selectedLedgerAccount" class="erp-select" style="max-width: 280px;" aria-label="Filter Akun Buku Besar">
                 <option value="">Semua Akun Aktif</option>
                 <option v-for="acc in ledgerAccounts" :key="acc.accountCode" :value="acc.accountCode">
                   {{ acc.accountCode }} - {{ acc.accountName }}
@@ -856,8 +868,22 @@ const submitting = ref(false);
 
 const ledgerAccounts = ref<any[]>([]);
 const trialBalance = ref({ totalDebit: 0, totalCredit: 0, isBalanced: true });
+const selectedLedgerBusinessUnit = ref('');
 const selectedLedgerAccount = ref('');
 const activeDrilldownAccount = ref<any | null>(null);
+
+async function loadLedger() {
+  try {
+    const query = selectedLedgerBusinessUnit.value
+      ? `?businessUnitId=${encodeURIComponent(selectedLedgerBusinessUnit.value)}`
+      : '';
+    const res = await api.get<any>(`/accounting/ledger${query}`);
+    ledgerAccounts.value = res.data.accounts;
+    trialBalance.value = res.data.trialBalanceSummary;
+  } catch (err: any) {
+    actionError.value = err.message || 'Gagal memuat buku besar unit bisnis.';
+  }
+}
 
 const journals = ref<any[]>([]);
 const journalSearch = ref('');
@@ -1061,8 +1087,11 @@ async function loadAll() {
   loading.value = true;
   error.value = '';
   try {
+    const ledgerQuery = selectedLedgerBusinessUnit.value
+      ? `?businessUnitId=${encodeURIComponent(selectedLedgerBusinessUnit.value)}`
+      : '';
     const [ledgerRes, jrnRes, agingRes, assetTaxRes, coaRes, masterRes] = await Promise.all([
-      api.get<any>('/accounting/ledger'),
+      api.get<any>(`/accounting/ledger${ledgerQuery}`),
       api.get<any[]>('/accounting/journals'),
       api.get<any>('/accounting/ar-ap-aging'),
       api.get<any>('/accounting/assets-and-tax'),

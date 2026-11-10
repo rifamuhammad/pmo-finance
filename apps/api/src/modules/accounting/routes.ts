@@ -218,7 +218,7 @@ accountingRouter.post('/journals/:id/reverse', requirePermission('accounting:pos
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.journalEntry.update({
+      const updatedOriginal = await tx.journalEntry.update({
         where: { id: orig.id },
         data: { status: 'REVERSED', reversalReason: reason.trim() },
       });
@@ -269,7 +269,7 @@ accountingRouter.post('/journals/:id/reverse', requirePermission('accounting:pos
         tx as any
       );
 
-      return { original: orig, reversal: updatedReversal };
+      return { original: updatedOriginal, reversal: updatedReversal };
     });
 
     res.status(201).json({ success: true, data: result, meta: { requestId: req.requestId } });
