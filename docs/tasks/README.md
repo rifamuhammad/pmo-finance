@@ -28,6 +28,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-119` | [PMO-111] Filter Ambang Batas Kapitalisasi Aset Tetap (>10% Nilai Buku & Nilai Batas ISAK 335) | `feature/KOI-119-aset-filter-ambang-batas-kapitalisasi` | `In Review` | [KOI-119-aset-filter-ambang-batas-kapitalisasi.md](./KOI-119-aset-filter-ambang-batas-kapitalisasi.md) |
 | `KOI-120` | [PMO-112] Kalkulator Depresiasi Garis Lurus & Cut-off Penyusutan Tanggal 20 | `feature/KOI-120-kalkulator-depresiasi-cut-off-tgl-20` | `In Review` | [KOI-120-kalkulator-depresiasi-cut-off-tgl-20.md](./KOI-120-kalkulator-depresiasi-cut-off-tgl-20.md) |
 | `KOI-121` | [SPRINT-4-REV] Sprint 4 Review & Tutup Buku Akhir Tahun 2026 | `feature/KOI-121-sprint-4-review-tutup-buku-2026` | `In Review` | [KOI-121-sprint-4-review-tutup-buku-2026.md](./KOI-121-sprint-4-review-tutup-buku-2026.md) |
+| `KOI-123` | [PMO-121] Inbox Approval Terpusat Lintas Dokumen & Kontrol SoD | `feature/KOI-123-inbox-approval-terpusat-lintas-dokumen` | `In Review` | [KOI-123-inbox-approval-terpusat-lintas-dokumen.md](./KOI-123-inbox-approval-terpusat-lintas-dokumen.md) |
 
 ---
 

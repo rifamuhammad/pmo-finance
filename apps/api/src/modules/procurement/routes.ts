@@ -177,6 +177,38 @@ procurementRouter.get('/purchase-requests', requirePermission('procurement:view'
   }
 });
 
+procurementRouter.get('/purchase-requests/:id', requirePermission('procurement:view'), async (req, res, next) => {
+  try {
+    const pr = await prisma.purchaseRequest.findUnique({
+      where: { id: req.params.id },
+      include: {
+        businessUnit: true,
+        costCenter: true,
+        budgetLine: { include: { budget: true } },
+        lines: true,
+        quotations: { include: { vendor: true } },
+      },
+    });
+    if (!pr) throw new AppError(404, 'PR_NOT_FOUND', 'Purchase Request tidak ditemukan.');
+    res.json({
+      success: true,
+      data: {
+        ...pr,
+        estimatedTotal: Number(pr.estimatedTotal),
+        lines: pr.lines.map((l) => ({
+          ...l,
+          quantity: Number(l.quantity),
+          estimatedUnitPrice: Number(l.estimatedUnitPrice),
+          lineTotal: Number(l.lineTotal),
+        })),
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const createPrSchema = z.object({
   title: z.string().min(4),
   businessUnitId: z.string().min(1),

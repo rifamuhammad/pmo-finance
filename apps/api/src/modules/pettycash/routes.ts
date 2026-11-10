@@ -794,6 +794,25 @@ pettyCashRouter.post('/submissions', async (req, res, next) => {
       },
     });
 
+    if (submitImmediately) {
+      const aprCount = await prisma.approvalRequest.count();
+      await prisma.approvalRequest.create({
+        data: {
+          requestNumber: `APR-PC-${String(aprCount + 1).padStart(4, '0')}`,
+          module: 'PETTY_CASH',
+          entityId: created.id,
+          entityCode: created.submissionNo,
+          title: `Persetujuan SPJ ${created.type}: ${created.activityDescription}`,
+          businessUnitId: created.businessUnitId,
+          amount: created.totalTransaction,
+          status: 'PENDING',
+          requestedById: req.user?.userId || 'USER',
+          requestedByName: req.user?.fullName || created.applicantName,
+          requiredRoleCode: 'FINANCE_MANAGER',
+        },
+      });
+    }
+
     res.status(201).json({
       success: true,
       data: formatSubmissionRecord(created),
@@ -820,6 +839,23 @@ pettyCashRouter.post('/submissions/:id/submit', async (req, res, next) => {
       where: { id: sub.id },
       data: { status: 'SUBMITTED' },
       include: { items: true, businessUnit: true },
+    });
+
+    const aprCount = await prisma.approvalRequest.count();
+    await prisma.approvalRequest.create({
+      data: {
+        requestNumber: `APR-PC-${String(aprCount + 1).padStart(4, '0')}`,
+        module: 'PETTY_CASH',
+        entityId: updated.id,
+        entityCode: updated.submissionNo,
+        title: `Persetujuan SPJ ${updated.type}: ${updated.activityDescription}`,
+        businessUnitId: updated.businessUnitId,
+        amount: updated.totalTransaction,
+        status: 'PENDING',
+        requestedById: req.user?.userId || 'USER',
+        requestedByName: req.user?.fullName || updated.applicantName,
+        requiredRoleCode: 'FINANCE_MANAGER',
+      },
     });
 
     res.json({
@@ -895,10 +931,74 @@ pettyCashRouter.post('/submissions/:id/approve', async (req, res, next) => {
       include: { items: true, businessUnit: true },
     });
 
+    await prisma.approvalRequest.updateMany({
+      where: { module: 'PETTY_CASH', entityId: sub.id, status: 'PENDING' },
+      data: {
+        status: 'APPROVED',
+        decidedById: req.user?.userId || 'SYSTEM',
+        decidedByName: req.user?.fullName || 'Finance Manager',
+        decidedAt: new Date(),
+        decisionNote: req.body?.note || 'Disetujui oleh Finance Manager / Bendahara.',
+      },
+    });
+
     res.json({
       success: true,
       data: formatSubmissionRecord(updated),
       message: `Pengajuan ${sub.submissionNo} telah disetujui oleh Finance Manager / Bendahara.`,
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 8.1 REJECT SUBMISSION
+pettyCashRouter.post('/submissions/:id/reject', async (req, res, next) => {
+  try {
+    const reason = z.string().min(5, 'Alasan penolakan wajib diisi minimal 5 karakter.').parse(req.body?.reason);
+    const sub = await prisma.pettyCashSubmission.findUnique({ where: { id: req.params.id } });
+    if (!sub) throw new AppError(404, 'NOT_FOUND', 'Pengajuan tidak ditemukan.');
+    if (!['SUBMITTED', 'TAX_VERIFIED'].includes(sub.status)) {
+      throw new AppError(409, 'INVALID_STATE', `Status ${sub.status} tidak dapat ditolak.`);
+    }
+
+    const updated = await prisma.pettyCashSubmission.update({
+      where: { id: sub.id },
+      data: {
+        status: 'REJECTED',
+      },
+      include: { items: true, businessUnit: true },
+    });
+
+    await prisma.approvalRequest.updateMany({
+      where: { module: 'PETTY_CASH', entityId: sub.id, status: 'PENDING' },
+      data: {
+        status: 'REJECTED',
+        decidedById: req.user?.userId || 'SYSTEM',
+        decidedByName: req.user?.fullName || 'Finance Manager',
+        decidedAt: new Date(),
+        decisionNote: reason.trim(),
+      },
+    });
+
+    await recordAuditLog({
+      action: 'REJECT',
+      module: 'PETTY_CASH',
+      entityType: 'PettyCashSubmission',
+      entityId: sub.id,
+      entityCode: sub.submissionNo,
+      actorId: req.user?.userId,
+      actorName: req.user?.fullName || 'User',
+      actorRole: req.user?.roleCode || 'USER',
+      summary: `Menolak pengajuan ${sub.type} ${sub.submissionNo} dengan alasan: ${reason.trim()}`,
+      afterData: { status: 'REJECTED', rejectionReason: reason.trim() },
+    });
+
+    res.json({
+      success: true,
+      data: formatSubmissionRecord(updated),
+      message: `Pengajuan ${sub.submissionNo} telah ditolak.`,
       meta: { requestId: req.requestId },
     });
   } catch (err) {

@@ -184,17 +184,18 @@ gantt
 ---
 
 ### SPRINT 5: General Ledger, Jurnal Otomatis & 5 Lapkeu ISAK 335
+* **Parent Epic Jira:** `KOI-122` (`[SPRINT 5] General Ledger, Jurnal Otomatis & 5 Lapkeu ISAK 335`)
 * **Periode:** Selasa, 05 Jan 2027 – Jumat, 15 Jan 2027
 * **Sasaran Sprint:** Buku Besar otomatis terisi dari seluruh transaksi dan menghasilkan 5 Laporan Keuangan resmi ISAK 335.
 
-| Kode Tiket | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`PMO-121`** | Inbox Approval Terpusat Lintas Dokumen (`ApprovalsView.vue`) | **Sedang** | 2 Hari | Sel, 05 Jan 2027 | Rab, 06 Jan 2027 | **High** | `To Do` |
-| **`PMO-131`** | Core Double-Entry Ledger Engine & Validasi Keseimbangan Debet/Kredit | **Susah** | 3 Hari | Kam, 07 Jan 2027 | Sen, 11 Jan 2027 | **Highest** | `To Do` |
-| **`PMO-141`** | Generator Laporan Posisi Keuangan (Neraca) & Aktivitas ISAK 335 | **Susah** | 3 Hari | Sen, 11 Jan 2027 | Rab, 13 Jan 2027 | **Highest** | `To Do` |
-| **`PMO-142`** | Generator Laporan Arus Kas Metode Langsung (Direct Method) | **Sedang** | 2 Hari | Rab, 13 Jan 2027 | Kam, 14 Jan 2027 | **High** | `To Do` |
-| **`PMO-151`** | Executive Dashboard & Analitik Kinerja RGA Real-Time Serapan Anggaran | **Gampang** | 2 Hari | Kam, 14 Jan 2027 | Jum, 15 Jan 2027 | **Medium** | `To Do` |
-| **`SPRINT-5-REV`**| Sprint 5 Review & Verifikasi Audit Trail Jurnal | **Review** | 1 Hari | Jum, 15 Jan 2027 | Jum, 15 Jan 2027 | **High** | `To Do` |
+| Kode Tiket | Jira Key | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`PMO-121`** | `KOI-123` | Inbox Approval Terpusat Lintas Dokumen (`ApprovalsView.vue`) | **Sedang** | 2 Hari | Sel, 05 Jan 2027 | Rab, 06 Jan 2027 | **High** | `In Review` |
+| **`PMO-131`** | - | Core Double-Entry Ledger Engine & Validasi Keseimbangan Debet/Kredit | **Susah** | 3 Hari | Kam, 07 Jan 2027 | Sen, 11 Jan 2027 | **Highest** | `To Do` |
+| **`PMO-141`** | - | Generator Laporan Posisi Keuangan (Neraca) & Aktivitas ISAK 335 | **Susah** | 3 Hari | Sen, 11 Jan 2027 | Rab, 13 Jan 2027 | **Highest** | `To Do` |
+| **`PMO-142`** | - | Generator Laporan Arus Kas Metode Langsung (Direct Method) | **Sedang** | 2 Hari | Rab, 13 Jan 2027 | Kam, 14 Jan 2027 | **High** | `To Do` |
+| **`PMO-151`** | - | Executive Dashboard & Analitik Kinerja RGA Real-Time Serapan Anggaran | **Gampang** | 2 Hari | Kam, 14 Jan 2027 | Jum, 15 Jan 2027 | **Medium** | `To Do` |
+| **`SPRINT-5-REV`**| - | Sprint 5 Review & Verifikasi Audit Trail Jurnal | **Review** | 1 Hari | Jum, 15 Jan 2027 | Jum, 15 Jan 2027 | **High** | `To Do` |
 
 ---
 

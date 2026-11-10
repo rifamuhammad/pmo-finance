@@ -1977,4 +1977,289 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
         .send({ reason: 'Selesai simulasi audit tutup buku Sprint 4' });
     });
   });
+
+  // =========================================================================
+  // 16. [KOI-123] [PMO-121] Inbox Approval Terpusat Lintas Dokumen & Kontrol SoD
+  // =========================================================================
+  describe('16. [KOI-123] [PMO-121] Inbox Approval Terpusat Lintas Dokumen & Kontrol SoD', () => {
+    let testPrApproval: any;
+    let testPrDocNumber: string;
+    let targetBudgetLineId = '';
+
+    beforeAll(async () => {
+      // Create a dedicated approved budget line with fresh ample ceiling (Rp 500.000.000)
+      const b = await prisma.budget.create({
+        data: {
+          docNumber: `BDG-TEST-SEC16-${Date.now()}`,
+          title: 'Anggaran Plafon Khusus Uji Inbox Approval Section 16',
+          businessUnitId: unitDiklatId,
+          fiscalPeriodId: period2026OpenId,
+          fundSourceId: fundInternalId,
+          version: 1,
+          status: 'APPROVED',
+          totalAllocated: 500000000,
+          totalCommitted: 0,
+          totalActual: 0,
+          createdById: 'USER-TEST',
+          createdByName: 'Test Creator',
+          lines: {
+            create: [
+              {
+                costCenterId: ccDiklatLabId,
+                accountCode: '5-1200',
+                category: 'CAPEX',
+                description: 'Alokasi Pengadaan Sarana & ATK',
+                allocatedAmount: 500000000,
+                committedAmount: 0,
+                actualAmount: 0,
+              },
+            ],
+          },
+        },
+        include: { lines: true },
+      });
+      targetBudgetLineId = b.lines[0].id;
+    });
+
+    it('fetches centralized approval inbox and verifies role-based scoping and KPI statistics', async () => {
+      // 1. Fetch KPI stats
+      const statsRes = await request(app)
+        .get('/api/v1/approvals/stats')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(statsRes.status).toBe(200);
+      expect(statsRes.body.success).toBe(true);
+      expect(statsRes.body.data).toHaveProperty('totalPending');
+      expect(statsRes.body.data).toHaveProperty('actionRequiredCount');
+      expect(statsRes.body.data).toHaveProperty('byModule');
+      expect(statsRes.body.data.byModule).toHaveProperty('PURCHASE_REQUEST');
+      expect(statsRes.body.data.byModule).toHaveProperty('BUDGET');
+
+      // 2. Fetch approvals list with filters
+      const listRes = await request(app)
+        .get('/api/v1/approvals?status=ALL')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(listRes.status).toBe(200);
+      expect(Array.isArray(listRes.body.data)).toBe(true);
+      expect(listRes.body.meta).toHaveProperty('total');
+      expect(listRes.body.meta).toHaveProperty('pendingCount');
+
+      // 3. Verify item fields contain enrichment
+      if (listRes.body.data.length > 0) {
+        const first = listRes.body.data[0];
+        expect(first).toHaveProperty('requestNumber');
+        expect(first).toHaveProperty('module');
+        expect(first).toHaveProperty('entityCode');
+        expect(first).toHaveProperty('canApprove');
+        expect(typeof first.amount).toBe('number');
+      }
+    });
+
+    it('creates a Purchase Request and verifies it immediately appears in the Central Approval Inbox', async () => {
+      // Create a submitted PR
+      const prRes = await request(app)
+        .post('/api/v1/procurement/purchase-requests')
+        .set('Authorization', `Bearer ${unitMgrToken}`)
+        .send({
+          businessUnitId: unitDiklatId,
+          costCenterId: ccDiklatLabId,
+          budgetLineId: targetBudgetLineId,
+          title: 'Pengadaan Meja Kursi Training Workshop PMO UTama',
+          purpose: 'Pengadaan fasilitas ruang pelatihan sertifikasi',
+          submitImmediately: true,
+          lines: [
+            {
+              itemName: 'Meja Lipat Training Ergonomis',
+              quantity: 10,
+              unit: 'Unit',
+              estimatedUnitPrice: 750000,
+              specification: 'Dimensi 120x60x75 cm kaki roda pengunci',
+            },
+            {
+              itemName: 'Kursi Training Jaring Hidrolik',
+              quantity: 10,
+              unit: 'Unit',
+              estimatedUnitPrice: 500000,
+              specification: 'Bahan breathable mesh dengan sandaran kepala',
+            },
+          ],
+        });
+
+      expect(prRes.status).toBe(201);
+      expect(prRes.body.data.status).toBe('SUBMITTED');
+      testPrDocNumber = prRes.body.data.docNumber;
+
+      // Check that it exists in GET /approvals
+      const inboxRes = await request(app)
+        .get(`/api/v1/approvals?module=PURCHASE_REQUEST&search=${testPrDocNumber}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(inboxRes.status).toBe(200);
+      expect(inboxRes.body.data.length).toBeGreaterThan(0);
+      testPrApproval = inboxRes.body.data.find((a: any) => a.entityCode === testPrDocNumber);
+      expect(testPrApproval).toBeDefined();
+      expect(testPrApproval.module).toBe('PURCHASE_REQUEST');
+      expect(testPrApproval.status).toBe('PENDING');
+      expect(testPrApproval.amount).toBe(12500000);
+      expect(testPrApproval.canApprove).toBe(true);
+
+      // Verify detail inspection endpoint
+      const detailRes = await request(app)
+        .get(`/api/v1/approvals/${testPrApproval.id}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(detailRes.status).toBe(200);
+      expect(detailRes.body.data.entityDetail).toBeDefined();
+      expect(detailRes.body.data.entityDetail.docNumber).toBe(testPrDocNumber);
+      expect(detailRes.body.data.entityDetail.lines.length).toBe(2);
+    });
+
+    it('approves the Purchase Request from Central Approval Inbox and verifies budget commitment & PR status', async () => {
+      expect(testPrApproval).toBeDefined();
+
+      const approveRes = await request(app)
+        .post(`/api/v1/approvals/${testPrApproval.id}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ note: 'Disetujui penuh untuk pengadaan fasilitas pelatihan PMO' });
+
+      expect(approveRes.status).toBe(200);
+      expect(approveRes.body.success).toBe(true);
+      expect(approveRes.body.data.status).toBe('APPROVED');
+
+      // Verify PR is now APPROVED in procurement module
+      const prCheck = await request(app)
+        .get(`/api/v1/procurement/purchase-requests/${testPrApproval.entityId}`)
+        .set('Authorization', `Bearer ${unitMgrToken}`);
+
+      expect(prCheck.status).toBe(200);
+      expect(prCheck.body.data.status).toBe('APPROVED');
+    });
+
+    it('rejects an approval request with mandatory reason >= 5 characters and updates underlying document status', async () => {
+      // 1. Create another PR to be rejected
+      const prRes = await request(app)
+        .post('/api/v1/procurement/purchase-requests')
+        .set('Authorization', `Bearer ${unitMgrToken}`)
+        .send({
+          businessUnitId: unitDiklatId,
+          costCenterId: ccDiklatLabId,
+          budgetLineId: targetBudgetLineId,
+          title: 'Pengadaan Sofa Tamu VIP Lounge',
+          purpose: 'Pengadaan perabot sofa tamu unit',
+          submitImmediately: true,
+          lines: [
+            {
+              itemName: 'Sofa Tamu Minimalis 3 Seater',
+              quantity: 1,
+              unit: 'Set',
+              estimatedUnitPrice: 8000000,
+              specification: 'Bahan oscar premium warna hitam',
+            },
+          ],
+        });
+
+      expect(prRes.status).toBe(201);
+      const prDoc = prRes.body.data.docNumber;
+
+      const inboxRes = await request(app)
+        .get(`/api/v1/approvals?module=PURCHASE_REQUEST&search=${prDoc}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      const aprItem = inboxRes.body.data.find((a: any) => a.entityCode === prDoc);
+      expect(aprItem).toBeDefined();
+
+      // 2. Reject without sufficient reason (< 5 chars) -> should fail 400
+      const failReject = await request(app)
+        .post(`/api/v1/approvals/${aprItem.id}/reject`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ reason: 'No' });
+
+      expect(failReject.status).toBe(400);
+
+      // 3. Reject with valid reason
+      const validReject = await request(app)
+        .post(`/api/v1/approvals/${aprItem.id}/reject`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ reason: 'Alokasi anggaran perabot kuartal ini ditangguhkan untuk prioritas sertifikasi.' });
+
+      expect(validReject.status).toBe(200);
+      expect(validReject.body.data.status).toBe('REJECTED');
+
+      // Verify PR is REJECTED in procurement
+      const prCheck = await request(app)
+        .get(`/api/v1/procurement/purchase-requests/${aprItem.entityId}`)
+        .set('Authorization', `Bearer ${unitMgrToken}`);
+
+      expect(prCheck.status).toBe(200);
+      expect(prCheck.body.data.status).toBe('REJECTED');
+      expect(prCheck.body.data.rejectionReason).toContain('ditangguhkan');
+    });
+
+    it('executes batch approval for multiple pending items atomically', async () => {
+      // 1. Create two PR items
+      const pr1 = await request(app)
+        .post('/api/v1/procurement/purchase-requests')
+        .set('Authorization', `Bearer ${unitMgrToken}`)
+        .send({
+          businessUnitId: unitDiklatId,
+          costCenterId: ccDiklatLabId,
+          budgetLineId: targetBudgetLineId,
+          title: 'Batch PR Item 1: ATK Kantor',
+          purpose: 'Kebutuhan ATK operasional unit',
+          submitImmediately: true,
+          lines: [{ itemName: 'Kertas HVS A4 & Binder', quantity: 20, unit: 'Rim', estimatedUnitPrice: 125000 }],
+        });
+
+      const pr2 = await request(app)
+        .post('/api/v1/procurement/purchase-requests')
+        .set('Authorization', `Bearer ${unitMgrToken}`)
+        .send({
+          businessUnitId: unitDiklatId,
+          costCenterId: ccDiklatLabId,
+          budgetLineId: targetBudgetLineId,
+          title: 'Batch PR Item 2: Toner Printer Laser',
+          purpose: 'Penggantian toner printer habis',
+          submitImmediately: true,
+          lines: [{ itemName: 'Cartridge Toner Hitam', quantity: 2, unit: 'Kotak', estimatedUnitPrice: 1500000 }],
+        });
+
+      expect(pr1.status).toBe(201);
+      expect(pr2.status).toBe(201);
+
+      const inboxRes = await request(app)
+        .get('/api/v1/approvals?status=PENDING&module=PURCHASE_REQUEST')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      const apr1 = inboxRes.body.data.find((a: any) => a.entityCode === pr1.body.data.docNumber);
+      const apr2 = inboxRes.body.data.find((a: any) => a.entityCode === pr2.body.data.docNumber);
+
+      expect(apr1).toBeDefined();
+      expect(apr2).toBeDefined();
+
+      // 2. Execute Batch Approve
+      const batchRes = await request(app)
+        .post('/api/v1/approvals/batch-approve')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          requestIds: [apr1.id, apr2.id],
+          note: 'Batch approval massal belanja operasional unit Diklat',
+        });
+
+      expect(batchRes.status).toBe(200);
+      expect(batchRes.body.data.successCount).toBe(2);
+      expect(batchRes.body.data.failedCount).toBe(0);
+
+      // Verify both are now APPROVED
+      const check1 = await request(app)
+        .get(`/api/v1/approvals/${apr1.id}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      const check2 = await request(app)
+        .get(`/api/v1/approvals/${apr2.id}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(check1.body.data.status).toBe('APPROVED');
+      expect(check2.body.data.status).toBe('APPROVED');
+    });
+  });
 });
