@@ -631,6 +631,8 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(payExp.body.data.journal.status).toBe('POSTED');
       expect(Number(payExp.body.data.journal.totalDebit)).toBe(19980000);
       expect(Number(payExp.body.data.journal.totalCredit)).toBe(19980000);
+      const debitLine = payExp.body.data.journal.lines.find((l: any) => Number(l.debit) > 0);
+      expect(debitLine.accountCode).toBe('210101010100');
 
       // Void the posted expense with reason -> restores budget actual and posts reversal journal
       const voidExp = await request(app)

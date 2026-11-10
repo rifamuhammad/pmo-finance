@@ -610,7 +610,11 @@ async function payAndPostExpense(exp: any) {
   feedbackMsg.value = '';
   try {
     const res = await apiFetch(`/procurement/expenses/${exp.id}/pay`, { method: 'POST' });
-    feedbackMsg.value = `Pengeluaran ${exp.docNumber} dicairkan, realisasi anggaran diperbarui, dan jurnal ${res.data.journal.journalNumber} diposting otomatis.`;
+    const isVendorPay = Boolean(exp.vendorInvoiceId);
+    const detailMsg = isVendorPay
+      ? `Pelunasan utang rekanan ${exp.docNumber} berhasil dibayarkan via ${exp.paymentMethod}, dan jurnal penutupan utang ${res.data.journal.journalNumber} diposting otomatis.`
+      : `Pengeluaran ${exp.docNumber} dicairkan via ${exp.paymentMethod}, realisasi anggaran diperbarui, dan jurnal ${res.data.journal.journalNumber} diposting otomatis.`;
+    feedbackMsg.value = detailMsg;
     await loadAllProcurementData();
   } catch (err: any) {
     errorMsg.value = err.message || 'Gagal mencairkan pengeluaran.';
@@ -1028,6 +1032,11 @@ onMounted(() => {
                 <strong>{{ exp.title }}</strong>
                 <div class="text-muted" style="font-size: 0.8rem">
                   Pos: {{ exp.budgetLine?.description }} | Kategori: {{ exp.category }}
+                </div>
+                <div v-if="exp.vendorInvoice" style="margin-top: 2px">
+                  <span class="badge" style="background: rgba(14, 116, 144, 0.12); color: #0e7490; font-size: 0.72rem">
+                    Tagihan: {{ exp.vendorInvoice.vendorInvoiceNumber }}
+                  </span>
                 </div>
               </td>
               <td>

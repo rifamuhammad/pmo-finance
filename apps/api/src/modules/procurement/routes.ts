@@ -1302,6 +1302,7 @@ procurementRouter.post('/expenses/:id/pay', requirePermission('expense:pay'), as
       where: { id: req.params.id },
       include: {
         budgetLine: { include: { budget: true } },
+        vendor: true,
         vendorInvoice: { include: { purchaseOrder: true } },
       },
     });
@@ -1387,14 +1388,29 @@ procurementRouter.post('/expenses/:id/pay', requirePermission('expense:pay'), as
       }
 
       // Auto-post balanced double-entry journal idempotently
-      let debitAccount = freshLine.accountCode;
-      if (!debitAccount || debitAccount.includes('-')) {
-        const officialExpense = await tx.chartOfAccount.findUnique({ where: { code: '520901020100' } });
-        if (officialExpense) {
-          debitAccount = '520901020100';
-        } else if (!debitAccount) {
-          debitAccount = '5-1100';
+      const isVendorInvoicePayment = Boolean(expense.vendorInvoiceId);
+      let debitAccount: string;
+      let debitDescription: string;
+
+      if (isVendorInvoicePayment) {
+        // Pelunasan kewajiban Utang Pengadaan Rekanan yang telah diakrualkan saat BAST (Pertor 310)
+        debitAccount = '210101010100';
+        const checkAp = await tx.chartOfAccount.findUnique({ where: { code: debitAccount } });
+        if (!checkAp) {
+          debitAccount = '2-1110';
         }
+        debitDescription = `Pelunasan Utang Pengadaan Rekanan: ${expense.vendor?.name || expense.recipientName} (${expense.vendorInvoice?.vendorInvoiceNumber || expense.docNumber})`;
+      } else {
+        debitAccount = freshLine.accountCode;
+        if (!debitAccount || debitAccount.includes('-')) {
+          const officialExpense = await tx.chartOfAccount.findUnique({ where: { code: '520901020100' } });
+          if (officialExpense) {
+            debitAccount = '520901020100';
+          } else if (!debitAccount) {
+            debitAccount = '5-1100';
+          }
+        }
+        debitDescription = `Realisasi beban: ${expense.title}`;
       }
 
       let creditAccount = expense.paymentMethod === 'PETTY_CASH' ? '110501010100' : '110101020200';
@@ -1411,14 +1427,16 @@ procurementRouter.post('/expenses/:id/pay', requirePermission('expense:pay'), as
           sourceId: expense.id,
           sourceDocNumber: expense.docNumber,
           idempotencyKey: `EXPENSE_PAY_${expense.id}`,
-          description: `Pencairan & Posting Biaya ${expense.docNumber}: ${expense.title}`,
+          description: isVendorInvoicePayment
+            ? `Pelunasan Utang Rekanan ${expense.docNumber}: ${expense.title}`
+            : `Pencairan & Posting Biaya ${expense.docNumber}: ${expense.title}`,
           createdById: req.user!.userId,
           createdByName: req.user!.fullName,
           lines: [
             {
               accountCode: debitAccount,
               costCenterId: expense.costCenterId,
-              description: `Realisasi beban: ${expense.title}`,
+              description: debitDescription,
               debit: expense.totalAmount.toString(),
               credit: '0.00',
             },

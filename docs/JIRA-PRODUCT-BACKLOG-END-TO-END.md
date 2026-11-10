@@ -218,14 +218,14 @@ flowchart TD
 
 ### [PMO-053] Pelunasan Tagihan Vendor via Bank & Penyetoran Pajak
 * **Issue Type:** Story | **Priority:** High | **Estimasi:** 3 SP
-* **Status:** `[x] SELESAI DI DEVELOP (Perlu Update Jurnal)`
+* **Jira Key:** `KOI-107` | **Status:** `[x] IN REVIEW (Board 3)`
 * **Acceptance Criteria:**
   1. Konfirmasi transfer bank mencatat jurnal pelunasan:  
      *(Dr)* `210101010100` Utang Pengadaan  
-     *(Cr)* `110102010100` Rekening Giro Pengeluaran.
+     *(Cr)* `110101020200` Bank BRI PMO (atau `110102010100` Rekening Giro Pengeluaran).
 * **Subtasks:**
   * [x] `PMO-053-1`: Endpoint pembayaran invoice vendor.
-  * [ ] `PMO-053-2`: Update jurnal pelunasan bank dan penutupan utang pajak.
+  * [x] `PMO-053-2`: Update jurnal pelunasan bank dan penutupan utang pengadaan 210101010100.
 
 ---
 
