@@ -204,7 +204,7 @@ flowchart TD
 
 ### [PMO-052] Penerimaan Barang/Jasa (BAST) & Jurnal Akrual Utang Pengadaan
 * **Issue Type:** Story | **Priority:** High | **Estimasi:** 5 SP
-* **Status:** `[x] SELESAI DI DEVELOP (Perlu Update Jurnal)`
+* **Jira Key:** `KOI-106` | **Status:** `[x] IN REVIEW (Board 3)`
 * **Acceptance Criteria:**
   1. Input BAST mencatat penerimaan barang/jasa vendor.
   2. Sistem memposting jurnal akrual:  
@@ -213,7 +213,7 @@ flowchart TD
      *(Cr)* `2102xxxxxx` Utang Pajak PPh/PPN.
 * **Subtasks:**
   * [x] `PMO-052-1`: Endpoint input Goods Receipt / BAST.
-  * [ ] `PMO-052-2`: Update generator jurnal akrual dengan kode akun utang Pertor 310 (`210101010100`).
+  * [x] `PMO-052-2`: Update generator jurnal akrual dengan kode akun utang Pertor 310 (`210101010100`).
   * [x] `PMO-052-3`: Upload file lampiran BAST PDF.
 
 ### [PMO-053] Pelunasan Tagihan Vendor via Bank & Penyetoran Pajak

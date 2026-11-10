@@ -107,7 +107,8 @@ gantt
 | Kode Tiket | Jira Key | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **`PMO-051`** | `KOI-105` | Modul LS: Alur PR & Integrasi 296 Pos Anggaran Riil Pertor 310 | **Susah** | 3 Hari | Sen, 07 Des 2026 | Rab, 09 Des 2026 | **High** | `In Review (Board)` |
-| **`PMO-061`** | - | Modul UMK: Pencairan Kasir ➔ Akun `110501010100` & Pertanggungjawaban SPJ | **Susah** | 3 Hari | Kam, 10 Des 2026 | Sen, 14 Des 2026 | **High** | `To Do` |
+| **`PMO-052`** | `KOI-106` | Penerimaan Barang/Jasa (BAST) & Jurnal Akrual Utang Pengadaan 2101 | **Sedang** | 2 Hari | Kam, 10 Des 2026 | Jum, 11 Des 2026 | **High** | `In Review (Board)` |
+| **`PMO-061`** | - | Modul UMK: Pencairan Kasir ➔ Akun `110501010100` & Pertanggungjawaban SPJ | **Susah** | 3 Hari | Sen, 14 Des 2026 | Rab, 16 Des 2026 | **High** | `To Do` |
 | **`PMO-071`** | - | Modul Kasir E-Revenue: Sinkronisasi Akun Pendapatan `4203xxxxxx` & PPN Keluaran | **Gampang** | 2 Hari | Sel, 15 Des 2026 | Rab, 16 Des 2026 | **High** | `To Do` |
 | **`PMO-072`** | - | Sprint 3 Review & Uji Transaksi Kas Lintas Unit | **Gampang** | 2 Hari | Kam, 17 Des 2026 | Jum, 18 Des 2026 | **Medium** | `To Do` |
 
