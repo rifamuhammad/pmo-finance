@@ -1194,4 +1194,42 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(creditUmkLine).toBeDefined();
     });
   });
+
+  describe('9. Sprint 3 Review & Uji Transaksi Kas Lintas 5 Unit Bisnis PMO (SPRINT-3-REV / KOI-113)', () => {
+    it('verifies commercial revenue accounts mapping for all 5 PMO business units', async () => {
+      const units = await prisma.businessUnit.findMany({
+        where: { code: { in: ['BU-TCI', 'BU-ITS', 'BU-KLINIK', 'BU-MICE', 'PMO-MGMT'] } },
+      });
+      expect(units.length).toBe(5);
+
+      const expectedMap: Record<string, string> = {
+        'BU-TCI': '420301010200',
+        'BU-ITS': '420301040200',
+        'BU-KLINIK': '420301060100',
+        'BU-MICE': '420301070202',
+        'PMO-MGMT': '420301090100',
+      };
+
+      for (const u of units) {
+        const expectedCoa = expectedMap[u.code];
+        expect(expectedCoa).toBeDefined();
+        const coa = await prisma.chartOfAccount.findUnique({ where: { code: expectedCoa } });
+        expect(coa).toBeDefined();
+        expect(coa?.type).toBe('REVENUE');
+        expect(coa?.normalBalance).toBe('CREDIT');
+      }
+    });
+
+    it('confirms the General Ledger Trial Balance is strictly balanced after all Sprint 3 transactions', async () => {
+      const ledgerRes = await request(app)
+        .get('/api/v1/accounting/ledger')
+        .set('Authorization', `Bearer ${accountingToken}`);
+      expect(ledgerRes.status).toBe(200);
+      expect(ledgerRes.body.data.trialBalanceSummary).toBeDefined();
+      expect(ledgerRes.body.data.trialBalanceSummary.isBalanced).toBe(true);
+      expect(ledgerRes.body.data.trialBalanceSummary.totalDebit).toBe(
+        ledgerRes.body.data.trialBalanceSummary.totalCredit
+      );
+    });
+  });
 });

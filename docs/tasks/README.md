@@ -20,6 +20,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-110` | [PMO-071] Modul Kasir E-Revenue: Sinkronisasi Akun Pendapatan 4203xxxxxx & PPN Keluaran Pertor 310 | `feature/KOI-110-kasir-e-revenue-pendapatan-4203-ppn` | `In Review` | [KOI-110-kasir-e-revenue-pendapatan-4203-ppn.md](./KOI-110-kasir-e-revenue-pendapatan-4203-ppn.md) |
 | `KOI-111` | [PMO-082] Modul Kasir Tunai (POS) & Penyetoran Deposit Bank BRI | `feature/KOI-111-kasir-pos-setoran-deposit-bank-bri` | `In Review` | [KOI-111-kasir-pos-setoran-deposit-bank-bri.md](./KOI-111-kasir-pos-setoran-deposit-bank-bri.md) |
 | `KOI-112` | [PMO-072] Pertanggungjawaban SPJ UMK Panjar, Verifikasi Nota & Tutup Panjar | `feature/KOI-112-spj-umk-panjar-verifikasi-nota-tutup-panjar` | `In Review` | [KOI-112-spj-umk-panjar-verifikasi-nota-tutup-panjar.md](./KOI-112-spj-umk-panjar-verifikasi-nota-tutup-panjar.md) |
+| `KOI-113` | [SPRINT-3-REV] Sprint 3 Review & Uji Transaksi Kas Lintas 5 Unit Bisnis PMO | `feature/KOI-113-sprint-3-review-uji-transaksi-kas` | `In Review` | [KOI-113-sprint-3-review-uji-transaksi-kas.md](./KOI-113-sprint-3-review-uji-transaksi-kas.md) |
 
 ---
 
