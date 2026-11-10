@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { apiFetch } from '../services/api';
 import { formatRupiah, formatDate, formatDateTime } from '../utils/format';
@@ -41,7 +41,57 @@ const closeSessionModalOpen = ref(false);
 const depositModalOpen = ref(false);
 const priceModalOpen = ref(false);
 const printModalOpen = ref(false);
+const openSessionModalOpen = ref(false);
+const receiptModalOpen = ref(false);
+
 const selectedInvoiceForPrint = ref<any>(null);
+const selectedPaymentForReceipt = ref<any>(null);
+
+const activeCashierSession = computed(() =>
+  cashierData.value.sessions?.find((s: any) => s.status === 'OPEN')
+);
+
+const openSessionForm = ref({
+  cashRegisterId: '',
+  openingFloat: 0,
+});
+
+function openNewSessionModal() {
+  const firstReg = cashierData.value.registers?.[0]?.id || '';
+  openSessionForm.value = {
+    cashRegisterId: firstReg,
+    openingFloat: 0,
+  };
+  openSessionModalOpen.value = true;
+}
+
+async function submitOpenSession() {
+  if (!openSessionForm.value.cashRegisterId) {
+    errorMsg.value = 'Silakan pilih loket register kasir.';
+    return;
+  }
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const res = await apiFetch('/revenue/cashier/sessions/open', {
+      method: 'POST',
+      body: JSON.stringify({
+        cashRegisterId: openSessionForm.value.cashRegisterId,
+        openingFloat: Number(openSessionForm.value.openingFloat) || 0,
+      }),
+    });
+    openSessionModalOpen.value = false;
+    feedbackMsg.value = `Sesi kasir ${res.data.sessionNumber} berhasil dibuka dengan modal awal ${formatRupiah(res.data.openingFloat)}.`;
+    await loadRevenueAndCashier();
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal membuka sesi kasir.';
+  }
+}
+
+function openReceiptModal(payment: any) {
+  selectedPaymentForReceipt.value = payment;
+  receiptModalOpen.value = true;
+}
 
 function openPrintModal(inv: any) {
   selectedInvoiceForPrint.value = inv;
@@ -574,15 +624,23 @@ onMounted(loadRevenueAndCashier);
                 <td class="money-col"><strong>{{ formatRupiah(pay.netAmount) }}</strong></td>
                 <td><StatusBadge :status="pay.status" /></td>
                 <td>
-                  <button
-                    v-if="pay.status === 'CONFIRMED' && auth.hasPermission('payment:approve')"
-                    type="button"
-                    class="btn btn-sm btn-danger"
-                    @click="openRefundModal(pay)"
-                  >
-                    Proses Refund
-                  </button>
-                  <span v-else class="text-muted">-</span>
+                  <div class="btn-row">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-secondary"
+                      @click="openReceiptModal(pay)"
+                    >
+                      Kuitansi POS
+                    </button>
+                    <button
+                      v-if="pay.status === 'CONFIRMED' && auth.hasPermission('payment:approve')"
+                      type="button"
+                      class="btn btn-sm btn-danger"
+                      @click="openRefundModal(pay)"
+                    >
+                      Refund
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -651,6 +709,64 @@ onMounted(loadRevenueAndCashier);
 
     <!-- TAB 3: CASHIER SESSIONS, CLOSEOUT & DEPOSITS -->
     <div v-else-if="activeTab === 'cashier'" style="display: flex; flex-direction: column; gap: 18px">
+      <!-- Active Shift Banner -->
+      <div v-if="activeCashierSession" class="active-session-banner">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap">
+          <div style="display: flex; align-items: center; gap: 8px">
+            <span class="session-badge">SESI KASIR AKTIF</span>
+            <strong style="font-size: 1rem">{{ activeCashierSession.sessionNumber }}</strong>
+            <span class="text-muted">• {{ activeCashierSession.cashRegister?.name || 'Loket Kasir Unit' }}</span>
+          </div>
+          <div class="btn-row" v-if="auth.hasPermission('cashier:operate')">
+            <button
+              type="button"
+              class="btn btn-sm btn-primary"
+              @click="openCloseCashierModal(activeCashierSession)"
+            >
+              Tutup Kasir (Closeout)
+            </button>
+          </div>
+        </div>
+
+        <div class="session-stats-grid">
+          <div class="stat-box">
+            <span class="stat-label">Petugas Kasir</span>
+            <strong class="stat-value">{{ activeCashierSession.cashierName }}</strong>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Modal Awal Kasir</span>
+            <strong class="stat-value">{{ formatRupiah(activeCashierSession.openingFloat) }}</strong>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Tunai Masuk (POS)</span>
+            <strong class="stat-value" style="color: var(--status-success-text)">{{ formatRupiah(activeCashierSession.totalCashIn) }}</strong>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Saldo Kasir Fisik Teoritis</span>
+            <strong class="stat-value" style="color: var(--color-primary)">{{ formatRupiah(activeCashierSession.theoreticalBalance) }}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="empty-shift-banner">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+          <div>
+            <strong>Belum ada Sesi Kasir yang aktif saat ini.</strong>
+            <p class="text-muted" style="margin: 4px 0 0; font-size: 0.85rem">
+              Buka sesi kasir baru untuk menetapkan modal kerja fisik awal dan mulai menerima pembayaran tunai loket sesuai Pertor 310.
+            </p>
+          </div>
+          <button
+            v-if="auth.hasPermission('cashier:operate')"
+            type="button"
+            class="btn btn-primary btn-sm"
+            @click="openNewSessionModal"
+          >
+            + Buka Sesi Kasir Baru
+          </button>
+        </div>
+      </div>
+
       <section class="panel">
         <div class="panel-header">
           <div>
@@ -658,6 +774,15 @@ onMounted(loadRevenueAndCashier);
             <p class="text-muted">
               Sesi kasir membandingkan saldo teoritis terhadap hasil hitung fisik; selisih di atas Rp 50.000 wajib disetujui Finance Manager.
             </p>
+          </div>
+          <div class="btn-row" v-if="auth.hasPermission('cashier:operate')">
+            <button
+              type="button"
+              class="btn btn-sm btn-secondary"
+              @click="openNewSessionModal"
+            >
+              + Buka Sesi Kasir Baru
+            </button>
           </div>
         </div>
 
@@ -1001,6 +1126,42 @@ onMounted(loadRevenueAndCashier);
       </form>
     </ModalDialog>
 
+    <!-- Modal: Buka Sesi Kasir Baru -->
+    <ModalDialog :open="openSessionModalOpen" title="Buka Sesi Kasir Baru (Shift Loket POS)" @close="openSessionModalOpen = false">
+      <form @submit.prevent="submitOpenSession" style="display: flex; flex-direction: column; gap: 14px">
+        <div class="form-field">
+          <label for="csh-reg" class="form-label">Pilih Loket Register Kasir</label>
+          <select id="csh-reg" v-model="openSessionForm.cashRegisterId" class="select" required>
+            <option v-for="r in cashierData.registers" :key="r.id" :value="r.id">
+              {{ r.code }} - {{ r.name }} ({{ r.businessUnit?.name || 'Unit Bisnis' }})
+            </option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="csh-float" class="form-label">Modal Awal Kasir / Opening Float (IDR)</label>
+          <CurrencyInput
+            id="csh-float"
+            v-model="openSessionForm.openingFloat"
+            :min="0"
+            placeholder="0"
+            required
+          />
+          <small class="text-muted">Uang pecahan modal kerja fisik yang ada di laci kasir saat loket mulai beroperasi.</small>
+        </div>
+
+        <div class="pertor-revenue-banner" style="margin: 0">
+          <span class="banner-badge">PERTOR 310</span>
+          <span>Sesi kasir akan otomatis terhubung ke akun kas operasional <code>110101010100</code> dan mencatat mutasi tunai transaksi loket.</span>
+        </div>
+
+        <div class="btn-row" style="justify-content: flex-end">
+          <button type="button" class="btn btn-sm" @click="openSessionModalOpen = false">Batal</button>
+          <button type="submit" class="btn btn-sm btn-primary">Buka Sesi & Mulai Shift Loket</button>
+        </div>
+      </form>
+    </ModalDialog>
+
     <!-- Modal: Close Cashier Session -->
     <ModalDialog :open="closeSessionModalOpen" title="Penutupan Sesi Kasir (Closeout & Hitung Fisik)" @close="closeSessionModalOpen = false">
       <form v-if="selectedSessionForClose" @submit.prevent="submitCloseCashier" style="display: flex; flex-direction: column; gap: 12px">
@@ -1056,11 +1217,98 @@ onMounted(loadRevenueAndCashier);
             <input id="dep-ref" v-model="depositForm.referenceNo" type="text" class="input" required />
           </div>
         </div>
+        <div class="pertor-revenue-banner" style="margin: 0">
+          <span class="banner-badge">JURNAL PERTOR 310</span>
+          <span>Setoran akan mendebit <code>110101020200</code> (Bank BRI Penerimaan Komersial) dan mengkredit <code>110101010100</code> (Kas Operasional Loket).</span>
+        </div>
         <div class="btn-row" style="justify-content: flex-end">
           <button type="button" class="btn btn-sm" @click="depositModalOpen = false">Batal</button>
           <button type="submit" class="btn btn-sm btn-primary">Simpan Setoran & Posting Jurnal</button>
         </div>
       </form>
+    </ModalDialog>
+
+    <!-- Modal: Bukti Penerimaan Kas & Kuitansi POS Resmi -->
+    <ModalDialog :open="receiptModalOpen" title="Bukti Penerimaan Kas & Kuitansi POS Resmi" @close="receiptModalOpen = false">
+      <div v-if="selectedPaymentForReceipt" class="pos-receipt-container">
+        <div class="pos-receipt-card">
+          <div class="pos-receipt-header">
+            <div class="pos-receipt-logo">UT</div>
+            <h3>UNIVERSITAS TERBUKA</h3>
+            <p class="pos-sub">PMO UTama - Direktorat Keuangan & Komersial</p>
+            <p class="pos-legal">Peraturan Rektor UT No. 310 Tahun 2025</p>
+            <div class="receipt-divider"></div>
+            <div class="receipt-title-tag">BUKTI KUITANSI KASIR (POS RECEIPT)</div>
+          </div>
+
+          <div class="receipt-meta-grid">
+            <div class="receipt-row">
+              <span class="lbl">No. Kuitansi:</span>
+              <strong class="val doc-code">{{ selectedPaymentForReceipt.receiptNumber }}</strong>
+            </div>
+            <div class="receipt-row">
+              <span class="lbl">Tanggal Transaksi:</span>
+              <span class="val">{{ formatDateTime(selectedPaymentForReceipt.paymentDate) }}</span>
+            </div>
+            <div class="receipt-row">
+              <span class="lbl">No. Tagihan (Invoice):</span>
+              <span class="val doc-code">{{ selectedPaymentForReceipt.customerInvoice?.docNumber }}</span>
+            </div>
+            <div class="receipt-row">
+              <span class="lbl">Pelanggan:</span>
+              <span class="val">{{ selectedPaymentForReceipt.customerInvoice?.customer?.name || 'Pelanggan Umum' }}</span>
+            </div>
+            <div class="receipt-row">
+              <span class="lbl">Metode Bayar:</span>
+              <span class="val"><strong>{{ selectedPaymentForReceipt.method }}</strong></span>
+            </div>
+            <div class="receipt-row">
+              <span class="lbl">Referensi Transaksi:</span>
+              <span class="val">{{ selectedPaymentForReceipt.referenceNo }}</span>
+            </div>
+          </div>
+
+          <div class="receipt-divider"></div>
+
+          <div class="receipt-total-box">
+            <div class="receipt-row" style="font-size: 0.95rem">
+              <span>Nominal Diterima:</span>
+              <strong>{{ formatRupiah(selectedPaymentForReceipt.grossAmount) }}</strong>
+            </div>
+            <div v-if="selectedPaymentForReceipt.feeAmount > 0" class="receipt-row text-muted" style="font-size: 0.8rem">
+              <span>Potongan Biaya Admin:</span>
+              <span>{{ formatRupiah(selectedPaymentForReceipt.feeAmount) }}</span>
+            </div>
+            <div class="receipt-row" style="font-size: 1.05rem; border-top: 1px dashed #cbd5e1; padding-top: 8px; margin-top: 4px">
+              <strong>Total Penerimaan Bersih:</strong>
+              <strong style="color: var(--status-success-text)">{{ formatRupiah(selectedPaymentForReceipt.netAmount) }}</strong>
+            </div>
+          </div>
+
+          <div class="receipt-divider"></div>
+
+          <div class="receipt-pertor-box">
+            <div class="pertor-title">Informasi Akun Jurnal (Pertor 310):</div>
+            <div class="pertor-coa-list">
+              <div>• Akun Kas Penerima: <code>110101010100</code> (Kas Operasional & Kasir Unit)</div>
+              <div>• Akun Piutang Dilunasi: <code>110301010100</code> (Piutang Usaha Layanan)</div>
+              <div>• Akun Pendapatan Komersial: <code>4203xxxxxx</code> | PPN Keluaran 11%: <code>210202010100</code></div>
+            </div>
+          </div>
+
+          <div class="receipt-footer">
+            <p>Terima kasih atas pembayaran Anda.</p>
+            <p class="receipt-stamp">STATUS: LUNAS & DIVERIFIKASI SISTEM</p>
+          </div>
+        </div>
+
+        <div class="btn-row no-print" style="justify-content: flex-end; margin-top: 14px">
+          <button type="button" class="btn btn-sm" @click="receiptModalOpen = false">Tutup</button>
+          <button type="button" class="btn btn-sm btn-primary" @click="triggerPrint">
+            Cetak Struk Kuitansi
+          </button>
+        </div>
+      </div>
     </ModalDialog>
 
     <!-- Modal: Update Product Price -->
@@ -1568,15 +1816,213 @@ onMounted(loadRevenueAndCashier);
   font-family: monospace;
 }
 
+.active-session-banner {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.session-badge {
+  background: #166534;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.session-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.stat-box {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(22, 101, 52, 0.15);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 0.74rem;
+  color: #475569;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.stat-value {
+  font-size: 1.05rem;
+  color: #0f172a;
+}
+
+.empty-shift-banner {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.pos-receipt-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pos-receipt-card {
+  width: 100%;
+  max-width: 420px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.pos-receipt-header {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.pos-receipt-logo {
+  display: inline-block;
+  background: #034693;
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.1rem;
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.pos-receipt-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: 0.5px;
+}
+
+.pos-sub {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.pos-legal {
+  margin: 2px 0 0;
+  font-size: 0.7rem;
+  color: #64748b;
+}
+
+.receipt-divider {
+  border-top: 1px dashed #94a3b8;
+  margin: 12px 0;
+}
+
+.receipt-title-tag {
+  display: inline-block;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 0.74rem;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin-top: 6px;
+}
+
+.receipt-meta-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.receipt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.receipt-row .lbl {
+  color: #64748b;
+}
+
+.receipt-row .val {
+  color: #0f172a;
+  text-align: right;
+}
+
+.receipt-total-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.receipt-pertor-box {
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 0.74rem;
+}
+
+.pertor-title {
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.pertor-coa-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: #475569;
+}
+
+.pertor-coa-list code {
+  background: #e2e8f0;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color: #0f172a;
+}
+
+.receipt-footer {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.receipt-stamp {
+  display: inline-block;
+  font-weight: 800;
+  font-size: 0.72rem;
+  color: #166534;
+  border: 1px solid #166534;
+  padding: 3px 8px;
+  border-radius: 4px;
+  margin-top: 6px;
+}
+
 @media print {
   body * {
     visibility: hidden;
   }
   .invoice-printable-card,
-  .invoice-printable-card * {
+  .invoice-printable-card *,
+  .pos-receipt-card,
+  .pos-receipt-card * {
     visibility: visible;
   }
-  .invoice-printable-card {
+  .invoice-printable-card,
+  .pos-receipt-card {
     position: absolute;
     left: 0;
     top: 0;

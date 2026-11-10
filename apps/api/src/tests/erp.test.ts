@@ -825,6 +825,56 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(dupOpen.status).toBe(409);
       expect(dupOpen.body.error.code).toBe('REGISTER_ALREADY_OPEN');
     });
+
+    it('records cash deposit to Bank BRI (110101020200 vs 110101010100) and closes cashier session with balanced journal (PMO-082)', async () => {
+      const cshRes = await request(app)
+        .get('/api/v1/revenue/cashier/sessions')
+        .set('Authorization', `Bearer ${cashierToken}`);
+      expect(cshRes.status).toBe(200);
+      const openSession = cshRes.body.data.sessions?.find((s: any) => s.status === 'OPEN');
+      expect(openSession).toBeDefined();
+
+      const bnkRes = await request(app)
+        .get('/api/v1/reconciliation/bank-accounts')
+        .set('Authorization', `Bearer ${financeToken}`);
+      const bankAccountId = bnkRes.body.data[0].id;
+
+      // Deposit Rp 500.000 to bank
+      const depRes = await request(app)
+        .post('/api/v1/revenue/cashier/deposits')
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({
+          cashierSessionId: openSession.id,
+          bankAccountId,
+          amount: 500000,
+          referenceNo: `SLIP-DEP-${Date.now().toString().slice(-6)}`,
+          notes: 'Setoran kasir loket ke rekening Bank BRI',
+        });
+      expect(depRes.status).toBe(201);
+      expect(depRes.body.data.depositNumber).toBeDefined();
+
+      // Verify journal created for deposit
+      const jrn = await prisma.journalEntry.findFirst({
+        where: { sourceType: 'CASH_DEPOSIT', sourceId: depRes.body.data.id },
+        include: { lines: true },
+      });
+      expect(jrn).toBeDefined();
+      expect(jrn?.lines.length).toBe(2);
+      const debitLine = jrn?.lines.find((l) => Number(l.debit) > 0);
+      const creditLine = jrn?.lines.find((l) => Number(l.credit) > 0);
+      expect(debitLine?.accountCode).toBe('110101020200'); // Bank BRI Penerimaan Komersial
+      expect(creditLine?.accountCode).toBe('110101010100'); // Kas Operasional Loket Unit
+
+      // Close cashier session
+      const closeRes = await request(app)
+        .post(`/api/v1/revenue/cashier/sessions/${openSession.id}/close`)
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({
+          actualCountedCash: Number(openSession.theoreticalBalance),
+        });
+      expect(closeRes.status).toBe(200);
+      expect(['CLOSED', 'CLOSING_SUBMITTED']).toContain(closeRes.body.data.status);
+    });
   });
 
   describe('5. Bank Statement Import Preview & Duplicate Fingerprint Detection', () => {
