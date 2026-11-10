@@ -15,6 +15,130 @@ function computeLineFingerprint(bankAccountId: string, dateStr: string, refNo: s
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
 }
 
+export function parseBriStatementContent(rawText: string) {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith('#') && !l.startsWith('//'));
+
+  if (lines.length === 0) {
+    throw new AppError(400, 'EMPTY_FILE', 'File mutasi rekening koran kosong.');
+  }
+
+  // Detect separator: comma, semicolon, or tab
+  const sample = lines[0];
+  let sep = ',';
+  if ((sample.match(/;/g) || []).length > (sample.match(/,/g) || []).length) {
+    sep = ';';
+  } else if ((sample.match(/\t/g) || []).length > (sample.match(/,/g) || []).length) {
+    sep = '\t';
+  }
+
+  const splitRow = (rowStr: string) => {
+    const parts: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < rowStr.length; i++) {
+      const c = rowStr[i];
+      if (c === '"') {
+        inQuotes = !inQuotes;
+      } else if (c === sep && !inQuotes) {
+        parts.push(current.trim().replace(/^"|"$/g, ''));
+        current = '';
+      } else {
+        current += c;
+      }
+    }
+    parts.push(current.trim().replace(/^"|"$/g, ''));
+    return parts;
+  };
+
+  const headerParts = splitRow(lines[0]).map((h) => h.toLowerCase());
+  const isHeader =
+    headerParts.some((h) => h.includes('tanggal') || h.includes('date')) ||
+    headerParts.some((h) => h.includes('debet') || h.includes('debit') || h.includes('kredit') || h.includes('credit'));
+
+  let dateIdx = 0;
+  let refIdx = 1;
+  let descIdx = 2;
+  let debitIdx = 3;
+  let creditIdx = 4;
+  let startLine = 0;
+
+  if (isHeader) {
+    startLine = 1;
+    headerParts.forEach((h, idx) => {
+      if (h.includes('tanggal') || h.includes('date')) dateIdx = idx;
+      else if (h.includes('referensi') || h.includes('ref') || h.includes('no.')) refIdx = idx;
+      else if (h.includes('keterangan') || h.includes('uraian') || h.includes('desc')) descIdx = idx;
+      else if (h.includes('debet') || h.includes('debit')) debitIdx = idx;
+      else if (h.includes('kredit') || h.includes('credit')) creditIdx = idx;
+    });
+  }
+
+  const cleanNum = (val: string): number => {
+    if (!val) return 0;
+    const cleaned = val.replace(/[^0-9,.-]/g, '');
+    if (!cleaned) return 0;
+    if (cleaned.includes('.') && cleaned.includes(',')) {
+      return parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
+    }
+    if (/^\d{1,3}(\.\d{3})+$/.test(cleaned)) {
+      return parseFloat(cleaned.replace(/\./g, ''));
+    }
+    if (cleaned.includes(',') && !cleaned.includes('.')) {
+      return parseFloat(cleaned.replace(',', '.'));
+    }
+    return parseFloat(cleaned) || 0;
+  };
+
+  const parseDate = (dStr: string): string => {
+    const trimmed = dStr.trim();
+    const dmy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (dmy) {
+      const day = dmy[1].padStart(2, '0');
+      const month = dmy[2].padStart(2, '0');
+      const year = dmy[3];
+      return `${year}-${month}-${day}`;
+    }
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+      return trimmed.slice(0, 10);
+    }
+    return new Date().toISOString().slice(0, 10);
+  };
+
+  const rows = [];
+  for (let i = startLine; i < lines.length; i++) {
+    const cols = splitRow(lines[i]);
+    if (cols.length < 3) continue;
+
+    const rawDate = cols[dateIdx] || '';
+    const rawRef = cols[refIdx] || `BRI-REF-${String(i).padStart(4, '0')}`;
+    const rawDesc = cols[descIdx] || 'Mutasi Bank BRI Operasional PMO';
+    const debit = cleanNum(cols[debitIdx] || '0');
+    const credit = cleanNum(cols[creditIdx] || '0');
+
+    if (debit <= 0 && credit <= 0) continue;
+
+    const direction: 'DEBIT' | 'CREDIT' = credit > 0 ? 'CREDIT' : 'DEBIT';
+    const amount = credit > 0 ? credit : debit;
+
+    rows.push({
+      transactionDate: parseDate(rawDate),
+      description: rawDesc,
+      referenceNo: rawRef,
+      direction,
+      amount,
+    });
+  }
+
+  if (rows.length === 0) {
+    throw new AppError(400, 'NO_VALID_TRANSACTIONS', 'Tidak ditemukan baris transaksi yang valid dalam file mutasi.');
+  }
+
+  return rows;
+}
+
 reconciliationRouter.get('/bank-accounts', requirePermission('reconciliation:view'), async (req, res, next) => {
   try {
     const accounts = await prisma.bankAccount.findMany({
@@ -74,10 +198,12 @@ const previewImportSchema = z.object({
 });
 
 async function analyzeStatementRows(bankAccountId: string, rows: Array<z.infer<typeof statementRowSchema>>) {
-  const [payments, deposits, expenses, existingLines] = await Promise.all([
+  const [payments, deposits, expenses, pettyCash, refunds, existingLines] = await Promise.all([
     prisma.payment.findMany({ where: { status: 'CONFIRMED' } }),
     prisma.cashDeposit.findMany({ where: { status: 'VERIFIED' } }),
     prisma.expense.findMany({ where: { status: { in: ['PAID', 'POSTED'] } } }),
+    prisma.pettyCashSubmission.findMany({ where: { status: { in: ['APPROVED', 'DISBURSED', 'SETTLED', 'CLOSED'] } } }),
+    prisma.refund.findMany({ where: { status: 'PROCESSED' } }),
     prisma.bankStatementLine.findMany({ where: { bankAccountId }, select: { fingerprint: true } }),
   ]);
 
@@ -99,7 +225,8 @@ async function analyzeStatementRows(bankAccountId: string, rows: Array<z.infer<t
       if (row.direction === 'CREDIT') {
         const matchedPayment = payments.find(
           (p) =>
-            p.referenceNo.toUpperCase() === row.referenceNo.trim().toUpperCase() ||
+            (p.referenceNo && p.referenceNo.toUpperCase() === row.referenceNo.trim().toUpperCase()) ||
+            (p.receiptNumber && p.receiptNumber.toUpperCase() === row.referenceNo.trim().toUpperCase()) ||
             toCents(p.netAmount) === toCents(amountStr) ||
             toCents(p.grossAmount) === toCents(amountStr)
         );
@@ -111,7 +238,8 @@ async function analyzeStatementRows(bankAccountId: string, rows: Array<z.infer<t
         } else {
           const matchedDeposit = deposits.find(
             (d) =>
-              d.referenceNo.toUpperCase() === row.referenceNo.trim().toUpperCase() ||
+              (d.referenceNo && d.referenceNo.toUpperCase() === row.referenceNo.trim().toUpperCase()) ||
+              (d.depositNumber && d.depositNumber.toUpperCase() === row.referenceNo.trim().toUpperCase()) ||
               toCents(d.amount) === toCents(amountStr)
           );
           if (matchedDeposit) {
@@ -125,6 +253,7 @@ async function analyzeStatementRows(bankAccountId: string, rows: Array<z.infer<t
         const matchedExpense = expenses.find(
           (e) =>
             (e.receiptRef && e.receiptRef.toUpperCase() === row.referenceNo.trim().toUpperCase()) ||
+            (e.docNumber && e.docNumber.toUpperCase() === row.referenceNo.trim().toUpperCase()) ||
             toCents(e.totalAmount) === toCents(amountStr)
         );
         if (matchedExpense) {
@@ -132,6 +261,31 @@ async function analyzeStatementRows(bankAccountId: string, rows: Array<z.infer<t
           suggestedEntityId = matchedExpense.id;
           suggestedDocNumber = matchedExpense.docNumber;
           matchStatus = 'MATCHED';
+        } else {
+          const matchedPettyCash = pettyCash.find(
+            (pc) =>
+              (pc.submissionNo && pc.submissionNo.toUpperCase() === row.referenceNo.trim().toUpperCase()) ||
+              toCents(pc.netDisbursement) === toCents(amountStr) ||
+              toCents(pc.totalTransaction) === toCents(amountStr)
+          );
+          if (matchedPettyCash) {
+            suggestedEntityType = 'PettyCashSubmission';
+            suggestedEntityId = matchedPettyCash.id;
+            suggestedDocNumber = matchedPettyCash.submissionNo;
+            matchStatus = 'MATCHED';
+          } else {
+            const matchedRefund = refunds.find(
+              (r) =>
+                (r.refundNumber && r.refundNumber.toUpperCase() === row.referenceNo.trim().toUpperCase()) ||
+                toCents(r.amount) === toCents(amountStr)
+            );
+            if (matchedRefund) {
+              suggestedEntityType = 'Refund';
+              suggestedEntityId = matchedRefund.id;
+              suggestedDocNumber = matchedRefund.refundNumber;
+              matchStatus = 'MATCHED';
+            }
+          }
         }
       }
     }
@@ -150,6 +304,101 @@ async function analyzeStatementRows(bankAccountId: string, rows: Array<z.infer<t
     };
   });
 }
+
+const parseCsvSchema = z.object({
+  rawContent: z.string().min(1, 'Isi data rekening koran tidak boleh kosong.'),
+  fileName: z.string().optional(),
+});
+
+reconciliationRouter.post('/parse-csv', requirePermission('reconciliation:manage'), async (req, res, next) => {
+  try {
+    const parsed = parseCsvSchema.parse(req.body);
+    const rows = parseBriStatementContent(parsed.rawContent);
+    const totalDebit = rows.filter((r) => r.direction === 'DEBIT').reduce((acc, r) => acc + r.amount, 0);
+    const totalCredit = rows.filter((r) => r.direction === 'CREDIT').reduce((acc, r) => acc + r.amount, 0);
+
+    res.json({
+      success: true,
+      data: {
+        fileName: parsed.fileName || 'mutasi-bank-bri.csv',
+        totalRows: rows.length,
+        totalDebit,
+        totalCredit,
+        rows,
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+reconciliationRouter.get('/summary/:bankAccountId', requirePermission('reconciliation:view'), async (req, res, next) => {
+  try {
+    const bankAccount = await prisma.bankAccount.findUnique({
+      where: { id: req.params.bankAccountId },
+      include: { businessUnit: true },
+    });
+    if (!bankAccount) throw new AppError(404, 'ACCOUNT_NOT_FOUND', 'Rekening bank tidak ditemukan.');
+
+    const journalLines = await prisma.journalLine.findMany({
+      where: {
+        accountCode: bankAccount.glAccountCode,
+        journalEntry: { status: 'POSTED' },
+      },
+    });
+
+    let totalDebitCents = 0n;
+    let totalCreditCents = 0n;
+    for (const line of journalLines) {
+      totalDebitCents += toCents(line.debit);
+      totalCreditCents += toCents(line.credit);
+    }
+    const bookBalanceCents = totalDebitCents - totalCreditCents;
+    const bookBalance = Number(fromCents(bookBalanceCents));
+    const bankBalance = Number(bankAccount.currentBalance);
+    const diff = bookBalance - bankBalance;
+
+    const totalImports = await prisma.bankStatementImport.count({
+      where: { bankAccountId: bankAccount.id },
+    });
+    const latestImport = await prisma.bankStatementImport.findFirst({
+      where: { bankAccountId: bankAccount.id },
+      orderBy: { createdAt: 'desc' },
+      include: { lines: true },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        bankAccountId: bankAccount.id,
+        bankName: bankAccount.bankName,
+        accountNumberMasked: bankAccount.accountNumberMasked,
+        glAccountCode: bankAccount.glAccountCode,
+        bookBalance,
+        bankBalance,
+        difference: diff,
+        isBalanced: diff === 0,
+        totalImports,
+        latestImport: latestImport
+          ? {
+              id: latestImport.id,
+              importNumber: latestImport.importNumber,
+              periodLabel: latestImport.periodLabel,
+              status: latestImport.status,
+              totalLines: latestImport.totalLines,
+              matchedCount: latestImport.matchedCount,
+              unmatchedCount: latestImport.unmatchedCount,
+              duplicateCount: latestImport.duplicateCount,
+            }
+          : null,
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Preview statement rows before committing to database
 reconciliationRouter.post('/preview', requirePermission('reconciliation:manage'), async (req, res, next) => {

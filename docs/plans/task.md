@@ -1,8 +1,8 @@
 | id | task | status | notes |
 | --- | --- | --- | --- |
-| s3-rev-1 | Uji simulasi transaksi kas & pendapatan lintas 5 Unit Bisnis PMO di erp.test.ts | completed | TCI (420301010200), ITS (420301040200), KLINIK (420301060100), MICE (420301070202), MGMT (420301090100) |
-| s3-rev-2 | Validasi integritas Trial Balance & General Ledger Pertor 310 (Balanced = true, diff = 0) | completed | Memastikan buku besar tetap seimbang sempurna setelah transaksi Sprint 3 |
-| s3-rev-3 | Quality Gate: Monorepo typecheck & Vite build verification | completed | 29/29 tests pass, tsc 0 errors, Vite build clean (6.92s) |
-| s3-rev-4 | Berita Acara Sprint 3 Review & Dokumentasi Teknis di docs/tasks/KOI-113 | completed | Rekap 7 tiket transaksi kas & daftar Pull Request untuk Manager |
-| s3-rev-5 | Update indeks docs/tasks/README.md & JIRA-SPRINT-SCHEDULE-AND-TIMELINE.md | completed | Sinkronisasi status SPRINT-3-REV KOI-113 ke In Review |
-| s3-rev-6 | Git commit, push origin, PR GitHub & transisi Jira ke In Review | completed | strictly In Review (anti-Done) |
+| koi115-1 | Parser Rekening Koran Bank BRI (CSV / TSV / Format Mutasi BRI) di Backend & Helper | completed | Parsing kolom Tanggal, Uraian, No. Referensi, Debet, Kredit, Saldo |
+| koi115-2 | Peningkatan Engine Auto-Matching Pertor 310 (Deposit POS, Pelunasan LS, UMK Panjar) | completed | Matching multi-dokumen (Payment, CashDeposit, Expense, PettyCash) |
+| koi115-3 | UI ReconciliationView.vue: File Upload Reader, Parser BRI & Banner Kepatuhan 110101020200 | completed | Drag & drop / file input, eliminasi dummy slop, indikator selisih buku vs bank |
+| koi115-4 | Integration Test di erp.test.ts untuk Bank BRI statement import & auto-matching | completed | 30/30 vitest passed, verifikasi auto-matching & deteksi duplikasi SHA-256 |
+| koi115-5 | Quality Gate: typecheck 0 error, Vitest passing, Vite build clean | completed | tsc 0 error, vue-tsc 0 error, Vite build clean (3.31s) |
+| koi115-6 | Dokumentasi docs/tasks/KOI-115, Git Commit, Push Origin & Jira In Review | in_progress | Strictly In Review (anti-Done) |

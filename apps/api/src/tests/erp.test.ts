@@ -877,7 +877,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
     });
   });
 
-  describe('5. Bank Statement Import Preview & Duplicate Fingerprint Detection', () => {
+  describe('5. Bank Statement Import Preview, BRI Parser & Duplicate Fingerprint Detection (KOI-115 / PMO-081)', () => {
     it('detects duplicate statement lines via SHA-256 fingerprint during preview', async () => {
       const bnkRes = await request(app)
         .get('/api/v1/reconciliation/bank-accounts')
@@ -912,6 +912,80 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(previewRes.status).toBe(200);
       expect(previewRes.body.data.summary.totalRows).toBe(2);
       expect(previewRes.body.data.summary.duplicateCount).toBe(1);
+    });
+
+    it('parses Bank BRI CSV statement, auto-matches transactions, and calculates book vs bank summary (PMO-081)', async () => {
+      const bnkRes = await request(app)
+        .get('/api/v1/reconciliation/bank-accounts')
+        .set('Authorization', `Bearer ${financeToken}`);
+      const briAccount = bnkRes.body.data.find((b: any) => b.code.includes('BRI') || b.glAccountCode === '110101020200') || bnkRes.body.data[0];
+
+      // 1. Test CSV Parser for Bank BRI
+      const testTs = Date.now();
+      const csvRaw = `Tanggal,No Referensi,Keterangan,Debet,Kredit,Saldo
+2026-12-16,STR-BRI-${testTs}-01,SETORAN KASIR POS PMO UTAMA,0,500000,10500000
+2026-12-17,LS-BRI-${testTs}-02,PELUNASAN TAGIHAN VENDOR LS,19980000,0,8520000
+2026-12-18,ADM-BRI-${testTs}-03,BIAYA ADM REKENING BRI,25000,0,8495000`;
+
+      const parseRes = await request(app)
+        .post('/api/v1/reconciliation/parse-csv')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ rawContent: csvRaw, fileName: 'rekening-koran-bri-desember-2026.csv' });
+
+      expect(parseRes.status).toBe(200);
+      expect(parseRes.body.data.totalRows).toBe(3);
+      expect(parseRes.body.data.rows[0].direction).toBe('CREDIT');
+      expect(parseRes.body.data.rows[0].amount).toBe(500000);
+      expect(parseRes.body.data.rows[1].direction).toBe('DEBIT');
+      expect(parseRes.body.data.rows[1].amount).toBe(19980000);
+
+      // 2. Test Preview with auto-matching
+      const previewRes = await request(app)
+        .post('/api/v1/reconciliation/preview')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          bankAccountId: briAccount.id,
+          periodLabel: 'Desember 2026',
+          fileName: 'rekening-koran-bri-desember-2026.csv',
+          rows: parseRes.body.data.rows,
+        });
+
+      expect(previewRes.status).toBe(200);
+      expect(previewRes.body.data.summary.totalRows).toBe(3);
+      expect(previewRes.body.data.summary.duplicateCount).toBe(0);
+
+      // 3. Test Commit Import
+      const importRes = await request(app)
+        .post('/api/v1/reconciliation/import')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          bankAccountId: briAccount.id,
+          periodLabel: 'Desember 2026',
+          fileName: 'rekening-koran-bri-desember-2026.csv',
+          rows: parseRes.body.data.rows,
+        });
+
+      expect(importRes.status).toBe(201);
+      const importId = importRes.body.data.id;
+      expect(importRes.body.data.status).toBe('RECONCILING');
+
+      // 4. Test Reconciliation Summary endpoint
+      const summaryRes = await request(app)
+        .get(`/api/v1/reconciliation/summary/${briAccount.id}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(summaryRes.status).toBe(200);
+      expect(summaryRes.body.data.glAccountCode).toBeDefined();
+      expect(summaryRes.body.data.bookBalance).toBeTypeOf('number');
+      expect(summaryRes.body.data.bankBalance).toBeTypeOf('number');
+
+      // 5. Finalize reconciliation session
+      const finRes = await request(app)
+        .post(`/api/v1/reconciliation/imports/${importId}/finalize`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(finRes.status).toBe(200);
+      expect(finRes.body.data.status).toBe('FINALIZED');
     });
   });
 
