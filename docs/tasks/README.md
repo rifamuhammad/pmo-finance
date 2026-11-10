@@ -23,6 +23,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-113` | [SPRINT-3-REV] Sprint 3 Review & Uji Transaksi Kas Lintas 5 Unit Bisnis PMO | `feature/KOI-113-sprint-3-review-uji-transaksi-kas` | `In Review` | [KOI-113-sprint-3-review-uji-transaksi-kas.md](./KOI-113-sprint-3-review-uji-transaksi-kas.md) |
 | `KOI-115` | [PMO-081] Rekonsiliasi Bank BRI: Parser Rekening Koran CSV/Excel & Auto-Matching | `feature/KOI-115-rekonsiliasi-bank-bri-parser-auto-matching` | `In Review` | [KOI-115-rekonsiliasi-bank-bri-parser-auto-matching.md](./KOI-115-rekonsiliasi-bank-bri-parser-auto-matching.md) |
 | `KOI-116` | [PMO-091] HRIS Gaji PUT PK: Perhitungan Standar Biaya Masukan (SBM) & PPh 21 | `feature/KOI-116-hris-gaji-put-pk-sbm-pph21` | `In Review` | [KOI-116-hris-gaji-put-pk-sbm-pph21.md](./KOI-116-hris-gaji-put-pk-sbm-pph21.md) |
+| `KOI-117` | [PMO-101] Database Karyawan, Riwayat Kontrak & Rekapitulasi Presensi Unit | `feature/KOI-117-hris-database-karyawan-kontrak-presensi` | `In Review` | [KOI-117-hris-database-karyawan-kontrak-presensi.md](./KOI-117-hris-database-karyawan-kontrak-presensi.md) |
 
 ---
 

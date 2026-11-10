@@ -1098,21 +1098,42 @@ model Employee {
 
   attendances Attendance[]
   salarySlips SalarySlip[]
+  contracts   EmployeeContract[]
 
   @@index([businessUnitId, department, status])
 }
 
+model EmployeeContract {
+  id             String    @id @default(uuid())
+  employeeId     String
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  contractNumber String    // e.g. "SK/PMO/PUT-PK/2026/014"
+  contractType   String    @default("PUT_PK") // PUT_PK, PKWT, KONSULTAN_AHLI, MAGANG
+  startDate      DateTime  @db.Date
+  endDate        DateTime  @db.Date
+  salaryRate     Decimal?  @db.Decimal(18, 2)
+  status         String    @default("ACTIVE") // ACTIVE, EXPIRING_SOON, EXPIRED, RENEWED, TERMINATED
+  notes          String?
+  signedDate     DateTime? @db.Date
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@index([employeeId, status])
+  @@index([endDate, status])
+}
+
 model Attendance {
-  id          String    @id @default(uuid())
-  employeeId  String
-  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  date        DateTime  @db.Date
-  checkIn     DateTime?
-  checkOut    DateTime?
-  status      String    @default("PRESENT") // PRESENT, LATE, SICK, LEAVE, ALPHA
-  notes       String?
-  verifiedBy  String?
-  createdAt   DateTime  @default(now())
+  id            String    @id @default(uuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date          DateTime  @db.Date
+  checkIn       DateTime?
+  checkOut      DateTime?
+  status        String    @default("PRESENT") // PRESENT, LATE, SICK, LEAVE, ALPHA
+  overtimeHours Decimal   @default(0) @db.Decimal(5, 2)
+  notes         String?
+  verifiedBy    String?
+  createdAt     DateTime  @default(now())
 
   @@unique([employeeId, date])
   @@index([date, status])

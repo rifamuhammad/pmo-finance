@@ -7,6 +7,20 @@ import { formatRupiah as formatCurrency, formatDate } from '../utils/format';
 
 type ActiveTab = 'EMPLOYEES' | 'ATTENDANCE' | 'PAYROLL' | 'CALCULATOR_SBM';
 
+interface ContractRecord {
+  id: string;
+  contractNumber: string;
+  contractType: string;
+  startDate: string;
+  endDate: string;
+  salaryRate: number | null;
+  status: string;
+  alertStatus: 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED' | 'RENEWED' | 'TERMINATED';
+  daysRemaining: number;
+  notes: string | null;
+  signedDate: string | null;
+}
+
 interface EmployeeRecord {
   id: string;
   nip: string;
@@ -32,6 +46,10 @@ interface EmployeeRecord {
   bpjsKesehatanNo: string | null;
   bpjsKetenagakerjaanNo: string | null;
   status: string;
+  contracts?: ContractRecord[];
+  activeContract?: ContractRecord | null;
+  contractStatus?: string;
+  daysUntilContractEnd?: number | null;
 }
 
 interface AttendanceRecord {
@@ -47,8 +65,68 @@ interface AttendanceRecord {
   checkIn: string | null;
   checkOut: string | null;
   status: 'PRESENT' | 'LATE' | 'SICK' | 'LEAVE' | 'ALPHA';
+  overtimeHours?: number;
   notes: string | null;
   verifiedBy: string | null;
+}
+
+interface UnitRecapEmployee {
+  employeeId: string;
+  nip: string;
+  fullName: string;
+  department: string;
+  position: string;
+  employmentStatus: string;
+  totalLoggedDays: number;
+  presentDays: number;
+  lateDays: number;
+  sickDays: number;
+  leaveDays: number;
+  alphaDays: number;
+  overtimeHours: number;
+  mealAllowanceAmount: number;
+  overtimeAmount: number;
+  totalSbmEntitlement: number;
+  isVerified: boolean;
+}
+
+interface UnitRecapItem {
+  unitId: string;
+  unitCode: string;
+  unitName: string;
+  managerName: string;
+  totalEmployees: number;
+  presentDays: number;
+  sickDays: number;
+  leaveDays: number;
+  alphaDays: number;
+  overtimeHours: number;
+  mealAllowanceAmount: number;
+  overtimeCost: number;
+  totalSbmCost: number;
+  isVerified: boolean;
+  status: 'VERIFIED' | 'PENDING_VERIFICATION';
+  employees: UnitRecapEmployee[];
+}
+
+interface UnitRecapResponse {
+  periodMonth: number;
+  periodYear: number;
+  units: UnitRecapItem[];
+  summary: {
+    totalUnits: number;
+    totalEmployees: number;
+    totalPresentDays: number;
+    totalSickDays: number;
+    totalLeaveDays: number;
+    totalAlphaDays: number;
+    totalOvertimeHours: number;
+    totalMealAllowance: number;
+    totalOvertimeCost: number;
+    grandTotalSbm: number;
+    standardMealPerDay: number;
+    standardOvertimePerHour: number;
+  };
 }
 
 interface SalarySlipRecord {
@@ -142,6 +220,102 @@ const filterDepartment = ref('ALL');
 const showSlipModal = ref(false);
 const selectedSlip = ref<SalarySlipRecord | null>(null);
 
+// Modal Contract History & Renewal State
+const showContractModal = ref(false);
+const selectedEmpForContract = ref<EmployeeRecord | null>(null);
+const savingContract = ref(false);
+const showAddContractForm = ref(false);
+const newContractForm = reactive({
+  contractNumber: '',
+  contractType: 'PUT_PK',
+  startDate: new Date().toISOString().slice(0, 10),
+  endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().slice(0, 10),
+  salaryRate: 0,
+  notes: '',
+});
+
+function openContractModal(emp: EmployeeRecord) {
+  selectedEmpForContract.value = emp;
+  showAddContractForm.value = false;
+  newContractForm.contractNumber = `SK/PMO/PUT-PK/${new Date().getFullYear()}/${emp.nip.slice(-3)}`;
+  newContractForm.contractType = emp.employmentStatus === 'CONTRACT' ? 'PUT_PK' : 'PUT_PK';
+  newContractForm.startDate = new Date().toISOString().slice(0, 10);
+  newContractForm.endDate = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().slice(0, 10);
+  newContractForm.salaryRate = emp.baseSalary;
+  newContractForm.notes = `Perpanjangan SK Penugasan Kerja Pegawai PUT PK ${emp.fullName}`;
+  showContractModal.value = true;
+}
+
+async function saveContractRenewal() {
+  if (!selectedEmpForContract.value) return;
+  savingContract.value = true;
+  errorMessage.value = '';
+  try {
+    await api.post('/hris/contracts', {
+      employeeId: selectedEmpForContract.value.id,
+      contractNumber: newContractForm.contractNumber,
+      contractType: newContractForm.contractType,
+      startDate: newContractForm.startDate,
+      endDate: newContractForm.endDate,
+      salaryRate: Number(newContractForm.salaryRate),
+      notes: newContractForm.notes,
+    });
+    feedbackMessage.value = `Berhasil menerbitkan SK Perpanjangan ${newContractForm.contractNumber} untuk ${selectedEmpForContract.value.fullName}.`;
+    await loadData();
+    const updated = employees.value.find((e) => e.id === selectedEmpForContract.value?.id);
+    if (updated) selectedEmpForContract.value = updated;
+    showAddContractForm.value = false;
+  } catch (err: any) {
+    errorMessage.value = err.message || 'Gagal menyimpan perpanjangan kontrak.';
+  } finally {
+    savingContract.value = false;
+  }
+}
+
+// Unit Attendance Recap State
+const recapMonth = ref(12);
+const recapYear = ref(2026);
+const recapUnitId = ref('ALL');
+const unitRecapData = ref<UnitRecapResponse | null>(null);
+const unitRecapLoading = ref(false);
+const verifyingUnit = ref(false);
+const showRawAttendance = ref(false);
+
+async function loadUnitRecap() {
+  unitRecapLoading.value = true;
+  try {
+    const query = new URLSearchParams({
+      month: String(recapMonth.value),
+      year: String(recapYear.value),
+      businessUnitId: recapUnitId.value,
+    }).toString();
+    const res = await api.get<UnitRecapResponse>(`/hris/attendance/unit-recap?${query}`);
+    unitRecapData.value = res.data;
+  } catch (err: any) {
+    errorMessage.value = err.message || 'Gagal memuat rekapitulasi presensi unit.';
+  } finally {
+    unitRecapLoading.value = false;
+  }
+}
+
+async function verifyUnit(unitId: string) {
+  verifyingUnit.value = true;
+  errorMessage.value = '';
+  try {
+    const res = await api.post<any>('/hris/attendance/verify-unit', {
+      businessUnitId: unitId,
+      periodMonth: Number(recapMonth.value),
+      periodYear: Number(recapYear.value),
+    });
+    feedbackMessage.value = `Rekapitulasi presensi unit berhasil diverifikasi (${res.data.updatedCount} baris).`;
+    await loadUnitRecap();
+  } catch (err: any) {
+    errorMessage.value = err.message || 'Gagal memverifikasi presensi unit.';
+  } finally {
+    verifyingUnit.value = false;
+  }
+}
+
 const filteredEmployees = computed(() => {
   return employees.value.filter((emp) => {
     const matchDept =
@@ -175,6 +349,7 @@ async function loadData() {
     employees.value = empRes.data || [];
     attendances.value = attRes.data || [];
     salarySlips.value = slipRes.data || [];
+    await loadUnitRecap();
     if (!calcEmployeeId.value && employees.value.length > 0) {
       calcEmployeeId.value = employees.value[0].id;
       calculateSbm();
@@ -385,12 +560,13 @@ onMounted(loadData);
                 <th>NIP &amp; Nama Pegawai</th>
                 <th>Divisi &amp; Unit</th>
                 <th>Jabatan / Posisi</th>
-                <th>Status Kerja</th>
+                <th>Status Kerja &amp; Kontrak</th>
                 <th class="money-col">Gaji Pokok</th>
                 <th class="money-col">Tunjangan</th>
                 <th class="money-col">Estimasi THP</th>
                 <th>Rekening Payroll</th>
-                <th style="text-align: center;">Status</th>
+                <th style="text-align: center;">Masa Berlaku SK</th>
+                <th style="text-align: center;">Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -408,9 +584,23 @@ onMounted(loadData);
                   <span class="role-chip">{{ emp.position }}</span>
                 </td>
                 <td>
-                  <span class="erp-badge" :class="emp.employmentStatus === 'PERMANENT' ? 'erp-badge-success' : 'erp-badge-warn'">
-                    {{ emp.employmentStatus === 'PERMANENT' ? 'Pegawai Tetap' : 'Kontrak' }}
-                  </span>
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <span class="erp-badge" :class="emp.employmentStatus === 'PERMANENT' ? 'erp-badge-success' : 'erp-badge-warn'">
+                      {{ emp.employmentStatus === 'PERMANENT' ? 'Pegawai Tetap' : 'PUT PK' }}
+                    </span>
+                    <span
+                      v-if="emp.activeContract"
+                      class="erp-badge"
+                      :class="{
+                        'erp-badge-warn': emp.contractStatus === 'EXPIRING_SOON',
+                        'erp-badge-danger': emp.contractStatus === 'EXPIRED',
+                        'erp-badge-success': emp.contractStatus === 'ACTIVE',
+                        'erp-badge-info': emp.contractStatus === 'PERMANENT',
+                      }"
+                    >
+                      {{ emp.contractStatus === 'EXPIRING_SOON' ? `⚠️ Sisa ${emp.daysUntilContractEnd} hari` : (emp.contractStatus === 'EXPIRED' ? '❌ Habis' : 'Aktif') }}
+                    </span>
+                  </div>
                 </td>
                 <td class="money-col">{{ formatCurrency(emp.baseSalary) }}</td>
                 <td class="money-col">{{ formatCurrency(emp.totalAllowance) }}</td>
@@ -424,10 +614,20 @@ onMounted(loadData);
                   </div>
                 </td>
                 <td style="text-align: center;">
-                  <span class="condition-chip cond-good">
-                    <span class="cond-dot"></span>
-                    Aktif
-                  </span>
+                  <div v-if="emp.activeContract">
+                    <strong class="doc-code" style="font-size: 0.75rem;">{{ emp.activeContract.contractNumber }}</strong>
+                    <div class="table-sub">s.d {{ formatDate(emp.activeContract.endDate) }}</div>
+                  </div>
+                  <span v-else class="text-muted">SK Tetap</span>
+                </td>
+                <td style="text-align: center;">
+                  <button
+                    type="button"
+                    class="btn btn-xs btn-outline-primary"
+                    @click="openContractModal(emp)"
+                  >
+                    📄 SK &amp; Kontrak
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -438,11 +638,174 @@ onMounted(loadData);
 
     <!-- TAB 2: ATTENDANCE RECAP -->
     <div v-if="currentTab === 'ATTENDANCE'" class="tab-pane">
-      <section class="panel panel-elevated">
+      <!-- Unit Recap Controls & Filters -->
+      <div class="filter-bar">
+        <div class="filter-item">
+          <label class="form-label">Bulan Periode</label>
+          <select v-model="recapMonth" class="select" @change="loadUnitRecap">
+            <option :value="10">Oktober</option>
+            <option :value="11">November</option>
+            <option :value="12">Desember</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <label class="form-label">Tahun</label>
+          <select v-model="recapYear" class="select" @change="loadUnitRecap">
+            <option :value="2025">2025</option>
+            <option :value="2026">2026</option>
+            <option :value="2027">2027</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <label class="form-label">Filter Unit Bisnis</label>
+          <select v-model="recapUnitId" class="select" @change="loadUnitRecap">
+            <option value="ALL">Semua Unit Bisnis PMO</option>
+            <option v-for="u in unitRecapData?.units || []" :key="u.unitId" :value="u.unitId">
+              {{ u.unitCode }} - {{ u.unitName }}
+            </option>
+          </select>
+        </div>
+        <div class="filter-item" style="display: flex; align-items: flex-end; gap: 8px;">
+          <button
+            type="button"
+            class="btn btn-sm btn-primary"
+            :disabled="unitRecapLoading"
+            @click="loadUnitRecap"
+          >
+            {{ unitRecapLoading ? 'Memuat...' : '🔄 Muat Ulang Rekap' }}
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm"
+            @click="showRawAttendance = !showRawAttendance"
+          >
+            {{ showRawAttendance ? 'Sembunyikan Log Harian' : '📋 Tampilkan Log Harian' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- SBM Attendance KPI Summary Strip -->
+      <section v-if="unitRecapData" class="metric-strip">
+        <div class="metric-box focal">
+          <div class="metric-label">Total Kehadiran Fisik (SBM)</div>
+          <div class="metric-value">{{ unitRecapData.summary.totalPresentDays }} Hari</div>
+          <div class="metric-sub">Standar Uang Makan Rp 37.000 / hari</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-head-row">
+            <div class="metric-label">Total Jam Lembur Unit</div>
+            <span class="erp-badge erp-badge-warn">SBM 2026</span>
+          </div>
+          <div class="metric-value">{{ unitRecapData.summary.totalOvertimeHours }} Jam</div>
+          <div class="metric-sub">Standar Lembur Rp 20.000 / jam</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-head-row">
+            <div class="metric-label">Hak Uang Makan SBM</div>
+            <span class="erp-badge erp-badge-info">Akun 520101060200</span>
+          </div>
+          <div class="metric-value money">{{ formatCurrency(unitRecapData.summary.totalMealAllowance) }}</div>
+          <div class="metric-sub">Beban Uang Makan Tenaga Non PNS</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-head-row">
+            <div class="metric-label">Total Beban Lembur SBM</div>
+            <span class="erp-badge erp-badge-info">Akun 520101050200</span>
+          </div>
+          <div class="metric-value money text-emerald">{{ formatCurrency(unitRecapData.summary.grandTotalSbm) }}</div>
+          <div class="metric-sub">Total Uang Makan + Uang Lembur</div>
+        </div>
+      </section>
+
+      <!-- Unit By Unit Breakdown Cards -->
+      <div v-if="unitRecapData && unitRecapData.units.length > 0" class="unit-recaps-container" style="display: flex; flex-direction: column; gap: 16px;">
+        <section v-for="unit in unitRecapData.units" :key="unit.unitId" class="panel panel-elevated">
+          <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="doc-code">{{ unit.unitCode }}</span>
+                <h3 class="section-title" style="margin: 0;">{{ unit.unitName }}</h3>
+                <span
+                  class="erp-badge"
+                  :class="unit.isVerified ? 'erp-badge-success' : 'erp-badge-warn'"
+                >
+                  {{ unit.isVerified ? '✓ TERVERIFIKASI RESMI' : '⏳ MENUNGGU VERIFIKASI' }}
+                </span>
+              </div>
+              <p class="text-muted" style="margin: 4px 0 0 0;">
+                Manajer Unit: <strong>{{ unit.managerName }}</strong> · {{ unit.totalEmployees }} Pegawai Aktif · Total SBM: <strong>{{ formatCurrency(unit.totalSbmCost) }}</strong> (Makan: {{ formatCurrency(unit.mealAllowanceAmount) }} + Lembur: {{ formatCurrency(unit.overtimeCost) }})
+              </p>
+            </div>
+            <div v-if="!unit.isVerified">
+              <button
+                type="button"
+                class="btn btn-sm btn-success"
+                :disabled="verifyingUnit"
+                @click="verifyUnit(unit.unitId)"
+              >
+                {{ verifyingUnit ? 'Memverifikasi...' : '✓ Verifikasi Rekap Presensi Unit' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="erp-table compact-table">
+              <thead>
+                <tr>
+                  <th>NIP &amp; Nama Pegawai</th>
+                  <th>Posisi / Jabatan</th>
+                  <th style="text-align: center;">Hadir (Hari)</th>
+                  <th style="text-align: center;">Terlambat</th>
+                  <th style="text-align: center;">Sakit / Cuti</th>
+                  <th style="text-align: center;">Lembur (Jam)</th>
+                  <th class="money-col">Uang Makan SBM</th>
+                  <th class="money-col">Uang Lembur SBM</th>
+                  <th class="money-col">Total SBM</th>
+                  <th style="text-align: center;">Status Verifikasi</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="emp in unit.employees" :key="emp.employeeId">
+                  <td>
+                    <strong class="doc-code">{{ emp.nip }}</strong>
+                    <div class="table-title">{{ emp.fullName }}</div>
+                  </td>
+                  <td>
+                    <span class="role-chip">{{ emp.position }}</span>
+                  </td>
+                  <td style="text-align: center; font-weight: 700; color: var(--status-success-text);">
+                    {{ emp.presentDays }}
+                  </td>
+                  <td style="text-align: center; color: var(--status-warning-text);">
+                    {{ emp.lateDays }}
+                  </td>
+                  <td style="text-align: center;">
+                    {{ emp.sickDays }}S / {{ emp.leaveDays }}C / {{ emp.alphaDays }}A
+                  </td>
+                  <td style="text-align: center; font-weight: 700;">
+                    {{ emp.overtimeHours }} Jam
+                  </td>
+                  <td class="money-col">{{ formatCurrency(emp.mealAllowanceAmount) }}</td>
+                  <td class="money-col">{{ formatCurrency(emp.overtimeAmount) }}</td>
+                  <td class="money-col font-bold text-emerald">{{ formatCurrency(emp.totalSbmEntitlement) }}</td>
+                  <td style="text-align: center;">
+                    <span class="erp-badge" :class="emp.isVerified ? 'erp-badge-success' : 'erp-badge-warn'">
+                      {{ emp.isVerified ? 'Terverifikasi' : 'Draft' }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Raw Daily Attendance Log Table (Toggleable) -->
+      <section v-if="showRawAttendance" class="panel panel-elevated" style="margin-top: 16px;">
         <div class="panel-header">
           <div>
-            <h2 class="section-title">Rekap Presensi &amp; Absensi Pegawai PMO</h2>
-            <p class="text-muted">Catatan waktu kehadiran kerja, jam masuk, jam pulang, dan verifikasi kehadiran tim HRD.</p>
+            <h2 class="section-title">Log Presensi Harian Mentah (Check-In &amp; Check-Out)</h2>
+            <p class="text-muted">Catatan waktu kehadiran kerja individual, jam masuk, jam pulang, dan verifikasi verifikator unit.</p>
           </div>
         </div>
 
@@ -845,6 +1208,134 @@ onMounted(loadData);
         </div>
       </div>
     </ModalDialog>
+
+    <!-- Modal Riwayat Kontrak & Perpanjangan SK -->
+    <ModalDialog
+      :open="showContractModal"
+      title="Riwayat SK Kontrak &amp; Penugasan Pegawai PUT PK"
+      @close="showContractModal = false"
+    >
+      <div v-if="selectedEmpForContract" class="contract-modal-content">
+        <div class="contract-emp-summary">
+          <div>
+            <div class="table-sub">{{ selectedEmpForContract.nip }} · {{ selectedEmpForContract.department }}</div>
+            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700;">{{ selectedEmpForContract.fullName }}</h3>
+            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 2px;">Posisi: {{ selectedEmpForContract.position }}</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">Status Kepegawaian:</div>
+            <span class="erp-badge" :class="selectedEmpForContract.employmentStatus === 'PERMANENT' ? 'erp-badge-success' : 'erp-badge-warn'">
+              {{ selectedEmpForContract.employmentStatus === 'PERMANENT' ? 'Pegawai Tetap' : 'PUT PK / Kontrak' }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Contract List -->
+        <div class="contract-history-section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700;">Daftar Surat Keputusan (SK) &amp; Perpanjangan Kontrak</h4>
+            <button
+              v-if="!showAddContractForm"
+              type="button"
+              class="btn btn-xs btn-outline-primary"
+              @click="showAddContractForm = true"
+            >
+              + Terbitkan Perpanjangan SK
+            </button>
+          </div>
+
+          <div v-if="!selectedEmpForContract.contracts || selectedEmpForContract.contracts.length === 0" class="empty-state-sm">
+            Belum ada riwayat SK kontrak tercatat.
+          </div>
+
+          <table v-else class="erp-table compact-table">
+            <thead>
+              <tr>
+                <th>No. SK Kontrak</th>
+                <th>Tipe</th>
+                <th>Masa Berlaku</th>
+                <th>Tarif Gaji</th>
+                <th>Status</th>
+                <th>Catatan</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in selectedEmpForContract.contracts" :key="c.id">
+                <td><strong class="doc-code">{{ c.contractNumber }}</strong></td>
+                <td><span class="role-chip">{{ c.contractType }}</span></td>
+                <td>{{ formatDate(c.startDate) }} s.d {{ formatDate(c.endDate) }}</td>
+                <td class="money-col">{{ c.salaryRate ? formatCurrency(c.salaryRate) : '-' }}</td>
+                <td>
+                  <span
+                    class="erp-badge"
+                    :class="{
+                      'erp-badge-success': c.alertStatus === 'ACTIVE',
+                      'erp-badge-warn': c.alertStatus === 'EXPIRING_SOON',
+                      'erp-badge-danger': c.alertStatus === 'EXPIRED',
+                      'erp-badge-info': c.alertStatus === 'RENEWED',
+                    }"
+                  >
+                    {{ c.alertStatus === 'EXPIRING_SOON' ? `⚠️ Segera Habis (${c.daysRemaining} hari)` : c.alertStatus }}
+                  </span>
+                </td>
+                <td style="font-size: 0.8rem; color: var(--text-secondary);">{{ c.notes || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Add Contract Form -->
+        <div v-if="showAddContractForm" class="contract-form-box">
+          <h4 style="margin: 0 0 12px 0; font-size: 0.95rem; font-weight: 700;">Formulir Penerbitan Perpanjangan SK Baru</h4>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">Nomor SK Kontrak *</label>
+              <input v-model="newContractForm.contractNumber" type="text" class="input" placeholder="SK/PMO/PUT-PK/2027/..." />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tipe Hubungan Kerja *</label>
+              <select v-model="newContractForm.contractType" class="select">
+                <option value="PUT_PK">PUT PK (Pegawai Usaha Tetap Perjanjian Kerja)</option>
+                <option value="PKWT">PKWT (Perjanjian Kerja Waktu Tertentu)</option>
+                <option value="KONSULTAN_AHLI">Konsultan / Tenaga Ahli</option>
+                <option value="MAGANG">Magang Terstruktur</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tanggal Mulai Berlaku *</label>
+              <input v-model="newContractForm.startDate" type="date" class="input" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tanggal Berakhir Kontrak *</label>
+              <input v-model="newContractForm.endDate" type="date" class="input" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Penyesuaian Gaji Pokok (Rp)</label>
+              <input v-model="newContractForm.salaryRate" type="number" class="input" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Catatan SK / Klausul Kerja</label>
+              <input v-model="newContractForm.notes" type="text" class="input" placeholder="Misal: Perpanjangan masa kerja tahap 2" />
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+            <button type="button" class="btn btn-sm" @click="showAddContractForm = false">Batal</button>
+            <button
+              type="button"
+              class="btn btn-sm btn-primary"
+              :disabled="savingContract || !newContractForm.contractNumber"
+              @click="saveContractRenewal"
+            >
+              {{ savingContract ? 'Menyimpan...' : 'Simpan &amp; Terbitkan SK' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-action-row" style="margin-top: 16px;">
+          <button type="button" class="btn" @click="showContractModal = false">Tutup</button>
+        </div>
+      </div>
+    </ModalDialog>
   </div>
 </template>
 
@@ -1080,8 +1571,57 @@ onMounted(loadData);
   padding-top: 10px;
 }
 
+.erp-badge-danger {
+  background: var(--status-danger-bg);
+  color: var(--status-danger-text);
+  border: 1px solid var(--status-danger-border);
+}
+
+.contract-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.contract-emp-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.contract-form-box {
+  padding: 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.compact-table th,
+.compact-table td {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+
+.empty-state-sm {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 @media (max-width: 900px) {
-  .slip-grid {
+  .slip-grid,
+  .form-grid-2 {
     grid-template-columns: 1fr;
   }
 }

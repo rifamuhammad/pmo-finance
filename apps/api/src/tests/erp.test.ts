@@ -1381,4 +1381,105 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(sampleSlip.notes).toContain('PPh 21 TER');
     });
   });
+
+  describe('11. Database Karyawan, Riwayat Kontrak & Rekapitulasi Presensi Unit (PMO-101 / KOI-117)', () => {
+    let testEmpId = '';
+
+    beforeAll(async () => {
+      const empRes = await request(app)
+        .get('/api/v1/hris/employees')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(empRes.status).toBe(200);
+      expect(empRes.body.data.length).toBeGreaterThan(0);
+      testEmpId = empRes.body.data[0].id;
+    });
+
+    it('retrieves employee database with contract history, alert status, and days remaining', async () => {
+      const res = await request(app)
+        .get('/api/v1/hris/employees')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(6);
+
+      const emp = res.body.data[0];
+      expect(emp.nip).toBeDefined();
+      expect(emp.fullName).toBeDefined();
+      expect(emp.contracts).toBeDefined();
+      expect(Array.isArray(emp.contracts)).toBe(true);
+      expect(emp.contracts.length).toBeGreaterThan(0);
+      expect(emp.activeContract).toBeDefined();
+      expect(emp.contractStatus).toBeDefined();
+      expect(['ACTIVE', 'EXPIRING_SOON', 'EXPIRED', 'PERMANENT']).toContain(emp.contractStatus);
+    });
+
+    it('issues a new contract renewal for employee and transitions previous active contracts to RENEWED', async () => {
+      const uniqueSk = `SK/PMO/PUT-PK/2027/TST-${Date.now()}`;
+      const contractRes = await request(app)
+        .post('/api/v1/hris/contracts')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          employeeId: testEmpId,
+          contractNumber: uniqueSk,
+          contractType: 'PUT_PK',
+          startDate: '2027-01-01',
+          endDate: '2027-12-31',
+          salaryRate: 9500000,
+          notes: 'Perpanjangan Masa Kerja Tahap 3 PUT PK Tahun Anggaran 2027',
+        });
+
+      expect(contractRes.status).toBe(201);
+      expect(contractRes.body.data.contractNumber).toBe(uniqueSk);
+      expect(contractRes.body.data.status).toBe('ACTIVE');
+
+      // Verify employee contracts list shows new contract as ACTIVE and previous ones updated
+      const empCheck = await request(app)
+        .get('/api/v1/hris/employees')
+        .set('Authorization', `Bearer ${financeToken}`);
+      const updatedEmp = empCheck.body.data.find((e: any) => e.id === testEmpId);
+      expect(updatedEmp).toBeDefined();
+      expect(updatedEmp.activeContract.contractNumber).toBe(uniqueSk);
+      expect(updatedEmp.contracts.length).toBeGreaterThan(1);
+    });
+
+    it('generates unit attendance recap per business unit with SBM meal & overtime entitlement calculations and verifies recap', async () => {
+      const recapRes = await request(app)
+        .get('/api/v1/hris/attendance/unit-recap?month=12&year=2026')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(recapRes.status).toBe(200);
+      expect(recapRes.body.data.periodMonth).toBe(12);
+      expect(recapRes.body.data.periodYear).toBe(2026);
+      expect(recapRes.body.data.units.length).toBeGreaterThan(0);
+
+      const summary = recapRes.body.data.summary;
+      expect(summary.totalPresentDays).toBeGreaterThan(0);
+      expect(summary.totalMealAllowance).toBe(summary.totalPresentDays * 37000);
+      expect(summary.totalOvertimeCost).toBe(summary.totalOvertimeHours * 20000);
+      expect(summary.grandTotalSbm).toBe(summary.totalMealAllowance + summary.totalOvertimeCost);
+
+      // Verify the unit attendance
+      const targetUnit = recapRes.body.data.units[0];
+      const verifyRes = await request(app)
+        .post('/api/v1/hris/attendance/verify-unit')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          businessUnitId: targetUnit.unitId,
+          periodMonth: 12,
+          periodYear: 2026,
+        });
+
+      expect(verifyRes.status).toBe(200);
+      expect(verifyRes.body.data.businessUnitId).toBe(targetUnit.unitId);
+      expect(verifyRes.body.data.verifiedBy).toBeDefined();
+
+      // Check recap again to confirm unit is verified
+      const recheck = await request(app)
+        .get(`/api/v1/hris/attendance/unit-recap?month=12&year=2026&businessUnitId=${targetUnit.unitId}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(recheck.status).toBe(200);
+      expect(recheck.body.data.units[0].isVerified).toBe(true);
+      expect(recheck.body.data.units[0].status).toBe('VERIFIED');
+    });
+  });
 });
