@@ -272,8 +272,6 @@ async function ensureSeedData() {
 // 1. GET MASTER CONTEXT (Dynamic Dropdowns from PostgreSQL)
 pettyCashRouter.get('/master-context', async (req, res, next) => {
   try {
-    await ensureSeedData();
-
     const [businessUnits, budgetLines, vendors, taxConfigs, coas, users] = await Promise.all([
       prisma.businessUnit.findMany({
         where: { isActive: true },
@@ -402,8 +400,6 @@ pettyCashRouter.get('/master-context', async (req, res, next) => {
 // 2. GET SUMMARY KARTU SALDO UP TAHUN BERJALAN (100% Real Aggregation from PostgreSQL)
 pettyCashRouter.get('/summary', async (req, res, next) => {
   try {
-    await ensureSeedData();
-
     const allSubmissions = await prisma.pettyCashSubmission.findMany({
       select: {
         type: true,
@@ -462,8 +458,6 @@ pettyCashRouter.get('/summary', async (req, res, next) => {
 // 3. GET SUBMISSIONS LIST (From PostgreSQL with filters)
 pettyCashRouter.get('/submissions', async (req, res, next) => {
   try {
-    await ensureSeedData();
-
     const { type, status, search } = req.query;
     const where: Record<string, unknown> = {};
 

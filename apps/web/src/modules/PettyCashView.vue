@@ -118,7 +118,7 @@ interface UserOption {
 }
 
 const activeModuleTab = ref<SubmissionType>('GUP');
-const currentSubView = ref<SubViewMode>('CREATE');
+const currentSubView = ref<SubViewMode>('LIST');
 const loading = ref(false);
 const saving = ref(false);
 const errorMessage = ref('');
@@ -162,62 +162,106 @@ const selectedBudgetLineId = ref<string>('');
 // SelectedVendorPreset tracks dropdown selection from Master Vendor
 const selectedVendorPresetId = ref<string>('');
 
-// Form Ajuan state
+// Form Ajuan state (Clean Slate for Production Input)
 const formAjuan = reactive({
-  proposerName: auth.user?.fullName || 'Siti Rahmawati, SE, Ak',
+  proposerName: auth.user?.fullName || '',
   businessUnitId: auth.user?.businessUnitId || '',
   proposerUnit: '',
-  proposerPhone: '082112457061',
+  proposerPhone: '',
   budgetType: 'Anggaran Operasional',
-  draCode: '520201010100',
-  draDescription: 'Belanja Bahan & Perlengkapan Operasional Unit',
-  coaCode: '520201010100',
-  coaName: 'Belanja Bahan dan Perlengkapan Operasional',
-  activityDetail: 'Biaya Operasional Kegiatan dan Belanja Kebutuhan Unit PMO UTama',
+  draCode: '',
+  draDescription: '',
+  coaCode: '',
+  coaName: '',
+  activityDetail: '',
   vendorId: null as string | null,
-  vendorName: 'CV Berkah Rasa Nusantara',
-  vendorTaxId: '91.245.881.2-411.000',
-  vendorIdentityName: 'CV Berkah Rasa Nusantara (PKP / Terdaftar)',
+  vendorName: '',
+  vendorTaxId: '',
+  vendorIdentityName: '',
   vendorIdentityFile: '',
-  saveToMasterVendor: true,
+  saveToMasterVendor: false,
   transactionDate: new Date().toISOString().slice(0, 10),
   paymentMethod: 'Transfer Bank',
   transactionKind: 'Transaksi Baru',
   regionType: 'Dalam Negeri'
 });
 
-// Daftar Permintaan (Line Items)
+// Daftar Permintaan (Line Items) - Start clean with 1 blank row
 const requestItems = ref<PettyCashItemRow[]>([
   {
     id: 'item-1',
-    itemName: 'Paket Konsumsi Rapat Koordinasi & Evaluasi Kinerja Unit',
+    itemName: '',
     unit: 'Paket',
-    quantity: 45,
-    unitPrice: 55000
-  },
-  {
-    id: 'item-2',
-    itemName: 'Snack Box & Coffee Break Peserta Rapat Teknis',
-    unit: 'Kotak',
-    quantity: 45,
-    unitPrice: 25000
+    quantity: 1,
+    unitPrice: 0
   }
 ]);
 
 // Perhitungan Pajak state
 const taxForm = reactive({
   includeMode: 'Exclude PPN (Belum Termasuk Pajak)',
-  taxCategory: 'PPh 23 - Jasa Katering / Jasa Manajemen / Jasa Teknis (2%)',
+  taxCategory: 'Non-Pajak / Bebas PPh',
   taxDetailStatus: 'Memiliki NPWP (Tarif Normal)'
 });
 
 // Upload Dokumen state
 const docsForm = reactive({
-  invoiceNo: 'INV/BRN/2026/XI/0118',
+  invoiceNo: '',
   invoiceDate: new Date().toISOString().slice(0, 10),
-  invoiceFile: 'Invoice_Konsumsi_Rakor_PMO.pdf',
-  receiptFile: 'Kwitansi_Standar_UT_0118.pdf'
+  invoiceFile: '',
+  receiptFile: ''
 });
+
+function resetForm() {
+  formAjuan.proposerName = auth.user?.fullName || '';
+  formAjuan.businessUnitId = auth.user?.businessUnitId || (masterData.businessUnits[0]?.id || '');
+  const foundUnit = masterData.businessUnits.find((u) => u.id === formAjuan.businessUnitId);
+  formAjuan.proposerUnit = foundUnit ? foundUnit.name : '';
+  formAjuan.proposerPhone = '';
+  formAjuan.budgetType = 'Anggaran Operasional';
+  formAjuan.draCode = '';
+  formAjuan.draDescription = '';
+  formAjuan.coaCode = '';
+  formAjuan.coaName = '';
+  formAjuan.activityDetail = '';
+  formAjuan.vendorId = null;
+  formAjuan.vendorName = '';
+  formAjuan.vendorTaxId = '';
+  formAjuan.vendorIdentityName = '';
+  formAjuan.vendorIdentityFile = '';
+  formAjuan.saveToMasterVendor = false;
+  formAjuan.transactionDate = new Date().toISOString().slice(0, 10);
+  formAjuan.paymentMethod = 'Transfer Bank';
+  formAjuan.transactionKind = 'Transaksi Baru';
+  formAjuan.regionType = 'Dalam Negeri';
+
+  selectedBudgetLineId.value = '';
+  selectedVendorPresetId.value = '';
+
+  requestItems.value = [
+    {
+      id: `item-${Date.now()}`,
+      itemName: '',
+      unit: 'Paket',
+      quantity: 1,
+      unitPrice: 0
+    }
+  ];
+
+  taxForm.includeMode = 'Exclude PPN (Belum Termasuk Pajak)';
+  taxForm.taxCategory = 'Non-Pajak / Bebas PPh';
+  taxForm.taxDetailStatus = 'Memiliki NPWP (Tarif Normal)';
+
+  docsForm.invoiceNo = '';
+  docsForm.invoiceDate = new Date().toISOString().slice(0, 10);
+  docsForm.invoiceFile = '';
+  docsForm.receiptFile = '';
+}
+
+function startNewSubmission() {
+  resetForm();
+  currentSubView.value = 'CREATE';
+}
 
 // Submissions list from DB
 const submissions = ref<PettyCashSubmissionRecord[]>([]);
@@ -611,6 +655,7 @@ async function submitAjuan(submitImmediately = true) {
 
     const created = res.data;
     await loadAllData();
+    resetForm();
     currentSubView.value = 'LIST';
     successBanner.value = submitImmediately
       ? `Pengajuan ${created.submissionNo} berhasil disimpan ke database dan dikirim ke antrean Verifikasi Pajak.`
@@ -817,7 +862,7 @@ onMounted(loadAllData);
           type="button"
           class="subnav-tab-btn"
           :class="{ active: currentSubView === 'CREATE' }"
-          @click="currentSubView = 'CREATE'"
+          @click="startNewSubmission"
         >
           + Buat Pengajuan {{ activeModuleTab === 'GUP' ? 'GUP' : 'TUP Nihil' }}
         </button>
