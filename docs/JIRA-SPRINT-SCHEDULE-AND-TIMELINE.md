@@ -73,6 +73,7 @@ gantt
 ## 📌 BREAKDOWN TIKET PER SPRINT
 
 ### SPRINT 1: Foundation & Master Data COA Spesifik PMO (Excel)
+* **Parent Epic Jira:** `KOI-79` (`[SPRINT 1] Foundation & Master Data COA Pertor 310`)
 * **Periode:** Selasa, 10 Nov 2026 – Jumat, 20 Nov 2026
 * **Sasaran Sprint:** Basis data siap 100% menampung 70 Akun COA Operasional PMO dari File Excel (`docs/KODE COA UT.xlsx` & `Semula-Menjadi Revisi ke 7`), 5 Unit Bisnis PMO, dan Periode Fiskal yang terkunci.
 
@@ -88,6 +89,7 @@ gantt
 ---
 
 ### SPRINT 2: Budgeting Semula-Menjadi & Multi-Level Volume
+* **Parent Epic Jira:** `KOI-93` (`[SPRINT 2] Budgeting Semula-Menjadi & Multi-Level Volume`)
 * **Periode:** Senin, 23 Nov 2026 – Jumat, 04 Des 2026
 * **Sasaran Sprint:** Modul Anggaran (`BudgetsView.vue`) selaras penuh dengan format Excel Rektorat (4 tingkat perkalian volume, pagu Semula vs Menjadi, dan selisih otomatis).
 
@@ -101,6 +103,7 @@ gantt
 ---
 
 ### SPRINT 3: Core Transaction Engines (LS, UMK & Revenue POS)
+* **Parent Epic Jira:** `KOI-108` (`[SPRINT 3] Core Transaction Engines (LS, UMK & Revenue POS)`)
 * **Periode:** Senin, 07 Des 2026 – Jumat, 18 Des 2026
 * **Sasaran Sprint:** Alur transaksi kas utama (Pengadaan LS, Kas Kecil UMK, Kasir POS) terhubung ke akun COA Pertor 310.
 
