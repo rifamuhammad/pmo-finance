@@ -161,7 +161,7 @@ gantt
 | **`PMO-061`** | `KOI-109` | Modul UMK: Pencairan Kasir ➔ Akun `110501010100` Kas Kecil Unit | **Susah** | 2 Hari | Sen, 14 Des 2026 | Sel, 15 Des 2026 | **High** | `In Review` |
 | **`PMO-071`** | `KOI-110` | Modul Kasir E-Revenue: Sinkronisasi Akun Pendapatan `4203xxxxxx` & PPN Keluaran | **Gampang** | 2 Hari | Sel, 15 Des 2026 | Rab, 16 Des 2026 | **High** | `In Review` |
 | **`PMO-082`** | `KOI-111` | Modul Kasir Tunai (POS) & Penyetoran Deposit Bank BRI | **Sedang** | 2 Hari | Rab, 16 Des 2026 | Kam, 17 Des 2026 | **High** | `In Review` |
-| **`PMO-072`** | - | Pertanggungjawaban SPJ UMK Panjar, Verifikasi Nota & Tutup Panjar | **Sedang** | 1 Hari | Kam, 17 Des 2026 | Jum, 18 Des 2026 | **High** | `To Do` |
+| **`PMO-072`** | `KOI-112` | Pertanggungjawaban SPJ UMK Panjar, Verifikasi Nota & Tutup Panjar | **Sedang** | 1 Hari | Kam, 17 Des 2026 | Jum, 18 Des 2026 | **High** | `In Review` |
 | **`SPRINT-3-REV`**| - | Sprint 3 Review & Uji Transaksi Kas Lintas Unit | **Review** | 1 Hari | Jum, 18 Des 2026 | Jum, 18 Des 2026 | **Medium** | `To Do` |
 
 ---

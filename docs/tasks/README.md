@@ -19,6 +19,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-109` | [PMO-061] Modul UMK: Pencairan Panjar Kasir ke Akun 110501010100 & Pertanggungjawaban SPJ | `feature/KOI-109-modul-umk-panjar-spj-110501010100` | `In Review` | [KOI-109-modul-umk-panjar-spj-110501010100.md](./KOI-109-modul-umk-panjar-spj-110501010100.md) |
 | `KOI-110` | [PMO-071] Modul Kasir E-Revenue: Sinkronisasi Akun Pendapatan 4203xxxxxx & PPN Keluaran Pertor 310 | `feature/KOI-110-kasir-e-revenue-pendapatan-4203-ppn` | `In Review` | [KOI-110-kasir-e-revenue-pendapatan-4203-ppn.md](./KOI-110-kasir-e-revenue-pendapatan-4203-ppn.md) |
 | `KOI-111` | [PMO-082] Modul Kasir Tunai (POS) & Penyetoran Deposit Bank BRI | `feature/KOI-111-kasir-pos-setoran-deposit-bank-bri` | `In Review` | [KOI-111-kasir-pos-setoran-deposit-bank-bri.md](./KOI-111-kasir-pos-setoran-deposit-bank-bri.md) |
+| `KOI-112` | [PMO-072] Pertanggungjawaban SPJ UMK Panjar, Verifikasi Nota & Tutup Panjar | `feature/KOI-112-spj-umk-panjar-verifikasi-nota-tutup-panjar` | `In Review` | [KOI-112-spj-umk-panjar-verifikasi-nota-tutup-panjar.md](./KOI-112-spj-umk-panjar-verifikasi-nota-tutup-panjar.md) |
 
 ---
 

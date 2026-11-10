@@ -62,6 +62,8 @@ interface PettyCashSubmissionRecord {
   receiptFile?: string | null;
   journalEntryId?: string | null;
   journalDocNo?: string | null;
+  verifiedTaxBy?: string | null;
+  approvedBy?: string | null;
   status: 'DRAFT' | 'SUBMITTED' | 'TAX_VERIFIED' | 'VERIFIED_TAX' | 'APPROVED' | 'APPROVED_FINANCE' | 'DISBURSED' | 'REJECTED';
   statusLabel?: string;
   items: PettyCashItemRow[];
@@ -1629,6 +1631,11 @@ onMounted(loadAllData);
           <div>
             <span class="journal-banner-label">Buku Besar Terposting:</span>
             <strong>{{ selectedSubmission.journalDocNo }}</strong>
+            <div style="font-size: 0.76rem; margin-top: 3px; color: #166534">
+              {{ selectedSubmission.type === 'TUP_NIHIL'
+                ? 'Jurnal Penutupan Panjar UMK Pertor 310: Debit Beban 5xxxx vs Kredit 110501010100 (Uang Muka Kegiatan Pegawai UT)'
+                : 'Jurnal Reimbursement GUP Pertor 310: Debit Beban 5xxxx vs Kredit 110101020200 (Bank BRI Kas Operasional)' }}
+            </div>
           </div>
         </div>
 
@@ -1782,8 +1789,11 @@ onMounted(loadAllData);
             <strong class="money" style="color: #dc2626;">- {{ formatCurrency(selectedSubmission.pphAmount) }}</strong>
           </div>
           <div style="display: flex; justify-content: space-between; border-top: 1px solid #cbd5e1; padding-top: 6px; font-weight: 800; font-size: 0.95rem; color: #034693;">
-            <span>NILAI NETTO PENGGANTIAN GUP:</span>
+            <span>{{ selectedSubmission.type === 'TUP_NIHIL' ? 'NILAI NIHILISASI PANJAR UMK:' : 'NILAI NETTO PENGGANTIAN GUP:' }}</span>
             <span>{{ formatCurrency(selectedSubmission.netPayableAmount) }}</span>
+          </div>
+          <div v-if="selectedSubmission.type === 'TUP_NIHIL'" style="margin-top: 6px; font-size: 0.72rem; color: #166534; background: #dcfce7; padding: 4px 8px; border-radius: 4px;">
+            ✓ Sesuai Pertor 310: Menutup Uang Muka Kegiatan Pegawai UT pada Akun Kredit <code>110501010100</code>
           </div>
         </div>
 
@@ -1792,16 +1802,16 @@ onMounted(loadAllData);
           <div>
             <div style="color: #64748b; margin-bottom: 35px;">Pembuat Pengajuan / SPJ,</div>
             <div style="font-weight: 700; border-top: 1px solid #94a3b8; padding-top: 2px;">{{ selectedSubmission.proposerName }}</div>
-            <div style="font-size: 0.7rem; color: #64748b;">Staf Operasional PMO</div>
+            <div style="font-size: 0.7rem; color: #64748b;">{{ selectedSubmission.proposerUnit || 'Staf Operasional PMO' }}</div>
           </div>
           <div>
             <div style="color: #64748b; margin-bottom: 35px;">Verifikasi Pajak & SPJ,</div>
-            <div style="font-weight: 700; border-top: 1px solid #94a3b8; padding-top: 2px;">Fajar Nugroho, BKP</div>
+            <div style="font-weight: 700; border-top: 1px solid #94a3b8; padding-top: 2px;">{{ selectedSubmission.verifiedTaxBy || 'Verifikator Pajak' }}</div>
             <div style="font-size: 0.7rem; color: #64748b;">Staf Kepatuhan Pajak PMO</div>
           </div>
           <div>
             <div style="color: #64748b; margin-bottom: 35px;">Mengetahui & Menyetujui,</div>
-            <div style="font-weight: 700; border-top: 1px solid #94a3b8; padding-top: 2px;">Siti Rahmawati, SE, Ak</div>
+            <div style="font-weight: 700; border-top: 1px solid #94a3b8; padding-top: 2px;">{{ selectedSubmission.approvedBy || 'Finance Manager' }}</div>
             <div style="font-size: 0.7rem; color: #64748b;">Finance Manager PMO</div>
           </div>
         </div>

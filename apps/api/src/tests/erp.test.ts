@@ -1114,5 +1114,84 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(getRes.status).toBe(200);
       expect(getRes.body.data.journalDocNo).toBe(journal.journalNumber);
     });
+
+    it('processes TUP_NIHIL submission and auto-posts closing journal crediting Panjar UMK 110501010100 (PMO-072 / KOI-112)', async () => {
+      // 1. Create TUP_NIHIL submission (SPJ pertanggungjawaban panjar UMK)
+      const createRes = await request(app)
+        .post('/api/v1/petty-cash/submissions')
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({
+          type: 'TUP_NIHIL',
+          applicantName: 'Ahmad PIC Pelaksana Kegiatan',
+          applicantUnit: 'Unit Diklat TCI',
+          applicantPhone: '081298765432',
+          expenseCategory: 'Perlengkapan Pelatihan',
+          draCode: '520901020100',
+          draDescription: 'Beban Barang dan Perlengkapan',
+          coaCode: '520901020100',
+          coaName: 'Beban Barang dan Perlengkapan',
+          activityDescription: 'Pertanggungjawaban SPJ uang muka kegiatan workshop TCI',
+          vendorName: 'Toko Buku & Alat Tulis Kampus',
+          vendorTaxId: '02.345.678.9-456.000',
+          vendorIdentityName: 'Toko Buku & Alat Tulis Kampus',
+          transactionDate: '2026-11-10',
+          paymentMethod: 'Uang Muka Kerja (TUP)',
+          taxType: 'PPh 22 (Barang)',
+          taxDetail: 'Pemotongan PPh 22 1.5%',
+          businessUnitId: unitDiklatId,
+          items: [
+            {
+              description: 'Modul Pelatihan & Block Note Peserta',
+              unit: 'Paket',
+              quantity: 50,
+              unitPrice: 30000,
+              isTaxable: true,
+            },
+          ],
+        });
+
+      expect(createRes.status).toBe(201);
+      const tupId = createRes.body.data.id;
+      expect(tupId).toBeDefined();
+
+      // 2. Tax Verification
+      const taxRes = await request(app)
+        .post(`/api/v1/petty-cash/submissions/${tupId}/verify-tax`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ taxType: 'PPh 22 (Barang)' });
+      expect(taxRes.status).toBe(200);
+      expect(taxRes.body.data.status).toBe('TAX_VERIFIED');
+
+      // 3. Approval by Finance Manager
+      const approveRes = await request(app)
+        .post(`/api/v1/petty-cash/submissions/${tupId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({});
+      expect(approveRes.status).toBe(200);
+      expect(approveRes.body.data.status).toBe('APPROVED');
+
+      // 4. Nihilisasi / Disburse - should credit account 110501010100 (Panjar UMK)
+      const disburseRes = await request(app)
+        .post(`/api/v1/petty-cash/submissions/${tupId}/disburse`)
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({});
+      expect(disburseRes.status).toBe(200);
+      expect(disburseRes.body.data.status).toBe('DISBURSED');
+
+      const journal = disburseRes.body.data.journal;
+      expect(journal).toBeDefined();
+      expect(journal.totalDebit).toBe(journal.totalCredit);
+
+      // Verify journal lines credit 110501010100
+      const dbJournal = await prisma.journalEntry.findUnique({
+        where: { id: journal.id },
+        include: { lines: true },
+      });
+      expect(dbJournal).toBeDefined();
+      const creditUmkLine = dbJournal?.lines.find(
+        (l) => l.accountCode === '110501010100' && Number(l.credit) > 0
+      );
+      expect(creditUmkLine).toBeDefined();
+    });
   });
 });
