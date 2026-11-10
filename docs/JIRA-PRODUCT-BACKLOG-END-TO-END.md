@@ -139,49 +139,49 @@ flowchart TD
 
 ### [PMO-041] Penyesuaian Skema Prisma BudgetLine Multi-Volume & Pagu Pergeseran
 * **Issue Type:** Story | **Priority:** Critical | **Estimasi:** 5 SP
-* **Status:** `[ ] HARUS DIKERJAKAN`
+* **Jira Key:** `KOI-94` | **Status:** `[x] IN REVIEW (Board 3)`
 * **Acceptance Criteria:**
   1. `BudgetLine` memiliki kolom: `activityCode` (`26.1.1.1.1`), `subActivity`, `detailDescription`, `vol1`-`vol4`, `satuan1`-`satuan4`, `semulaAmount`, `pergeseranAmount`, `allocatedAmount`.
   2. Rumus: $\text{Total Vol} = V_1 \times V_2 \times V_3 \times V_4$; $\text{Pagu} = \text{Total Vol} \times \text{Tarif}$; $\text{Selisih} = \text{Semula} - \text{Menjadi}$.
 * **Subtasks:**
-  * [ ] `PMO-041-1`: Update model `BudgetLine` di `prisma/schema.prisma`.
-  * [ ] `PMO-041-2`: Jalankan `npx prisma db push` untuk migrasi kolom baru.
-  * [ ] `PMO-041-3`: Sesuaikan payload validator Zod di `apps/api/src/modules/budget/routes.ts`.
+  * [x] `PMO-041-1`: Update model `BudgetLine` di `prisma/schema.prisma`.
+  * [x] `PMO-041-2`: Jalankan `npx prisma db push` untuk migrasi kolom baru.
+  * [x] `PMO-041-3`: Sesuaikan payload validator Zod di `apps/api/src/modules/budget/routes.ts`.
 
 ### [PMO-042] Transformasi Antarmuka `BudgetsView.vue` ke Format Semula - Menjadi
 * **Issue Type:** Story | **Priority:** Critical | **Estimasi:** 8 SP
-* **Status:** `[ ] HARUS DIKERJAKAN`
+* **Jira Key:** `KOI-98` | **Status:** `[x] IN REVIEW (Board 3)`
 * **Acceptance Criteria:**
   1. Tabel menampilkan kolom: *No*, *Unit Bisnis*, *Sub Kegiatan*, *Detil*, *COA*, *Pagu Semula*, *Pergeseran (+/-)*, *Pagu Menjadi*, *Realisasi*, *Sisa*.
   2. Filter pill instan: `Semua`, `IT Solution`, `KLINIK`, `MICE`, `TCI`, `Keuangan & Umum`.
   3. Klik baris membuka Slide Drawer rincian 4 volume ($V_1 \times V_2 \times V_3 \times V_4$) dan prognosis triwulan.
 * **Subtasks:**
-  * [ ] `PMO-042-1`: Refactor tabel utama di `apps/web/src/modules/BudgetsView.vue`.
-  * [ ] `PMO-042-2`: Pasang filter pill unit bisnis dinamis.
-  * [ ] `PMO-042-3`: Buat komponen drawer rincian kalkulator volume.
-  * [ ] `PMO-042-4`: Tambahkan fitur validasi agar pengeluaran tidak melebihi pagu bebas.
+  * [x] `PMO-042-1`: Refactor tabel utama di `apps/web/src/modules/BudgetsView.vue`.
+  * [x] `PMO-042-2`: Pasang filter pill unit bisnis dinamis.
+  * [x] `PMO-042-3`: Buat komponen drawer rincian kalkulator volume.
+  * [x] `PMO-042-4`: Tambahkan fitur validasi agar pengeluaran tidak melebihi pagu bebas.
 
 ### [PMO-043] Versioning Snapshot Revisi Anggaran (Revisi 1 s/d Revisi 7)
 * **Issue Type:** Story | **Priority:** High | **Estimasi:** 5 SP
-* **Status:** `[ ] HARUS DIKERJAKAN`
+* **Jira Key:** `KOI-99` | **Status:** `[x] IN REVIEW (Board 3)`
 * **Acceptance Criteria:**
   1. Pengesahan revisi anggaran membekukan seluruh baris ke model `BudgetRevision` dalam format JSON.
   2. Tersedia tab arsip revisi untuk membandingkan pagu antar revisi masa lalu.
 * **Subtasks:**
-  * [ ] `PMO-043-1`: Endpoint `POST /api/v1/budgets/:id/revisions`.
-  * [ ] `PMO-043-2`: UI modal pengajuan revisi dengan pilihan alasan revisi baku (*"Dialihkan ke Block Grant PMO"*, dll).
-  * [ ] `PMO-043-3`: Endpoint komparasi versi revisi (`diff`).
+  * [x] `PMO-043-1`: Endpoint `POST /api/v1/budgets/:id/revisions`.
+  * [x] `PMO-043-2`: UI modal pengajuan revisi dengan pilihan alasan revisi baku (*"Dialihkan ke Block Grant PMO"*, dll).
+  * [x] `PMO-043-3`: Endpoint komparasi versi revisi (`diff`).
 
 ### [PMO-044] Injeksi Data Anggaran Riil (Revisi 7 Block Grant & Usulan 2027)
 * **Issue Type:** Task | **Priority:** Medium | **Estimasi:** 5 SP
-* **Status:** `[ ] HARUS DIKERJAKAN`
+* **Jira Key:** `KOI-100` | **Status:** `[x] IN REVIEW (Board 3)`
 * **Acceptance Criteria:**
   1. 140 baris anggaran riil 2026 (Revisi 7) masuk ke database.
   2. 200 baris anggaran usulan 2027 masuk ke database.
 * **Subtasks:**
-  * [ ] `PMO-044-1`: Script import data `Revisi 7 Block Grant`.
-  * [ ] `PMO-044-2`: Script import data `Tabel Usulan 2027`.
-  * [ ] `PMO-044-3`: Verifikasi total pagu seimbang di dashboard budgeting.
+  * [x] `PMO-044-1`: Script import data `Revisi 7 Block Grant`.
+  * [x] `PMO-044-2`: Script import data `Tabel Usulan 2027`.
+  * [x] `PMO-044-3`: Verifikasi total pagu seimbang di dashboard budgeting.
 
 ---
 

@@ -93,8 +93,8 @@ gantt
 
 | Kode Tiket | Jira Key | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`PMO-041`** | `KOI-94` | Refactor Prisma Schema `BudgetLine` & Formula $V_1 \times V_2 \times V_3 \times V_4$ | **Susah** | 3 Hari | Sen, 23 Nov 2026 | Rab, 25 Nov 2026 | **Highest** | `Done` |
-| **`PMO-042`** | `KOI-98` | Refactor Komponen UI `BudgetsView.vue` Semula vs Menjadi | **Susah** | 3 Hari | Kam, 26 Nov 2026 | Sen, 30 Nov 2026 | **High** | `Done` |
+| **`PMO-041`** | `KOI-94` | Refactor Prisma Schema `BudgetLine` & Formula $V_1 \times V_2 \times V_3 \times V_4$ | **Susah** | 3 Hari | Sen, 23 Nov 2026 | Rab, 25 Nov 2026 | **Highest** | `In Review (Board)` |
+| **`PMO-042`** | `KOI-98` | Refactor Komponen UI `BudgetsView.vue` Semula vs Menjadi | **Susah** | 3 Hari | Kam, 26 Nov 2026 | Sen, 30 Nov 2026 | **High** | `In Review (Board)` |
 | **`PMO-043`** | `KOI-99` | Workflow Persetujuan Revisi Anggaran, Snapshot Versioning & Diff Viewer | **Gampang** | 2 Hari | Sel, 01 Des 2026 | Rab, 02 Des 2026 | **High** | `In Review (Board)` |
 | **`PMO-044`** | `KOI-100` | Injeksi Data Anggaran Riil PMO (Revisi 7 Block Grant & Usulan 2027) | **Gampang** | 2 Hari | Kam, 03 Des 2026 | Jum, 04 Des 2026 | **Medium** | `In Review (Board)` |
 
