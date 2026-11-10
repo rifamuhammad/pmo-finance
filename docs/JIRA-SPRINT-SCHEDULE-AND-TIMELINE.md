@@ -179,7 +179,7 @@ gantt
 | **`PMO-102`** | `KOI-118` | Engine Auto-Lock Presensi & Lembur HRIS Setiap Tanggal 25 Pukul 23:59 | **Sedang** | 1 Hari | Jum, 25 Des 2026 | Jum, 25 Des 2026 | **High** | `In Review` |
 | **`PMO-111`** | `KOI-119` | Filter Ambang Batas Kapitalisasi Aset Tetap (>10% Nilai Buku & Nilai Batas) | **Sedang** | 2 Hari | Sen, 28 Des 2026 | Sel, 29 Des 2026 | **High** | `In Review` |
 | **`PMO-112`** | `KOI-120` | Kalkulator Depresiasi Garis Lurus & Cut-off Penyusutan Tanggal 20 | **Susah** | 2 Hari | Rab, 30 Des 2026 | Kam, 31 Des 2026 | **High** | `In Review` |
-| **`SPRINT-4-REV`**| `KOI-121` | Sprint 4 Review & Tutup Buku Akhir Tahun 2026 | **Review** | 1 Hari | Kam, 31 Des 2026 | Kam, 31 Des 2026 | **High** | `In Progress` |
+| **`SPRINT-4-REV`**| `KOI-121` | Sprint 4 Review & Tutup Buku Akhir Tahun 2026 | **Review** | 1 Hari | Kam, 31 Des 2026 | Kam, 31 Des 2026 | **High** | `In Review` |
 
 ---
 
