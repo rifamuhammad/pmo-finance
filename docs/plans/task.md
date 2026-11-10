@@ -1,7 +1,9 @@
 | id | task | status | notes |
 | --- | --- | --- | --- |
-| s3-pay-1 | Evaluasi endpoint pelunasan expense & vendor invoice di procurement routes | completed | Menutup Utang Pengadaan 210101010100 saat Vendor Invoice dilunasi |
-| s3-pay-2 | Implementasi jurnal pelunasan utang rekanan vs kas bank & potongan pajak | completed | Dr 210101010100 vs Cr 110101020200 & Cr 2102xxxxxx |
-| s3-pay-3 | Penyempurnaan UI bukti pelunasan utang pada ProcurementView.vue | completed | Menampilkan badge tagihan vendor dan feedback penutupan utang rekanan |
-| s3-pay-4 | Uji coba otomatis pada erp.test.ts (alur 3-way match -> payment pelunasan utang) | completed | Validasi Debit ke 210101010100, 24/24 tests pass strictly balanced |
-| s3-pay-5 | Verifikasi test suite, typecheck, dokumentasi task & transisi Jira ke In Review | completed | docs/tasks/KOI-107, push branch, Jira Board 3 verified |
+| s3-umk-1 | Analisis alur UMK (GUP/TUP/Panjar Kegiatan) & mapping COA Pertor 310 | completed | Akun 110501010100 Uang Muka Kegiatan vs 110101020200 Bank BRI |
+| s3-umk-2 | Implementasi posting jurnal otomatis saat pencairan dana panjar UMK | completed | Dr 110501010100 vs Cr 110101020200 |
+| s3-umk-3 | Implementasi posting jurnal realisasi beban saat SPJ disahkan | completed | Dr Akun Beban (520901020100) vs Cr 110501010100 |
+| s3-umk-4 | Implementasi pengembalian sisa dana UMK (setor kas bank / nihilisasi) | completed | Dr 110101020200 vs Cr 110501010100 |
+| s3-umk-5 | Penyempurnaan antarmuka PettyCashView.vue & integrasi API | completed | Indikator status SPJ, nomor dokumen jurnal panjar & nihilisasi |
+| s3-umk-6 | Pengujian komprehensif alur UMK pada vitest suite & typecheck | completed | Validasi double-entry strictly balanced di ledger (25/25 tests pass) |
+| s3-umk-7 | Dokumentasi task KOI-109 & transisi Jira ke In Review (Board 3) | in_progress | docs/tasks/KOI-109, push origin, strictly In Review |

@@ -60,6 +60,8 @@ interface PettyCashSubmissionRecord {
   invoiceDate?: string | null;
   invoiceFile?: string | null;
   receiptFile?: string | null;
+  journalEntryId?: string | null;
+  journalDocNo?: string | null;
   status: 'DRAFT' | 'SUBMITTED' | 'TAX_VERIFIED' | 'VERIFIED_TAX' | 'APPROVED' | 'APPROVED_FINANCE' | 'DISBURSED' | 'REJECTED';
   statusLabel?: string;
   items: PettyCashItemRow[];
@@ -1524,6 +1526,9 @@ onMounted(loadAllData);
                 <td>
                   <StatusBadge :status="statusToTone(sub.status)" />
                   <div class="cell-sub">{{ sub.statusLabel || sub.status }}</div>
+                  <div v-if="sub.journalDocNo" class="cell-journal-badge" title="No. Jurnal Buku Besar">
+                    {{ sub.journalDocNo }}
+                  </div>
                 </td>
                 <td class="text-right">
                   <button type="button" class="btn-table-action" @click="openDetail(sub)">
@@ -1566,6 +1571,19 @@ onMounted(loadAllData);
             <span class="detail-label">Status Saat Ini</span>
             <div><StatusBadge :status="statusToTone(selectedSubmission.status)" /></div>
             <p>{{ selectedSubmission.statusLabel || selectedSubmission.status }}</p>
+          </div>
+        </div>
+
+        <div v-if="selectedSubmission.journalDocNo" class="pmo-journal-confirmed-banner">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+          <div>
+            <span class="journal-banner-label">Buku Besar Terposting:</span>
+            <strong>{{ selectedSubmission.journalDocNo }}</strong>
           </div>
         </div>
 
@@ -2570,6 +2588,42 @@ textarea.form-control {
 
 .font-semibold {
   font-weight: 700;
+}
+
+.cell-journal-badge {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.15rem 0.4rem;
+  background: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+  font-size: 0.68rem;
+  font-family: monospace;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+}
+
+.pmo-journal-confirmed-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  color: #166534;
+  font-size: 0.82rem;
+}
+
+.pmo-journal-confirmed-banner svg {
+  flex-shrink: 0;
+  color: #15803d;
+}
+
+.journal-banner-label {
+  margin-right: 0.35rem;
+  color: #166534;
 }
 
 @media (max-width: 1100px) {

@@ -16,6 +16,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-105` | [PMO-051] Alur Pengadaan Langsung (LS): PR & Integrasi Pos Anggaran Riil Pertor 310 | `feature/KOI-105-pengadaan-ls-pr-pos-anggaran-riil` | `In Review` | [KOI-105-pengadaan-ls-pr-pos-anggaran-riil.md](./KOI-105-pengadaan-ls-pr-pos-anggaran-riil.md) |
 | `KOI-106` | [PMO-052] Penerimaan Barang/Jasa (BAST) & Jurnal Akrual Utang Pengadaan 2101 | `feature/KOI-106-bast-jurnal-utang-pengadaan-2101` | `In Review` | [KOI-106-bast-jurnal-utang-pengadaan-2101.md](./KOI-106-bast-jurnal-utang-pengadaan-2101.md) |
 | `KOI-107` | [PMO-053] Pelunasan Tagihan Vendor via Bank & Penutupan Utang Pengadaan 2101 | `feature/KOI-107-pelunasan-vendor-utang-pengadaan-2101` | `In Review` | [KOI-107-pelunasan-vendor-utang-pengadaan-2101.md](./KOI-107-pelunasan-vendor-utang-pengadaan-2101.md) |
+| `KOI-109` | [PMO-061] Modul UMK: Pencairan Panjar Kasir ke Akun 110501010100 & Pertanggungjawaban SPJ | `feature/KOI-109-modul-umk-panjar-spj-110501010100` | `In Review` | [KOI-109-modul-umk-panjar-spj-110501010100.md](./KOI-109-modul-umk-panjar-spj-110501010100.md) |
 
 ---
 

@@ -982,4 +982,87 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(res.body.data.contextMetrics).toBeDefined();
     }, 15000);
   });
+
+  describe('8. UMK & SPJ Petty Cash (KOI-109 / PMO-061)', () => {
+    let submissionId: string;
+
+    it('creates a petty cash submission, verifies tax, approves and disburses with balanced double-entry journal', async () => {
+      // 1. Create submission
+      const createRes = await request(app)
+        .post('/api/v1/petty-cash/submissions')
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({
+          type: 'GUP',
+          applicantName: 'Budi Kasir PMO',
+          applicantUnit: 'Unit Operasional',
+          applicantPhone: '081234567890',
+          expenseCategory: 'Biaya Konsumsi & ATK',
+          draCode: '520901020100',
+          draDescription: 'Beban Barang dan Perlengkapan',
+          coaCode: '520901020100',
+          coaName: 'Beban Barang dan Perlengkapan',
+          activityDescription: 'Penggantian konsumsi rapat koordinasi sprint 3',
+          vendorName: 'CV Katering Kampus UTama',
+          vendorTaxId: '01.234.567.8-123.000',
+          vendorIdentityName: 'CV Katering Kampus UTama',
+          transactionDate: '2026-11-10',
+          paymentMethod: 'Transfer Bank',
+          taxType: 'PPh 23 (Jasa Boga/Katering)',
+          taxDetail: 'Pemotongan PPh 23 2%',
+          businessUnitId: unitDiklatId,
+          items: [
+            {
+              description: 'Paket Snack Box Rapat Koordinasi',
+              unit: 'Kotak',
+              quantity: 20,
+              unitPrice: 25000,
+              isTaxable: true,
+            },
+          ],
+        });
+
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.success).toBe(true);
+      submissionId = createRes.body.data.id;
+      expect(submissionId).toBeDefined();
+
+      // 2. Verify Tax
+      const taxRes = await request(app)
+        .post(`/api/v1/petty-cash/submissions/${submissionId}/verify-tax`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ taxType: 'PPh 23 (Jasa Boga/Katering)' });
+      expect(taxRes.status).toBe(200);
+      expect(taxRes.body.data.status).toBe('TAX_VERIFIED');
+
+      // 3. Approve
+      const approveRes = await request(app)
+        .post(`/api/v1/petty-cash/submissions/${submissionId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({});
+      expect(approveRes.status).toBe(200);
+      expect(approveRes.body.data.status).toBe('APPROVED');
+
+      // 4. Disburse and verify balanced double-entry journal
+      const disburseRes = await request(app)
+        .post(`/api/v1/petty-cash/submissions/${submissionId}/disburse`)
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({});
+      expect(disburseRes.status).toBe(200);
+      expect(disburseRes.body.success).toBe(true);
+      expect(disburseRes.body.data.status).toBe('DISBURSED');
+      expect(disburseRes.body.data.journalDocNo).toBeDefined();
+
+      const journal = disburseRes.body.data.journal;
+      expect(journal).toBeDefined();
+      expect(journal.totalDebit).toBe(journal.totalCredit);
+      expect(Number(journal.totalDebit)).toBeGreaterThan(0);
+
+      // Verify detail endpoint returns journalDocNo
+      const getRes = await request(app)
+        .get(`/api/v1/petty-cash/submissions/${submissionId}`)
+        .set('Authorization', `Bearer ${cashierToken}`);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.data.journalDocNo).toBe(journal.journalNumber);
+    });
+  });
 });

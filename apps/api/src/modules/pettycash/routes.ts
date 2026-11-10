@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../shared/prisma.js';
 import { toNumber } from '../../shared/decimal.js';
 import { recordAuditLog } from '../../shared/audit.js';
+import { createOrGetBalancedJournal } from '../../shared/accounting-engine.js';
 import {
   AppError,
   requireAuth,
@@ -34,7 +35,7 @@ function getStatusLabel(status: string): string {
   }
 }
 
-function formatSubmissionRecord(r: any) {
+function formatSubmissionRecord(r: any, journalNumber?: string | null) {
   const totalTx = toNumber(r.totalTransaction);
   const ppnAmt = toNumber(r.ppnAmount);
   const pphAmt = toNumber(r.pphAmount);
@@ -45,6 +46,8 @@ function formatSubmissionRecord(r: any) {
 
   return {
     ...r,
+    journalEntryId: r.journalEntryId || null,
+    journalDocNo: journalNumber || r.journalDocNo || null,
     // Standardized Frontend & Backend aliases
     proposerName: r.applicantName,
     applicantName: r.applicantName,
@@ -489,7 +492,19 @@ pettyCashRouter.get('/submissions', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const formatted = records.map(formatSubmissionRecord);
+    const journalIds = records.map((r) => r.journalEntryId).filter((id): id is string => Boolean(id));
+    const journals =
+      journalIds.length > 0
+        ? await prisma.journalEntry.findMany({
+            where: { id: { in: journalIds } },
+            select: { id: true, journalNumber: true },
+          })
+        : [];
+    const journalMap = new Map(journals.map((j) => [j.id, j.journalNumber]));
+
+    const formatted = records.map((r) =>
+      formatSubmissionRecord(r, r.journalEntryId ? journalMap.get(r.journalEntryId) : null)
+    );
 
     res.json({
       success: true,
@@ -513,9 +528,18 @@ pettyCashRouter.get('/submissions/:id', async (req, res, next) => {
       throw new AppError(404, 'SUBMISSION_NOT_FOUND', 'Data pengajuan Uang Persediaan tidak ditemukan.');
     }
 
+    let journalDocNo: string | null = null;
+    if (r.journalEntryId) {
+      const jrn = await prisma.journalEntry.findUnique({
+        where: { id: r.journalEntryId },
+        select: { journalNumber: true },
+      });
+      journalDocNo = jrn?.journalNumber || null;
+    }
+
     res.json({
       success: true,
-      data: formatSubmissionRecord(r),
+      data: formatSubmissionRecord(r, journalDocNo),
       meta: { requestId: req.requestId },
     });
   } catch (err) {
@@ -897,28 +921,147 @@ pettyCashRouter.post('/submissions/:id/disburse', async (req, res, next) => {
       throw new AppError(409, 'INVALID_STATE', `Pengajuan harus berstatus APPROVED sebelum dicairkan.`);
     }
 
-    const updated = await prisma.pettyCashSubmission.update({
-      where: { id: sub.id },
-      data: {
-        status: 'DISBURSED',
-        disbursedAt: new Date(),
-      },
-      include: { items: true, businessUnit: true },
-    });
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Tentukan akun Beban Operasional (Debit)
+      let expenseAccount = sub.coaCode;
+      if (!expenseAccount || expenseAccount.includes('-')) {
+        const officialExpense = await tx.chartOfAccount.findUnique({ where: { code: '520901020100' } });
+        expenseAccount = officialExpense ? '520901020100' : (expenseAccount || '5-1200');
+      }
 
-    const journalDocNo = `JRN-UP/${new Date().getFullYear()}/${sub.submissionNo.split('/').pop() || '001'}`;
+      // 2. Tentukan akun Kredit Kas/Bank atau UMK
+      const isGup = sub.type === 'GUP';
+      let creditAccount = isGup ? '110101020200' : '110501010100';
+      const checkCredit = await tx.chartOfAccount.findUnique({ where: { code: creditAccount } });
+      if (!checkCredit) {
+        creditAccount = isGup ? '1-1120' : '1-1110';
+      }
+
+      // 3. Susun baris jurnal (Debit & Kredit Seimbang)
+      const lines = [];
+
+      // Sisi Debet: Total Belanja Operasional
+      lines.push({
+        accountCode: expenseAccount,
+        description: `Beban SPJ ${sub.type} ${sub.submissionNo}: ${sub.activityDescription}`,
+        debit: sub.totalTransaction.toString(),
+        credit: '0.00',
+      });
+
+      // Potongan Pajak PPh & PPN
+      const pphCents = BigInt(Math.round(Number(sub.pphAmount) * 100));
+      const ppnCents = BigInt(Math.round(Number(sub.ppnAmount) * 100));
+      let taxLinesTotalCents = 0n;
+
+      if (pphCents > 0n) {
+        let pphAccount = '210201010100';
+        const checkPph = await tx.chartOfAccount.findUnique({ where: { code: pphAccount } });
+        if (!checkPph) pphAccount = '2-1200';
+        lines.push({
+          accountCode: pphAccount,
+          description: `Potongan Pajak PPh SPJ ${sub.submissionNo} (${sub.taxType || 'PPh'})`,
+          debit: '0.00',
+          credit: sub.pphAmount.toString(),
+        });
+        taxLinesTotalCents += pphCents;
+      }
+
+      if (ppnCents > 0n) {
+        let ppnAccount = '210202010100';
+        const checkPpn = await tx.chartOfAccount.findUnique({ where: { code: ppnAccount } });
+        if (!checkPpn) ppnAccount = '2-1200';
+        lines.push({
+          accountCode: ppnAccount,
+          description: `Potongan Pajak PPN SPJ ${sub.submissionNo}`,
+          debit: '0.00',
+          credit: sub.ppnAmount.toString(),
+        });
+        taxLinesTotalCents += ppnCents;
+      }
+
+      // Sisi Kredit: Kas Bank atau Panjar UMK (Netto)
+      const totCents = BigInt(Math.round(Number(sub.totalTransaction) * 100));
+      const netPaymentCents = totCents - taxLinesTotalCents;
+      const netPaymentStr = (Number(netPaymentCents) / 100).toFixed(2);
+
+      lines.push({
+        accountCode: creditAccount,
+        description: isGup
+          ? `Pencairan Kas Operasional GUP ${sub.submissionNo} untuk ${sub.applicantName} (${sub.applicantUnit})`
+          : `Pertanggungjawaban Panjar UMK ${sub.submissionNo} untuk ${sub.applicantName}`,
+        debit: '0.00',
+        credit: netPaymentStr,
+      });
+
+      // 4. Resolve Business Unit ID for General Ledger
+      let targetBuId = sub.businessUnitId;
+      if (!targetBuId) {
+        const defaultBu = await tx.businessUnit.findFirst({ select: { id: true } });
+        targetBuId = defaultBu ? defaultBu.id : 'BU-DEFAULT';
+      }
+
+      // 5. Auto-post Balanced Double-Entry Journal
+      const journal = await createOrGetBalancedJournal(
+        {
+          entryDate: new Date(),
+          businessUnitId: targetBuId,
+          sourceType: 'PETTY_CASH',
+          sourceId: sub.id,
+          sourceDocNumber: sub.submissionNo,
+          idempotencyKey: `PETTYCASH_DISBURSE_${sub.id}`,
+          description: isGup
+            ? `Pencairan Penggantian Uang Persediaan (GUP) ${sub.submissionNo}: ${sub.activityDescription}`
+            : `Pertanggungjawaban & Nihilisasi TUP Panjar ${sub.submissionNo}: ${sub.activityDescription}`,
+          createdById: req.user?.userId || 'SYSTEM',
+          createdByName: req.user?.fullName || 'Petty Cash Automation',
+          lines,
+        },
+        tx
+      );
+
+      // 6. Update submission record
+      const updated = await tx.pettyCashSubmission.update({
+        where: { id: sub.id },
+        data: {
+          status: 'DISBURSED',
+          disbursedAt: new Date(),
+          journalEntryId: journal.id,
+        },
+        include: { items: true, businessUnit: true },
+      });
+
+      await recordAuditLog(
+        {
+          actorId: req.user?.userId || 'SYSTEM',
+          actorName: req.user?.fullName || 'Petty Cash Automation',
+          actorRole: req.user?.roleCode || 'CASHIER',
+          action: 'PETTY_CASH_DISBURSED',
+          module: 'PETTY_CASH',
+          entityType: 'PettyCashSubmission',
+          entityId: sub.id,
+          entityCode: sub.submissionNo,
+          summary: `Mencairkan dana ${sub.type} ${sub.submissionNo} sebesar Rp ${toNumber(sub.netDisbursement).toLocaleString('id-ID')} dengan Jurnal ${journal.journalNumber}`,
+          afterData: { submissionNo: sub.submissionNo, journalNumber: journal.journalNumber },
+          requestId: req.requestId,
+        },
+        tx as any
+      );
+
+      return { updated, journal };
+    });
 
     res.json({
       success: true,
       data: {
-        ...formatSubmissionRecord(updated),
-        submission: formatSubmissionRecord(updated),
-        journalDocNo,
+        ...formatSubmissionRecord(result.updated, result.journal.journalNumber),
+        submission: formatSubmissionRecord(result.updated, result.journal.journalNumber),
+        journalDocNo: result.journal.journalNumber,
+        journal: result.journal,
       },
       message:
         sub.type === 'GUP'
-          ? `Penggantian Uang Persediaan (GUP) ${sub.submissionNo} sebesar Rp ${toNumber(sub.netDisbursement).toLocaleString('id-ID')} telah dicairkan ke kas unit.`
-          : `Pertanggungjawaban TUP Nihil ${sub.submissionNo} telah diselesaikan (Nihilisasi selesai).`,
+          ? `Penggantian Uang Persediaan (GUP) ${sub.submissionNo} sebesar Rp ${toNumber(sub.netDisbursement).toLocaleString('id-ID')} telah dicairkan ke kas unit (Jurnal: ${result.journal.journalNumber}).`
+          : `Pertanggungjawaban TUP Nihil ${sub.submissionNo} telah diselesaikan (Jurnal Nihilisasi: ${result.journal.journalNumber}).`,
       meta: { requestId: req.requestId },
     });
   } catch (err) {
