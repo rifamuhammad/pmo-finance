@@ -1219,124 +1219,305 @@ function formatRupiahInt(amount: number): string {
   return 'Rp ' + Math.round(amount).toLocaleString('id-ID');
 }
 
+async function buildAiAssistantContext(user: NonNullable<Express.Request['user']>) {
+  const isUnitScoped = Boolean(user.businessUnitId && ['UNIT_MANAGER', 'CASHIER'].includes(user.roleCode));
+  const unitFilter: Record<string, unknown> = {};
+  if (isUnitScoped && user.businessUnitId) {
+    unitFilter.businessUnitId = user.businessUnitId;
+  }
+
+  const [
+    currentUserData,
+    budgets,
+    expenses,
+    approvals,
+    customerInvoices,
+    cashierSessions,
+    glAggregate,
+    pettyCashSubmissions,
+    fixedAssetsCount,
+    employeesCount,
+  ] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: user.userId },
+      include: { businessUnit: true, role: true },
+    }),
+    prisma.budget.findMany({
+      where: {
+        ...unitFilter,
+        status: { in: ['APPROVED', 'REVISED'] },
+      },
+      include: { businessUnit: true, lines: true },
+    }),
+    prisma.expense.findMany({
+      where: unitFilter,
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      include: { businessUnit: true },
+    }),
+    prisma.approvalRequest.findMany({
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    }),
+    prisma.customerInvoice.findMany({
+      where: unitFilter,
+      orderBy: { createdAt: 'desc' },
+      include: { businessUnit: true, customer: true },
+    }),
+    prisma.cashierSession.findMany({
+      where: { ...unitFilter, status: 'OPEN' },
+      include: { cashRegister: true },
+    }),
+    prisma.journalLine.aggregate({
+      _sum: { debit: true, credit: true },
+      where: {
+        journalEntry: {
+          status: 'POSTED',
+          ...(isUnitScoped && user.businessUnitId ? { businessUnitId: user.businessUnitId } : {}),
+        },
+      },
+    }),
+    prisma.pettyCashSubmission.findMany({
+      where: unitFilter,
+      orderBy: { createdAt: 'desc' },
+      take: 8,
+    }),
+    prisma.fixedAsset.count({
+      where: { ...unitFilter, status: 'ACTIVE' },
+    }),
+    prisma.employee.count({
+      where: { ...unitFilter, status: 'ACTIVE' },
+    }),
+  ]);
+
+  let totalAllocated = 0;
+  let totalCommitted = 0;
+  let totalActualExpense = 0;
+  let totalSemulaAmount = 0;
+  let totalPergeseranAmount = 0;
+  let totalMenjadiAmount = 0;
+  let totalRgaTargetRevenue = 0;
+
+  const rgaByUnitMap = new Map<
+    string,
+    { unitCode: string; unitName: string; targetRevenue: number; realizedRevenue: number }
+  >();
+
+  budgets.forEach((b) => {
+    const unitCode = b.businessUnit?.code || 'PMO';
+    const unitName = b.businessUnit?.name || 'Unit PMO';
+    const revTarget = Number(b.revenueTarget || 0);
+    totalRgaTargetRevenue += revTarget;
+
+    const existingUnit = rgaByUnitMap.get(b.businessUnitId) || {
+      unitCode,
+      unitName,
+      targetRevenue: 0,
+      realizedRevenue: 0,
+    };
+    existingUnit.targetRevenue += revTarget;
+    rgaByUnitMap.set(b.businessUnitId, existingUnit);
+
+    b.lines.forEach((l) => {
+      const alloc = Number(l.allocatedAmount || 0);
+      const semula = Number(l.semulaAmount || alloc);
+      const pergeseran = Number(l.pergeseranAmount || 0);
+      const menjadi = Number(l.menjadiAmount || alloc);
+
+      totalAllocated += alloc;
+      totalCommitted += Number(l.committedAmount || 0);
+      totalActualExpense += Number(l.actualAmount || 0);
+      totalSemulaAmount += semula;
+      totalPergeseranAmount += pergeseran;
+      totalMenjadiAmount += menjadi;
+    });
+  });
+
+  let totalRealizedRevenue = 0;
+  customerInvoices.forEach((inv) => {
+    if (inv.status === 'PAID' || inv.status === 'PARTIALLY_PAID') {
+      const amt = Number(inv.paidAmount || inv.totalAmount || 0);
+      totalRealizedRevenue += amt;
+      const existingUnit = rgaByUnitMap.get(inv.businessUnitId);
+      if (existingUnit) {
+        existingUnit.realizedRevenue += amt;
+      }
+    }
+  });
+
+  const rgaUnits = Array.from(rgaByUnitMap.values()).map((u) => ({
+    ...u,
+    achievementPercent:
+      u.targetRevenue > 0 ? Math.round((u.realizedRevenue / u.targetRevenue) * 100) : 0,
+  }));
+
+  const totalAvailable = Math.max(0, totalAllocated - totalCommitted - totalActualExpense);
+  const serapanPercent =
+    totalAllocated > 0
+      ? Math.round(((totalCommitted + totalActualExpense) / totalAllocated) * 100)
+      : 0;
+  const rgaAchievementPercent =
+    totalRgaTargetRevenue > 0
+      ? Math.round((totalRealizedRevenue / totalRgaTargetRevenue) * 100)
+      : 0;
+
+  const glTotalDebit = Number(glAggregate._sum.debit || 0);
+  const glTotalCredit = Number(glAggregate._sum.credit || 0);
+  const glIsBalanced = Math.abs(glTotalDebit - glTotalCredit) < 1;
+
+  const quickPrompts = [
+    {
+      icon: '📑',
+      title: 'Pagu PBI Semula-Menjadi',
+      query: 'Tampilkan analisis pagu PBI Semula-Menjadi, revisi pergeseran, dan sisa anggaran bebas saat ini.',
+    },
+    {
+      icon: '📈',
+      title: 'Target & Realisasi RGA',
+      query: 'Bagaimana capaian target pendapatan RGA per unit bisnis terhadap pagu anggaran saat ini?',
+    },
+    {
+      icon: '⚖️',
+      title: 'Neraca ISAK 335 & GL',
+      query: 'Cek keseimbangan Trial Balance Buku Besar GL, aturan Storno, dan kepatuhan laporan ISAK 335.',
+    },
+    {
+      icon: '💳',
+      title: 'Kas Kecil & Panjar UMK',
+      query: 'Bagaimana status pengajuan Kas Kecil (GUP/TUP) dan aturan SLA 5 hari kerja SPJ panjar UMK?',
+    },
+    {
+      icon: '📬',
+      title: 'Antrean Approval',
+      query: 'Apakah ada dokumen di antrean approval yang menunggu persetujuan sesuai wewenang role?',
+    },
+    {
+      icon: '🏢',
+      title: 'Cut-Off Aset & HRIS',
+      query: 'Tampilkan ringkasan aset tetap, SDM aktif, serta kepatuhan cut-off penyusutan Tgl 20 dan payroll Tgl 25.',
+    },
+  ];
+
+  return {
+    isUnitScoped,
+    quickPrompts,
+    qwenContext: {
+      user: {
+        fullName: currentUserData?.fullName || user.fullName,
+        email: currentUserData?.email || user.email,
+        roleCode: user.roleCode,
+        roleName: currentUserData?.role?.name || user.roleCode,
+        businessUnitId: user.businessUnitId,
+        businessUnitName:
+          currentUserData?.businessUnit?.name || 'Kantor Pusat / Holding (Lintas Divisi)',
+      },
+      metrics: {
+        totalAllocated,
+        totalCommitted,
+        totalActualExpense,
+        totalAvailable,
+        serapanPercent,
+        totalSemulaAmount,
+        totalPergeseranAmount,
+        totalMenjadiAmount,
+        totalRgaTargetRevenue,
+        totalRealizedRevenue,
+        rgaAchievementPercent,
+        glTotalDebit,
+        glTotalCredit,
+        glIsBalanced,
+        activePettyCashCount: pettyCashSubmissions.length,
+        fixedAssetsCount,
+        employeesCount,
+      },
+      budgets: budgets.map((b) => ({
+        title: b.title,
+        unitCode: b.businessUnit?.code,
+        unitName: b.businessUnit?.name,
+        allocated: b.lines.reduce((acc, l) => acc + Number(l.allocatedAmount), 0),
+        committed: b.lines.reduce((acc, l) => acc + Number(l.committedAmount), 0),
+        actual: b.lines.reduce((acc, l) => acc + Number(l.actualAmount), 0),
+        semula: b.lines.reduce((acc, l) => acc + Number(l.semulaAmount || l.allocatedAmount), 0),
+        pergeseran: b.lines.reduce((acc, l) => acc + Number(l.pergeseranAmount || 0), 0),
+        menjadi: b.lines.reduce((acc, l) => acc + Number(l.menjadiAmount || l.allocatedAmount), 0),
+        revenueTarget: Number(b.revenueTarget || 0),
+      })),
+      rgaUnits,
+      pendingApprovals: approvals.map((a) => ({
+        code: a.entityCode || a.requestNumber,
+        module: a.module,
+        title: a.title,
+        requestedBy: a.requestedByName,
+        requiredRole: a.requiredRoleCode,
+      })),
+      recentExpenses: expenses.map((e) => ({
+        docNumber: e.docNumber,
+        title: e.title,
+        recipientName: e.recipientName,
+        amount: Number(e.totalAmount),
+        status: e.status,
+      })),
+      pettyCashSubmissions: pettyCashSubmissions.map((p) => ({
+        submissionNo: p.submissionNo,
+        type: p.type,
+        activityDescription: p.activityDescription,
+        applicantName: p.applicantName,
+        amount: Number(p.totalTransaction),
+        status: p.status,
+      })),
+      unpaidInvoices: customerInvoices
+        .filter((i) => i.status !== 'PAID')
+        .slice(0, 10)
+        .map((i) => ({
+          docNumber: i.docNumber,
+          customerName: i.customer?.name || 'Pelanggan',
+          amount: Number(i.totalAmount),
+          status: i.status,
+        })),
+      openCashierSessionsCount: cashierSessions.length,
+    },
+  };
+}
+
+reportsRouter.get('/ai-assistant/context', async (req, res, next) => {
+  try {
+    const user = req.user!;
+    const { isUnitScoped, quickPrompts, qwenContext } = await buildAiAssistantContext(user);
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          ...qwenContext.user,
+          isUnitScoped,
+        },
+        metrics: {
+          ...qwenContext.metrics,
+          pendingApprovalsCount: qwenContext.pendingApprovals.length,
+          expensesCount: qwenContext.recentExpenses.length,
+          openCashierSessionsCount: qwenContext.openCashierSessionsCount,
+        },
+        rgaUnits: qwenContext.rgaUnits,
+        quickPrompts,
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 reportsRouter.post('/ai-assistant', async (req, res, next) => {
   try {
     const { query, history } = aiAssistantSchema.parse(req.body);
-    const qLower = query.toLowerCase();
     const user = req.user!;
-
-    // Scoped context based on role and unit
-    const unitFilter: Record<string, unknown> = {};
-    if (user.businessUnitId && ['UNIT_MANAGER', 'CASHIER'].includes(user.roleCode)) {
-      unitFilter.businessUnitId = user.businessUnitId;
-    }
-
-    // Fetch live ERP context
-    const [currentUserData, budgets, expenses, approvals, customerInvoices, cashierSessions, businessUnits] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: user.userId },
-        include: { businessUnit: true, role: true },
-      }),
-      prisma.budget.findMany({
-        where: {
-          ...unitFilter,
-          status: { in: ['APPROVED', 'REVISED'] },
-        },
-        include: { businessUnit: true, lines: true },
-      }),
-      prisma.expense.findMany({
-        where: unitFilter,
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        include: { businessUnit: true },
-      }),
-      prisma.approvalRequest.findMany({
-        where: { status: 'PENDING' },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      }),
-      prisma.customerInvoice.findMany({
-        where: unitFilter,
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        include: { businessUnit: true, customer: true },
-      }),
-      prisma.cashierSession.findMany({
-        where: { status: 'OPEN' },
-        include: { cashRegister: true },
-      }),
-      prisma.businessUnit.findMany({ where: { isActive: true } }),
-    ]);
-
-    // Calculate aggregated metrics
-    let totalAllocated = 0;
-    let totalCommitted = 0;
-    let totalActualExpense = 0;
-
-    budgets.forEach((b) => {
-      b.lines.forEach((l) => {
-        totalAllocated += Number(l.allocatedAmount);
-        totalCommitted += Number(l.committedAmount);
-        totalActualExpense += Number(l.actualAmount);
-      });
-    });
-
-    const totalAvailable = Math.max(0, totalAllocated - totalCommitted - totalActualExpense);
+    const { qwenContext } = await buildAiAssistantContext(user);
 
     const qwenResult = await queryQwenAiAssistant({
       query,
       history,
-      context: {
-        user: {
-          fullName: currentUserData?.fullName || user.fullName,
-          email: currentUserData?.email || user.email,
-          roleCode: user.roleCode,
-          roleName: currentUserData?.role?.name || user.roleCode,
-          businessUnitId: user.businessUnitId,
-          businessUnitName: currentUserData?.businessUnit?.name || 'Kantor Pusat / Holding (Lintas Divisi)',
-        },
-        metrics: {
-          totalAllocated,
-          totalCommitted,
-          totalActualExpense,
-          totalAvailable,
-          serapanPercent:
-            totalAllocated > 0
-              ? Math.round(((totalCommitted + totalActualExpense) / totalAllocated) * 100)
-              : 0,
-        },
-        budgets: budgets.map((b) => ({
-          title: b.title,
-          unitCode: b.businessUnit?.code,
-          unitName: b.businessUnit?.name,
-          allocated: b.lines.reduce((acc, l) => acc + Number(l.allocatedAmount), 0),
-          committed: b.lines.reduce((acc, l) => acc + Number(l.committedAmount), 0),
-          actual: b.lines.reduce((acc, l) => acc + Number(l.actualAmount), 0),
-        })),
-        pendingApprovals: approvals.map((a) => ({
-          code: a.entityCode || a.requestNumber,
-          module: a.module,
-          title: a.title,
-          requestedBy: a.requestedByName,
-          requiredRole: a.requiredRoleCode,
-        })),
-        recentExpenses: expenses.map((e) => ({
-          docNumber: e.docNumber,
-          title: e.title,
-          recipientName: e.recipientName,
-          amount: Number(e.totalAmount),
-          status: e.status,
-        })),
-        unpaidInvoices: customerInvoices
-          .filter((i) => i.status !== 'PAID')
-          .map((i) => ({
-            docNumber: i.docNumber,
-            customerName: i.customer?.name || 'Pelanggan',
-            amount: Number(i.totalAmount),
-            status: i.status,
-          })),
-        openCashierSessionsCount: cashierSessions.length,
-      },
+      context: qwenContext,
     });
 
     res.json({
@@ -1347,13 +1528,10 @@ reportsRouter.post('/ai-assistant', async (req, res, next) => {
         provider: qwenResult.provider,
         model: qwenResult.model,
         contextMetrics: {
-          totalAllocated,
-          totalCommitted,
-          totalActualExpense,
-          totalAvailable,
-          pendingApprovalsCount: approvals.length,
-          expensesCount: expenses.length,
-          openCashierSessionsCount: cashierSessions.length,
+          ...qwenContext.metrics,
+          pendingApprovalsCount: qwenContext.pendingApprovals.length,
+          expensesCount: qwenContext.recentExpenses.length,
+          openCashierSessionsCount: qwenContext.openCashierSessionsCount,
         },
       },
       meta: { requestId: req.requestId },

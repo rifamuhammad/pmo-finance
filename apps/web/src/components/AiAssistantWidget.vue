@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, watch, onMounted } from 'vue';
 import { apiFetch } from '../services/api';
 import { useAuthStore } from '../stores/auth';
 
@@ -21,22 +21,56 @@ interface Message {
   copied?: boolean;
 }
 
+interface ContextMetrics {
+  totalAllocated: number;
+  totalCommitted: number;
+  totalActualExpense: number;
+  totalAvailable: number;
+  serapanPercent: number;
+  totalSemulaAmount?: number;
+  totalPergeseranAmount?: number;
+  totalMenjadiAmount?: number;
+  totalRgaTargetRevenue?: number;
+  totalRealizedRevenue?: number;
+  rgaAchievementPercent?: number;
+  glTotalDebit?: number;
+  glTotalCredit?: number;
+  glIsBalanced?: boolean;
+  pendingApprovalsCount?: number;
+  activePettyCashCount?: number;
+  openCashierSessionsCount?: number;
+  fixedAssetsCount?: number;
+  employeesCount?: number;
+}
+
 const inputQuery = ref('');
 const loading = ref(false);
 const chatContainer = ref<HTMLElement | null>(null);
 const activeModel = ref('pmo-copilot (Ollama)');
-const showScopeInfo = ref(false);
+const showScopeInfo = ref(true);
+const contextMetrics = ref<ContextMetrics | null>(null);
+
+function formatCompactIdr(num?: number): string {
+  const val = Number(num || 0);
+  if (val >= 1_000_000_000) {
+    return 'Rp ' + (val / 1_000_000_000).toFixed(2).replace('.', ',') + ' M';
+  }
+  if (val >= 1_000_000) {
+    return 'Rp ' + (val / 1_000_000).toFixed(1).replace('.', ',') + ' Jt';
+  }
+  return 'Rp ' + Math.round(val).toLocaleString('id-ID');
+}
 
 const initialGreeting = computed(() => {
   const userName = auth.user?.fullName || 'Bapak/Ibu';
   const role = auth.user?.roleCode || 'Staff';
   return `Halo **${userName}**! Saya adalah **PMO Financial Copilot**, asisten intelijen keuangan dan operasional resmi ERP PMO UTama.
 
-Saya beroperasi secara **100% lokal dan privat melalui Ollama**, siap membantu Anda dalam:
-- 📊 **Monitoring Anggaran**: Menganalisis sisa plafon divisi dan serapan dana RKAP.
-- 📬 **Verifikasi Approval**: Mengecek antrean dokumen pending sesuai hierarki wewenang Anda (\`${role}\`).
-- 🧾 **Kontrol Beban & Reimburse**: Memeriksa riwayat klaim operasional dan kesesuaian nota.
-- ⚖️ **Kepatuhan Kebijakan**: Memvalidasi kepatuhan prinsip *3-Way Matching* dan *Separation of Duties*.
+Saya terhubung langsung ke basis data real-time sesuai otoritas **\`${role}\`**, siap membantu Anda dalam:
+- 📑 **Pagu PBI Semula-Menjadi**: Analisis plafon, revisi pergeseran, dan serapan anggaran 60 kolom.
+- 📈 **Sinkronisasi Target RGA**: Evaluasi target vs realisasi pendapatan 5 unit bisnis.
+- ⚖️ **Buku Besar GL & ISAK 335**: Pemeriksaan keseimbangan *Trial Balance*, COA Pertor 310, dan jurnal Storno.
+- 💳 **Kas Kecil & Cut-Off Bulanan**: Monitoring panjar UMK (SLA 5 HK), penyusutan aset (Tgl 20), dan payroll HRIS (Tgl 25).
 
 Apa yang ingin Anda analisis hari ini?`;
 });
@@ -58,31 +92,65 @@ interface PromptCategory {
 
 const promptCategories = ref<PromptCategory[]>([
   {
-    title: 'Sisa Plafon Anggaran',
-    icon: '📊',
-    query: 'Berapa sisa pagu anggaran dan tingkat serapan unit saya saat ini?',
+    title: 'Pagu PBI Semula-Menjadi',
+    icon: '📑',
+    query: 'Tampilkan analisis pagu PBI Semula-Menjadi, revisi pergeseran, dan sisa anggaran bebas saat ini.',
+  },
+  {
+    title: 'Target & Realisasi RGA',
+    icon: '📈',
+    query: 'Bagaimana capaian target pendapatan RGA per unit bisnis terhadap pagu anggaran saat ini?',
+  },
+  {
+    title: 'Neraca ISAK 335 & GL',
+    icon: '⚖️',
+    query: 'Cek keseimbangan Trial Balance Buku Besar GL, aturan Storno, dan kepatuhan laporan ISAK 335.',
+  },
+  {
+    title: 'Kas Kecil & Panjar UMK',
+    icon: '💳',
+    query: 'Bagaimana status pengajuan Kas Kecil (GUP/TUP) dan aturan SLA 5 hari kerja SPJ panjar UMK?',
   },
   {
     title: 'Antrean Approval Pending',
     icon: '📬',
-    query: 'Apakah ada dokumen PR atau beban yang menunggu persetujuan wewenang saya?',
+    query: 'Apakah ada dokumen di antrean approval yang menunggu persetujuan sesuai wewenang role?',
   },
   {
-    title: 'Rekapitulasi Klaim Beban',
-    icon: '🧾',
-    query: 'Tampilkan rekap transaksi pengeluaran beban (expenses) terbaru dan status pencairannya',
-  },
-  {
-    title: 'Status Piutang & Kasir',
-    icon: '💰',
-    query: 'Bagaimana status piutang faktur belum lunas dan register kasir yang sedang buka?',
-  },
-  {
-    title: 'Aturan 3-Way Matching',
-    icon: '⚖️',
-    query: 'Jelaskan syarat dan alur 3-way matching sebelum tagihan faktur vendor dapat dibayar',
+    title: 'Cut-Off Aset & HRIS',
+    icon: '🏢',
+    query: 'Tampilkan ringkasan aset tetap, SDM aktif, serta kepatuhan cut-off penyusutan Tgl 20 dan payroll Tgl 25.',
   },
 ]);
+
+async function fetchContextSnapshot() {
+  try {
+    const res = await apiFetch('/reports/ai-assistant/context');
+    if (res.data?.metrics) {
+      contextMetrics.value = res.data.metrics;
+    }
+    if (Array.isArray(res.data?.quickPrompts) && res.data.quickPrompts.length > 0) {
+      promptCategories.value = res.data.quickPrompts;
+    }
+  } catch {
+    // Non-blocking context snapshot
+  }
+}
+
+watch(
+  () => props.isOpen,
+  (open) => {
+    if (open) {
+      fetchContextSnapshot();
+    }
+  }
+);
+
+onMounted(() => {
+  if (props.isOpen) {
+    fetchContextSnapshot();
+  }
+});
 
 function formatTime(d: Date): string {
   return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -174,6 +242,9 @@ async function sendQuery(text?: string) {
 
     if (res.data?.model) {
       activeModel.value = res.data.model.includes('pmo') ? 'pmo-copilot (Ollama)' : res.data.model;
+    }
+    if (res.data?.contextMetrics) {
+      contextMetrics.value = res.data.contextMetrics;
     }
   } catch (err: any) {
     messages.value.push({
@@ -280,23 +351,31 @@ function clearChat() {
       <transition name="accordion">
         <div v-if="showScopeInfo" class="scope-detail-drawer">
           <div class="scope-detail-inner">
-            <div class="scope-detail-title">Konteks Data Real-time Terhubung:</div>
+            <div class="scope-detail-title">Konteks Data Keuangan Real-time Terhubung:</div>
             <div class="scope-detail-grid">
               <div class="metric-card">
-                <span class="metric-lbl">Otoritas Approval</span>
-                <span class="metric-val">Sesuai RBAC Role</span>
+                <span class="metric-lbl">Sisa Pagu Menjadi (PBI)</span>
+                <span class="metric-val">
+                  {{ contextMetrics ? `${formatCompactIdr(contextMetrics.totalAvailable)} (${100 - (contextMetrics.serapanPercent || 0)}% Sisa)` : 'Memuat...' }}
+                </span>
               </div>
               <div class="metric-card">
-                <span class="metric-lbl">Lingkup Anggaran</span>
-                <span class="metric-val">Tahun Buku FY-2026</span>
+                <span class="metric-lbl">Capaian Pendapatan RGA</span>
+                <span class="metric-val">
+                  {{ contextMetrics ? `${formatCompactIdr(contextMetrics.totalRealizedRevenue)} (${contextMetrics.rgaAchievementPercent || 0}%)` : 'Memuat...' }}
+                </span>
               </div>
               <div class="metric-card">
-                <span class="metric-lbl">Model Kecerdasan</span>
-                <span class="metric-val">pmo-copilot (Local)</span>
+                <span class="metric-lbl">Buku Besar GL (ISAK 335)</span>
+                <span class="metric-val">
+                  {{ contextMetrics ? (contextMetrics.glIsBalanced !== false ? '✅ Seimbang 100%' : '⚠️ Perlu Cek') : 'Terverifikasi' }}
+                </span>
               </div>
               <div class="metric-card">
-                <span class="metric-lbl">Privasi Transaksi</span>
-                <span class="metric-val">0 Data Dikirim ke Cloud</span>
+                <span class="metric-lbl">Approval & Kas Kecil</span>
+                <span class="metric-val">
+                  {{ contextMetrics ? `${contextMetrics.pendingApprovalsCount || 0} Inbox • ${contextMetrics.activePettyCashCount || 0} UMK` : 'Sesuai RBAC' }}
+                </span>
               </div>
             </div>
           </div>

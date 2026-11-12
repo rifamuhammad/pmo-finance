@@ -2987,4 +2987,91 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(adminTile?.locked).toBe(true);
     });
   });
+
+  // =========================================================================
+  // 25. [KOI-133] [PMO-182] Widget Asisten Keuangan AI Terintegrasi (Context-Aware Financial AI) (3)
+  // =========================================================================
+  describe('25. [KOI-133] [PMO-182] Widget Asisten Keuangan AI Terintegrasi (Context-Aware Financial AI)', () => {
+    it('fetches live Context-Aware AI snapshot (/reports/ai-assistant/context) with PBI Semula-Menjadi, RGA, GL Trial Balance & RBAC unit scoping', async () => {
+      // 1. GM PMO receives consolidated context across all 5 business units
+      const gmCtxRes = await request(app)
+        .get('/api/v1/reports/ai-assistant/context')
+        .set('Authorization', `Bearer ${gmToken}`);
+
+      expect(gmCtxRes.status).toBe(200);
+      expect(gmCtxRes.body.success).toBe(true);
+      expect(gmCtxRes.body.data.user.isUnitScoped).toBe(false);
+      expect(gmCtxRes.body.data.metrics.totalAllocated).toBeGreaterThan(0);
+      expect(gmCtxRes.body.data.metrics.totalMenjadiAmount).toBeGreaterThan(0);
+      expect(gmCtxRes.body.data.metrics.glIsBalanced).toBe(true);
+      expect(Array.isArray(gmCtxRes.body.data.rgaUnits)).toBe(true);
+      expect(Array.isArray(gmCtxRes.body.data.quickPrompts)).toBe(true);
+      expect(gmCtxRes.body.data.quickPrompts.length).toBeGreaterThanOrEqual(6);
+
+      // 2. Unit Manager receives strictly unit-scoped context
+      const unitCtxRes = await request(app)
+        .get('/api/v1/reports/ai-assistant/context')
+        .set('Authorization', `Bearer ${unitMgrToken}`);
+
+      expect(unitCtxRes.status).toBe(200);
+      expect(unitCtxRes.body.data.user.isUnitScoped).toBe(true);
+      expect(unitCtxRes.body.data.metrics.totalAllocated).toBeLessThanOrEqual(
+        gmCtxRes.body.data.metrics.totalAllocated
+      );
+    });
+
+    it('provides deterministic context-aware financial analysis on PBI Semula-Menjadi 60 Kolom and RGA Revenue Targets', async () => {
+      // 1. Ask about PBI Semula-Menjadi & Pergeseran Anggaran
+      const pbiQueryRes = await request(app)
+        .post('/api/v1/reports/ai-assistant')
+        .set('Authorization', `Bearer ${gmToken}`)
+        .send({
+          query: 'Tampilkan analisis pagu PBI Semula-Menjadi dan pergeseran revisi anggaran saat ini',
+        });
+
+      expect(pbiQueryRes.status).toBe(200);
+      expect(pbiQueryRes.body.success).toBe(true);
+      expect(pbiQueryRes.body.data.reply).toBeDefined();
+      expect(pbiQueryRes.body.data.reply.toLowerCase()).toMatch(/semula|menjadi|pagu|anggaran/);
+      expect(pbiQueryRes.body.data.contextMetrics.totalMenjadiAmount).toBeGreaterThan(0);
+
+      // 2. Ask about RGA Revenue Target & Realization across units
+      const rgaQueryRes = await request(app)
+        .post('/api/v1/reports/ai-assistant')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          query: 'Bagaimana evaluasi target RGA dan capaian pendapatan per unit bisnis?',
+        });
+
+      expect(rgaQueryRes.status).toBe(200);
+      expect(rgaQueryRes.body.success).toBe(true);
+      expect(rgaQueryRes.body.data.reply.toLowerCase()).toMatch(/rga|target|pendapatan/);
+      expect(typeof rgaQueryRes.body.data.contextMetrics.totalRgaTargetRevenue).toBe('number');
+    });
+
+    it('provides deterministic compliance guidance on ISAK 335 / GL Trial Balance, UMK Petty Cash SLA, and Cut-Off Tgl 20 & 25', async () => {
+      // 1. Ask about ISAK 335 & GL Trial Balance / Storno
+      const isakRes = await request(app)
+        .post('/api/v1/reports/ai-assistant')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          query: 'Cek keseimbangan Buku Besar GL, aturan Storno, dan laporan Neraca ISAK 335',
+        });
+
+      expect(isakRes.status).toBe(200);
+      expect(isakRes.body.data.reply.toLowerCase()).toMatch(/isak 335|buku besar|debit|kredit|storno/);
+      expect(isakRes.body.data.contextMetrics.glIsBalanced).toBe(true);
+
+      // 2. Ask about Cut-Off Tanggal 20 Aset & Tanggal 25 HRIS
+      const cutoffRes = await request(app)
+        .post('/api/v1/reports/ai-assistant')
+        .set('Authorization', `Bearer ${gmToken}`)
+        .send({
+          query: 'Bagaimana status penyusutan aset tetap dan aturan cut-off HRIS tanggal 25?',
+        });
+
+      expect(cutoffRes.status).toBe(200);
+      expect(cutoffRes.body.data.reply.toLowerCase()).toMatch(/aset|20|25|hris|penyusutan/);
+    });
+  });
 });
