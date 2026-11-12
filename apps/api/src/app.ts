@@ -14,6 +14,7 @@ import { pettyCashRouter } from './modules/pettycash/routes.js';
 import { assetRouter } from './modules/assets/routes.js';
 import { hrisRouter } from './modules/hris/routes.js';
 import { approvalsRouter } from './modules/approvals/routes.js';
+import { auditRouter } from './modules/audit/routes.js';
 
 export const app = express();
 
@@ -129,5 +130,6 @@ app.use('/api/v1/petty-cash', pettyCashRouter);
 app.use('/api/v1/assets', assetRouter);
 app.use('/api/v1/hris', hrisRouter);
 app.use('/api/v1/approvals', approvalsRouter);
+app.use('/api/v1/audit', auditRouter);
 
 app.use(errorHandler);

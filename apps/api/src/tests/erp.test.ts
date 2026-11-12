@@ -2797,4 +2797,120 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(authorizedRes.status).toBe(200);
     });
   });
+
+  // =========================================================================
+  // 23. [KOI-131] [PMO-171] Perekaman Otomatis Mutasi Data & Jejak Audit (Forensic Audit Trail) (3)
+  // =========================================================================
+  describe('23. [KOI-131] [PMO-171] Perekaman Otomatis Mutasi Data & Jejak Audit (Forensic Audit Trail)', () => {
+    let sampleLogId = '';
+    let testEntityId = '';
+
+    it('automatically records immutable audit logs upon financial entity mutations with beforeData and afterData snapshots', async () => {
+      // 1. Fetch recent audit logs from dedicated forensic endpoint
+      const res = await request(app)
+        .get('/api/v1/audit/logs?limit=10')
+        .set('Authorization', `Bearer ${auditorToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data.length).toBeGreaterThan(0);
+      expect(res.body.meta.total).toBeGreaterThan(0);
+
+      const firstLog = res.body.data[0];
+      sampleLogId = firstLog.id;
+      testEntityId = firstLog.entityId;
+
+      expect(firstLog.actorName).toBeDefined();
+      expect(firstLog.actorRole).toBeDefined();
+      expect(firstLog.action).toBeDefined();
+      expect(firstLog.module).toBeDefined();
+      expect(firstLog.summary).toBeDefined();
+
+      // 2. Query single log with computed field diffs
+      const singleRes = await request(app)
+        .get(`/api/v1/audit/logs/${sampleLogId}`)
+        .set('Authorization', `Bearer ${auditorToken}`);
+
+      expect(singleRes.status).toBe(200);
+      expect(singleRes.body.success).toBe(true);
+      expect(singleRes.body.data.id).toBe(sampleLogId);
+      expect(Array.isArray(singleRes.body.data.diffs)).toBe(true);
+      expect(typeof singleRes.body.data.hasChanges).toBe('boolean');
+    });
+
+    it('provides forensic query with multi-parameter filtering, date ranges, and chronological entity timeline', async () => {
+      // 1. Filter by module
+      const moduleRes = await request(app)
+        .get('/api/v1/audit/logs?module=BUDGET&limit=10')
+        .set('Authorization', `Bearer ${auditorToken}`);
+
+      expect(moduleRes.status).toBe(200);
+      expect(moduleRes.body.success).toBe(true);
+      for (const log of moduleRes.body.data) {
+        expect(log.module).toBe('BUDGET');
+      }
+
+      // 2. Chronological Entity Timeline
+      if (testEntityId) {
+        const timelineRes = await request(app)
+          .get(`/api/v1/audit/entity/Budget/${testEntityId}`)
+          .set('Authorization', `Bearer ${auditorToken}`);
+
+        expect(timelineRes.status).toBe(200);
+        expect(timelineRes.body.success).toBe(true);
+        expect(Array.isArray(timelineRes.body.data)).toBe(true);
+      }
+
+      // 3. Forensic Summary Stats
+      const statsRes = await request(app)
+        .get('/api/v1/audit/stats')
+        .set('Authorization', `Bearer ${auditorToken}`);
+
+      expect(statsRes.status).toBe(200);
+      expect(statsRes.body.success).toBe(true);
+      expect(statsRes.body.data.totalEvents).toBeGreaterThan(0);
+      expect(statsRes.body.data.byModule).toBeDefined();
+      expect(statsRes.body.data.byAction).toBeDefined();
+      expect(Array.isArray(statsRes.body.data.topActors)).toBe(true);
+
+      // 4. Forensic CSV Export
+      const csvRes = await request(app)
+        .get('/api/v1/audit/export/csv?limit=50')
+        .set('Authorization', `Bearer ${auditorToken}`);
+
+      expect(csvRes.status).toBe(200);
+      expect(csvRes.headers['content-type']).toContain('text/csv');
+      expect(csvRes.headers['content-disposition']).toContain('.csv');
+      expect(csvRes.text).toContain('Waktu Server (WIB)');
+      expect(csvRes.text).toContain('Ringkasan Forensik');
+    });
+
+    it('strictly enforces audit trail immutability (403 AUDIT_LOG_IMMUTABLE) and RBAC authorization (requires audit:view)', async () => {
+      // 1. Attempt unauthenticated access -> 401
+      const unauthRes = await request(app)
+        .get('/api/v1/audit/logs');
+      expect(unauthRes.status).toBe(401);
+
+      // 2. Attempt deleting audit log directly -> 403 AUDIT_LOG_IMMUTABLE
+      if (sampleLogId) {
+        const deleteRes = await request(app)
+          .delete(`/api/v1/audit/logs/${sampleLogId}`)
+          .set('Authorization', `Bearer ${gmToken}`);
+
+        expect(deleteRes.status).toBe(403);
+        expect(deleteRes.body.error.code).toBe('AUDIT_LOG_IMMUTABLE');
+        expect(deleteRes.body.error.message).toContain('kebal mutasi atau penghapusan');
+
+        // 3. Attempt updating/patching audit log -> 403 AUDIT_LOG_IMMUTABLE
+        const patchRes = await request(app)
+          .patch(`/api/v1/audit/logs/${sampleLogId}`)
+          .set('Authorization', `Bearer ${gmToken}`)
+          .send({ summary: 'Manipulated summary' });
+
+        expect(patchRes.status).toBe(403);
+        expect(patchRes.body.error.code).toBe('AUDIT_LOG_IMMUTABLE');
+      }
+    });
+  });
 });

@@ -109,3 +109,28 @@ export async function downloadPbiExcel(budgetId?: string, docNumber?: string): P
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+
+export async function downloadAuditCsv(params: Record<string, string> = {}): Promise<void> {
+  const token = localStorage.getItem('pmo_erp_token');
+  const searchParams = new URLSearchParams(params);
+  const path = `${API_BASE}/audit/export/csv?${searchParams.toString()}`;
+  const response = await fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    const json = await response.json().catch(() => null);
+    throw new Error(json?.error?.message || 'Gagal mengunduh jejak audit forensik CSV.');
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `Forensic_Audit_Trail_PMO_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

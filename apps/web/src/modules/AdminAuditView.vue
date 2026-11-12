@@ -428,53 +428,125 @@
 
       <!-- TAB 4: AUDIT TRAIL LOGS -->
       <div v-if="activeTab === 'audit'" class="erp-stack">
+        <!-- Forensic KPI Stat Grid -->
+        <div v-if="auditStats" class="erp-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 4px;">
+          <div class="erp-card" style="padding: 14px;">
+            <div style="font-size: 0.76rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 700;">Total Peristiwa Forensik</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #1e293b; margin-top: 4px;">{{ auditStats.totalEvents || auditLogs.length }}</div>
+            <div style="font-size: 0.72rem; color: #10b981; margin-top: 2px;">Terproteksi Permanen (Append-Only)</div>
+          </div>
+          <div class="erp-card" style="padding: 14px;">
+            <div style="font-size: 0.76rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 700;">Aktivitas Hari Ini</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #0284c7; margin-top: 4px;">{{ auditStats.todayEvents || 0 }} Mutasi</div>
+            <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px;">Waktu Server Indonesia (WIB)</div>
+          </div>
+          <div class="erp-card" style="padding: 14px;">
+            <div style="font-size: 0.76rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 700;">Modul Teraktif</div>
+            <div style="font-size: 1.15rem; font-weight: 700; color: #4f46e5; margin-top: 6px;">{{ Object.keys(auditStats.byModule || {})[0] || 'BUDGET' }}</div>
+            <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px;">{{ Object.values(auditStats.byModule || {})[0] || 0 }} mutasi tercatat</div>
+          </div>
+          <div class="erp-card" style="padding: 14px;">
+            <div style="font-size: 0.76rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 700;">Integritas Forensik</div>
+            <div style="font-size: 1.15rem; font-weight: 700; color: #059669; margin-top: 6px;">100% Kebal Mutasi</div>
+            <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px;">Strict HTTP 403 Immutability</div>
+          </div>
+        </div>
+
         <section class="erp-card">
-          <div class="erp-card-header">
+          <div class="erp-card-header" style="flex-wrap: wrap; gap: 14px;">
             <div>
               <span class="erp-badge erp-badge-info">SERVER-SIDE IMMUTABLE AUDIT LOG</span>
               <h3 class="erp-section-title" style="margin-top: 4px;">
-                Rekam Jejak Seluruh Aktivitas &amp; Perubahan Status Dokumen
+                Rekam Jejak Forensik Mutasi Data Keuangan
               </h3>
               <p class="erp-subtitle">
-                Mencatat pelaku, peran, waktu server, entitas, dan ringkasan perubahan sebelum/sesudah.
+                Mencatat kronologi pelaku, peran, waktu server, IP client, entitas, dan perubahan nilai before-after.
               </p>
             </div>
-            <div class="erp-row" style="gap: 10px;">
-              <select v-model="auditModuleFilter" class="select" style="max-width: 180px;" aria-label="Filter Modul Audit" @change="loadAuditLogs">
-                <option value="">Semua Modul</option>
-                <option value="AUTH">AUTH</option>
-                <option value="BUDGET">BUDGET</option>
-                <option value="PROCUREMENT">PROCUREMENT</option>
-                <option value="EXPENSE">EXPENSE</option>
-                <option value="REVENUE">REVENUE</option>
-                <option value="CASHIER">CASHIER</option>
-                <option value="RECONCILIATION">RECONCILIATION</option>
-                <option value="ACCOUNTING">ACCOUNTING</option>
-                <option value="STRATEGY">STRATEGY</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-              <input
-                v-model="auditSearch"
-                type="search"
-                class="input"
-                placeholder="Cari pelaku / ringkasan..."
-                style="max-width: 240px;"
-                @input="loadAuditLogs"
-              />
+            <div class="erp-row" style="gap: 8px; flex-wrap: wrap; align-items: center;">
+              <button
+                type="button"
+                class="btn btn-sm"
+                :disabled="isExportingCsv"
+                @click="handleExportAuditCsv"
+                title="Ekspor seluruh jejak audit sesuai filter ke berkas CSV"
+              >
+                <span>{{ isExportingCsv ? 'Mengekspor...' : 'Ekspor CSV Forensik' }}</span>
+              </button>
             </div>
+          </div>
+
+          <!-- Multi-parameter Forensic Filters -->
+          <div class="erp-row" style="gap: 10px; margin-bottom: 16px; flex-wrap: wrap; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+            <select v-model="auditModuleFilter" class="select" style="max-width: 160px;" aria-label="Filter Modul Audit" @change="loadAuditLogs">
+              <option value="">Semua Modul</option>
+              <option value="AUTH">AUTH</option>
+              <option value="BUDGET">BUDGET</option>
+              <option value="PROCUREMENT">PROCUREMENT</option>
+              <option value="EXPENSE">EXPENSE</option>
+              <option value="REVENUE">REVENUE</option>
+              <option value="CASHIER">CASHIER</option>
+              <option value="RECONCILIATION">RECONCILIATION</option>
+              <option value="ACCOUNTING">ACCOUNTING</option>
+              <option value="APPROVAL">APPROVAL</option>
+              <option value="ASSET">ASSET</option>
+              <option value="PETTY_CASH">PETTY_CASH</option>
+              <option value="HRIS">HRIS</option>
+              <option value="ADMIN">ADMIN</option>
+            </select>
+
+            <select v-model="auditActionFilter" class="select" style="max-width: 160px;" aria-label="Filter Aksi Audit" @change="loadAuditLogs">
+              <option value="">Semua Aksi</option>
+              <option value="CREATE">CREATE</option>
+              <option value="UPDATE">UPDATE</option>
+              <option value="SUBMIT">SUBMIT</option>
+              <option value="APPROVE">APPROVE</option>
+              <option value="REJECT">REJECT</option>
+              <option value="REVISE">REVISE</option>
+              <option value="REVERSE">REVERSE</option>
+              <option value="DELETE_BLOCKED">DELETE_BLOCKED</option>
+            </select>
+
+            <input
+              v-model="auditStartDate"
+              type="date"
+              class="input"
+              style="max-width: 150px;"
+              title="Dari Tanggal"
+              @change="loadAuditLogs"
+            />
+
+            <input
+              v-model="auditEndDate"
+              type="date"
+              class="input"
+              style="max-width: 150px;"
+              title="Sampai Tanggal"
+              @change="loadAuditLogs"
+            />
+
+            <input
+              v-model="auditSearch"
+              type="search"
+              class="input"
+              placeholder="Cari pelaku / ringkasan / entitas..."
+              style="flex: 1; min-width: 220px;"
+              @input="loadAuditLogs"
+            />
           </div>
 
           <div class="erp-table-wrap">
             <table class="erp-table">
               <thead>
                 <tr>
-                  <th>Waktu Server</th>
+                  <th>Waktu Server (WIB)</th>
                   <th>Pelaku (Actor)</th>
                   <th>Role</th>
                   <th>Modul</th>
-                  <th>Aksi / Peristiwa</th>
+                  <th>Aksi</th>
                   <th>Entitas Dokumen</th>
                   <th>Ringkasan Jejak Audit</th>
+                  <th style="text-align: center;">Tindakan Forensik</th>
                 </tr>
               </thead>
               <tbody>
@@ -483,14 +555,41 @@
                   <td><strong>{{ log.actorName }}</strong></td>
                   <td><span class="doc-code">{{ log.actorRole }}</span></td>
                   <td><span class="doc-code">{{ log.module }}</span></td>
-                  <td><strong>{{ log.action }}</strong></td>
+                  <td>
+                    <span
+                      class="erp-badge"
+                      :class="{
+                        'erp-badge-success': ['APPROVE', 'CREATE'].includes(log.action),
+                        'erp-badge-danger': ['REJECT', 'REVERSE', 'DELETE_BLOCKED'].includes(log.action),
+                        'erp-badge-info': ['SUBMIT', 'REVISE', 'UPDATE'].includes(log.action)
+                      }"
+                    >
+                      {{ log.action }}
+                    </span>
+                  </td>
                   <td>
                     <span v-if="log.entityCode" class="doc-code">{{ log.entityCode }}</span>
-                    <span v-else class="text-secondary">-</span>
+                    <span v-else class="text-secondary">{{ log.entityType }}</span>
                   </td>
-                  <td style="max-width: 320px;">
+                  <td style="max-width: 300px;">
                     <div>{{ log.summary }}</div>
                     <small v-if="log.requestId" class="text-secondary" style="font-size: 0.7rem;">ID: {{ log.requestId }}</small>
+                  </td>
+                  <td style="text-align: center;">
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      style="font-size: 0.75rem; padding: 4px 10px;"
+                      @click="openAuditDetail(log)"
+                      title="Buka perbandingan nilai mutasi sebelum vs sesudah"
+                    >
+                      Lihat Diff / Detail
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="paginatedLogs.length === 0">
+                  <td colspan="8" style="text-align: center; padding: 24px; color: var(--text-secondary);">
+                    Tidak ditemukan jejak audit yang sesuai dengan parameter filter.
                   </td>
                 </tr>
               </tbody>
@@ -800,12 +899,96 @@
         </div>
       </form>
     </ModalDialog>
+
+    <!-- MODAL 8: FORENSIC AUDIT TRAIL DIFF VIEWER -->
+    <ModalDialog
+      :open="showAuditDiffModal"
+      title="Detail Jejak Audit Forensik & Rekam Mutasi Data"
+      @close="showAuditDiffModal = false"
+    >
+      <div v-if="selectedAuditLog" class="erp-stack" style="gap: 16px;">
+        <div class="erp-grid" style="grid-template-columns: repeat(2, 1fr); gap: 10px; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+          <div><small style="color: #64748b;">Waktu Server:</small> <div><strong>{{ formatDateTime(selectedAuditLog.createdAt) }}</strong></div></div>
+          <div><small style="color: #64748b;">Pelaku &amp; Peran:</small> <div><strong>{{ selectedAuditLog.actorName }}</strong> ({{ selectedAuditLog.actorRole }})</div></div>
+          <div><small style="color: #64748b;">Modul &amp; Aksi:</small> <div><span class="doc-code">{{ selectedAuditLog.module }}</span> <strong style="margin-left: 6px;">{{ selectedAuditLog.action }}</strong></div></div>
+          <div><small style="color: #64748b;">Entitas Referensi:</small> <div>{{ selectedAuditLog.entityType }} <span class="doc-code" style="margin-left: 4px;">{{ selectedAuditLog.entityCode || selectedAuditLog.entityId }}</span></div></div>
+          <div><small style="color: #64748b;">IP Address Client:</small> <div>{{ selectedAuditLog.ipAddress || '127.0.0.1 (Localhost)' }}</div></div>
+          <div><small style="color: #64748b;">Request Tracing ID:</small> <div style="font-family: monospace; font-size: 0.75rem;">{{ selectedAuditLog.requestId || '-' }}</div></div>
+        </div>
+
+        <div>
+          <h4 style="font-size: 0.88rem; font-weight: 700; margin-bottom: 6px;">Ringkasan Kejadian:</h4>
+          <p style="margin: 0; padding: 10px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 0.85rem;">{{ selectedAuditLog.summary }}</p>
+        </div>
+
+        <!-- Calculated Field Diff -->
+        <div v-if="selectedAuditLog.diffs && selectedAuditLog.diffs.length > 0">
+          <h4 style="font-size: 0.88rem; font-weight: 700; margin-bottom: 8px; color: #0f172a;">
+            Perbandingan Nilai Lapangan (Field Diffs - Before vs After):
+          </h4>
+          <div class="erp-table-wrap">
+            <table class="erp-table" style="font-size: 0.8rem;">
+              <thead>
+                <tr>
+                  <th>Field / Properti</th>
+                  <th>Nilai Semula (Before)</th>
+                  <th>Nilai Menjadi (After)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="d in selectedAuditLog.diffs" :key="d.field">
+                  <td style="font-family: monospace; font-weight: bold;">{{ d.field }}</td>
+                  <td style="color: #b91c1c; background: #fef2f2; text-decoration: line-through;">
+                    {{ JSON.stringify(d.before) }}
+                  </td>
+                  <td style="color: #15803d; background: #f0fdf4; font-weight: bold;">
+                    {{ JSON.stringify(d.after) }}
+                  </td>
+                  <td>
+                    <span
+                      class="erp-badge"
+                      :class="{
+                        'erp-badge-success': d.changeType === 'ADDED',
+                        'erp-badge-info': d.changeType === 'MODIFIED',
+                        'erp-badge-danger': d.changeType === 'REMOVED'
+                      }"
+                    >
+                      {{ d.changeType }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Raw Snapshot Accordion / Fallback -->
+        <div v-else-if="selectedAuditLog.beforeData || selectedAuditLog.afterData" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div>
+            <h5 style="font-size: 0.8rem; font-weight: 700; color: #64748b; margin-bottom: 4px;">Data Sebelum (beforeData)</h5>
+            <pre style="background: #f8fafc; padding: 10px; border-radius: 6px; font-size: 0.72rem; max-height: 200px; overflow: auto; border: 1px solid #e2e8f0;">{{ JSON.stringify(selectedAuditLog.beforeData, null, 2) || 'null' }}</pre>
+          </div>
+          <div>
+            <h5 style="font-size: 0.8rem; font-weight: 700; color: #64748b; margin-bottom: 4px;">Data Sesudah (afterData)</h5>
+            <pre style="background: #f8fafc; padding: 10px; border-radius: 6px; font-size: 0.72rem; max-height: 200px; overflow: auto; border: 1px solid #e2e8f0;">{{ JSON.stringify(selectedAuditLog.afterData, null, 2) || 'null' }}</pre>
+          </div>
+        </div>
+        <div v-else style="padding: 16px; text-align: center; color: #64748b; background: #f8fafc; border-radius: 8px; font-size: 0.85rem;">
+          Tidak ada payload mutasi snapshot sebelum/sesudah yang tercatat untuk peristiwa ini.
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+          <button type="button" class="btn btn-sm" @click="showAuditDiffModal = false">Tutup</button>
+        </div>
+      </div>
+    </ModalDialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { api } from '../services/api';
+import { api, downloadAuditCsv } from '../services/api';
 import { useAuthStore } from '../stores/auth';
 import { formatDate, formatDateTime, formatRupiah } from '../utils/format';
 import StatusBadge from '../components/StatusBadge.vue';
@@ -825,7 +1008,14 @@ const submitting = ref(false);
 
 const auditLogs = ref<any[]>([]);
 const auditModuleFilter = ref('');
+const auditActionFilter = ref('');
+const auditStartDate = ref('');
+const auditEndDate = ref('');
 const auditSearch = ref('');
+const auditStats = ref<any>(null);
+const selectedAuditLog = ref<any>(null);
+const showAuditDiffModal = ref(false);
+const isExportingCsv = ref(false);
 
 const {
   currentPage: logPage,
@@ -924,13 +1114,60 @@ function getRoleMenuSummary(perms: string[]): string {
   return Array.from(prefixSet).slice(0, 4).join(', ') + (prefixSet.size > 4 ? '...' : '');
 }
 
+async function loadAuditStats() {
+  try {
+    const res = await api.get('/audit/stats');
+    auditStats.value = res.data;
+  } catch {
+    // Graceful fallback if stats not loaded
+  }
+}
+
 async function loadAuditLogs() {
   const params = new URLSearchParams();
   if (auditModuleFilter.value) params.set('module', auditModuleFilter.value);
+  if (auditActionFilter.value) params.set('action', auditActionFilter.value);
+  if (auditStartDate.value) params.set('startDate', auditStartDate.value);
+  if (auditEndDate.value) params.set('endDate', auditEndDate.value);
   if (auditSearch.value.trim()) params.set('search', auditSearch.value.trim());
+  params.set('limit', '100');
   const qs = params.toString() ? `?${params.toString()}` : '';
-  const res = await api.get<any[]>(`/reports/audit-logs${qs}`);
-  auditLogs.value = res.data;
+  try {
+    const res = await api.get<any>(`/audit/logs${qs}`);
+    auditLogs.value = Array.isArray(res.data) ? res.data : (res.data?.logs || []);
+  } catch {
+    const fallbackRes = await api.get<any[]>(`/reports/audit-logs${qs}`);
+    auditLogs.value = fallbackRes.data || [];
+  }
+}
+
+async function openAuditDetail(log: any) {
+  try {
+    const res = await api.get<any>(`/audit/logs/${log.id}`);
+    selectedAuditLog.value = res.data;
+    showAuditDiffModal.value = true;
+  } catch {
+    selectedAuditLog.value = log;
+    showAuditDiffModal.value = true;
+  }
+}
+
+async function handleExportAuditCsv() {
+  try {
+    isExportingCsv.value = true;
+    const params: Record<string, string> = {};
+    if (auditModuleFilter.value) params.module = auditModuleFilter.value;
+    if (auditActionFilter.value) params.action = auditActionFilter.value;
+    if (auditStartDate.value) params.startDate = auditStartDate.value;
+    if (auditEndDate.value) params.endDate = auditEndDate.value;
+    if (auditSearch.value.trim()) params.search = auditSearch.value.trim();
+    await downloadAuditCsv(params);
+    feedbackMsg.value = 'Berhasil mengunduh salinan berkas Jejak Audit Forensik (CSV).';
+  } catch (err: any) {
+    actionError.value = err.message || 'Gagal mengekspor CSV jejak audit.';
+  } finally {
+    isExportingCsv.value = false;
+  }
 }
 
 async function loadAll() {
@@ -939,6 +1176,7 @@ async function loadAll() {
   try {
     const promises: Promise<any>[] = [
       loadAuditLogs(),
+      loadAuditStats(),
       api.get<any>('/master/overview'),
       api.get<any[]>('/master/roles'),
       api.get<any[]>('/master/menus-permissions'),
@@ -948,7 +1186,7 @@ async function loadAll() {
       promises.push(api.get<any[]>('/master/users'));
     }
 
-    const [, masterRes, rolesRes, menusRes, usersRes] = await Promise.all(promises);
+    const [, , masterRes, rolesRes, menusRes, usersRes] = await Promise.all(promises);
     fiscalPeriods.value = masterRes.data.fiscalPeriods;
     systemSettings.value = masterRes.data.systemSettings;
     masterUnits.value = masterRes.data.businessUnits;
