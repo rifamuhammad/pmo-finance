@@ -16,10 +16,17 @@ const emit = defineEmits<{
 const router = useRouter();
 
 const searchQuery = ref('');
-const activeScope = ref<'ALL' | 'ASSET' | 'FINANCE' | 'HRIS' | 'MODULE'>('ALL');
+const activeScope = ref<'ALL' | 'ASSET' | 'FINANCE' | 'COA' | 'HRIS' | 'MODULE'>('ALL');
 const activeIndex = ref(0);
 const isSearching = ref(false);
 const liveResults = ref<any[]>([]);
+const scopeCounts = ref<{ ALL: number; ASSET: number; FINANCE: number; COA: number; HRIS: number }>({
+  ALL: 0,
+  ASSET: 0,
+  FINANCE: 0,
+  COA: 0,
+  HRIS: 0,
+});
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
 // Static Master ERP Navigation Items (Zero Duplication - Deduped)
@@ -210,6 +217,7 @@ let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 async function performOmnisearch(query: string) {
   if (!query || query.trim().length < 2) {
     liveResults.value = [];
+    scopeCounts.value = { ALL: 0, ASSET: 0, FINANCE: 0, COA: 0, HRIS: 0 };
     isSearching.value = false;
     return;
   }
@@ -219,11 +227,22 @@ async function performOmnisearch(query: string) {
     const res = await apiFetch<any>(`/master/omnisearch?q=${encodeURIComponent(query.trim())}`);
     if (res?.data && Array.isArray(res.data)) {
       liveResults.value = res.data;
+      if (res.meta?.countsByScope) {
+        scopeCounts.value = {
+          ALL: res.meta.countsByScope.ALL || res.data.length,
+          ASSET: res.meta.countsByScope.ASSET || 0,
+          FINANCE: res.meta.countsByScope.FINANCE || 0,
+          COA: res.meta.countsByScope.COA || 0,
+          HRIS: res.meta.countsByScope.HRIS || 0,
+        };
+      }
     } else {
       liveResults.value = [];
+      scopeCounts.value = { ALL: 0, ASSET: 0, FINANCE: 0, COA: 0, HRIS: 0 };
     }
   } catch {
     liveResults.value = [];
+    scopeCounts.value = { ALL: 0, ASSET: 0, FINANCE: 0, COA: 0, HRIS: 0 };
   } finally {
     isSearching.value = false;
   }
@@ -255,15 +274,28 @@ const displayedItems = computed(() => {
     combined = [...combined, ...matchedShortcuts];
 
     if (activeScope.value === 'ASSET') {
-      return combined.filter((i) => i.category === 'Aset & Inventaris' || i.id === 'm-assets');
+      return combined.filter((i) => i.scopeGroup === 'ASSET' || i.category === 'Aset & Inventaris' || i.id === 'm-assets');
     }
     if (activeScope.value === 'FINANCE') {
       return combined.filter(
-        (i) => i.category?.includes('SPJ') || i.category?.includes('Pengadaan') || i.category?.includes('Anggaran') || i.category?.includes('Akuntansi')
+        (i) =>
+          i.scopeGroup === 'FINANCE' ||
+          i.scopeGroup === 'COA' ||
+          i.category?.includes('SPJ') ||
+          i.category?.includes('Pengadaan') ||
+          i.category?.includes('Anggaran') ||
+          i.category?.includes('Jurnal') ||
+          i.category?.includes('Bagan Akun') ||
+          i.category?.includes('Akuntansi')
+      );
+    }
+    if (activeScope.value === 'COA') {
+      return combined.filter(
+        (i) => i.scopeGroup === 'COA' || i.category?.includes('Bagan Akun') || i.id === 'm-accounting'
       );
     }
     if (activeScope.value === 'HRIS') {
-      return combined.filter((i) => i.category?.includes('SDM') || i.id === 'm-hris');
+      return combined.filter((i) => i.scopeGroup === 'HRIS' || i.category?.includes('SDM') || i.id === 'm-hris');
     }
     if (activeScope.value === 'MODULE') {
       return combined.filter((i) => i.type === 'MODULE');
@@ -280,6 +312,9 @@ const displayedItems = computed(() => {
     return staticShortcuts.filter((s) =>
       ['m-petty-cash', 'm-procurement', 'm-expenses', 'm-revenue', 'm-reconciliation', 'm-accounting', 'm-budgets'].includes(s.id)
     );
+  }
+  if (activeScope.value === 'COA') {
+    return staticShortcuts.filter((s) => ['m-accounting', 'm-budgets'].includes(s.id));
   }
   if (activeScope.value === 'HRIS') {
     return staticShortcuts.filter((s) => s.id === 'm-hris');
@@ -380,7 +415,7 @@ onUnmounted(() => {
           v-model="searchQuery"
           type="text"
           class="omni-input-field"
-          placeholder="Cari aset (freezer, kursi, UTCC), SPJ, PO, pegawai, modul..."
+          placeholder="Cari anggaran RKAP, 70 akun COA Pertor 310, jurnal GL, PR/PO, SPJ, aset, atau pegawai..."
         />
         <div v-if="isSearching" class="omni-spinner"></div>
         <button type="button" class="omni-esc-badge" title="Tutup (Esc)" @click="emit('close')">
@@ -397,16 +432,7 @@ onUnmounted(() => {
           @click="activeScope = 'ALL'"
         >
           <i class="pi pi-search"></i>
-          <span>Semua</span>
-        </button>
-        <button
-          type="button"
-          class="omni-scope-btn"
-          :class="{ active: activeScope === 'ASSET' }"
-          @click="activeScope = 'ASSET'"
-        >
-          <i class="pi pi-building"></i>
-          <span>Aset &amp; Inventaris</span>
+          <span>Semua{{ searchQuery.trim().length >= 2 && scopeCounts.ALL > 0 ? ` (${scopeCounts.ALL})` : '' }}</span>
         </button>
         <button
           type="button"
@@ -415,7 +441,25 @@ onUnmounted(() => {
           @click="activeScope = 'FINANCE'"
         >
           <i class="pi pi-receipt"></i>
-          <span>SPJ &amp; PO</span>
+          <span>Keuangan &amp; PO{{ searchQuery.trim().length >= 2 && scopeCounts.FINANCE > 0 ? ` (${scopeCounts.FINANCE})` : '' }}</span>
+        </button>
+        <button
+          type="button"
+          class="omni-scope-btn"
+          :class="{ active: activeScope === 'COA' }"
+          @click="activeScope = 'COA'"
+        >
+          <i class="pi pi-book"></i>
+          <span>COA Pertor 310{{ searchQuery.trim().length >= 2 && scopeCounts.COA > 0 ? ` (${scopeCounts.COA})` : '' }}</span>
+        </button>
+        <button
+          type="button"
+          class="omni-scope-btn"
+          :class="{ active: activeScope === 'ASSET' }"
+          @click="activeScope = 'ASSET'"
+        >
+          <i class="pi pi-building"></i>
+          <span>Aset &amp; Inventaris{{ searchQuery.trim().length >= 2 && scopeCounts.ASSET > 0 ? ` (${scopeCounts.ASSET})` : '' }}</span>
         </button>
         <button
           type="button"
@@ -424,7 +468,7 @@ onUnmounted(() => {
           @click="activeScope = 'HRIS'"
         >
           <i class="pi pi-users"></i>
-          <span>SDM Pegawai</span>
+          <span>SDM Pegawai{{ searchQuery.trim().length >= 2 && scopeCounts.HRIS > 0 ? ` (${scopeCounts.HRIS})` : '' }}</span>
         </button>
         <button
           type="button"

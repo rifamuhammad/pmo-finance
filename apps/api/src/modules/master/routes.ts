@@ -730,74 +730,272 @@ masterRouter.get('/menus-permissions', requirePermission('admin:view'), async (r
   res.json({ success: true, data: menusRegistry });
 });
 
-// REAL OMNISEARCH API: Search across Assets (Mas Wildan/PBI), Finance Docs (SPJ/PO), HRIS, and ERP Modules
+// REAL OMNISEARCH API: Search across 8 Domains (Assets, SPJ, PO, PR, Budgets, Journals, COA Pertor 310, HRIS)
 masterRouter.get('/omnisearch', async (req, res, next) => {
   try {
     const q = String(req.query.q || '').trim();
+    const scope = String(req.query.scope || 'ALL').toUpperCase();
     if (!q || q.length < 2) {
-      return res.json({ success: true, data: [] });
+      return res.json({
+        success: true,
+        data: [],
+        meta: {
+          query: q,
+          scope,
+          total: 0,
+          countsByScope: { ALL: 0, ASSET: 0, FINANCE: 0, HRIS: 0, COA: 0 },
+          requestId: req.requestId,
+        },
+      });
     }
 
-    const [assets, pettyCash, purchaseOrders, employees] = await Promise.all([
-      prisma.fixedAsset.findMany({
-        where: {
-          OR: [
-            { name: { contains: q } },
-            { assetCode: { contains: q } },
-            { location: { contains: q } },
-            { brandModel: { contains: q } },
-            { picPerson: { contains: q } },
-            { category: { contains: q } },
-          ],
-        },
-        take: 6,
-        orderBy: { updatedAt: 'desc' },
-      }).catch(() => []),
-      prisma.pettyCashSubmission.findMany({
-        where: {
-          OR: [
-            { submissionNo: { contains: q } },
-            { activityDescription: { contains: q } },
-            { applicantName: { contains: q } },
-            { vendorName: { contains: q } },
-          ],
-        },
-        take: 4,
-        orderBy: { createdAt: 'desc' },
-      }).catch(() => []),
-      prisma.purchaseOrder.findMany({
-        where: {
-          OR: [
-            { docNumber: { contains: q } },
-            { selectionJustification: { contains: q } },
-            { vendor: { name: { contains: q } } },
-          ],
-        },
-        include: { vendor: { select: { name: true } } },
-        take: 4,
-        orderBy: { createdAt: 'desc' },
-      }).catch(() => []),
-      prisma.employee.findMany({
-        where: {
-          OR: [
-            { fullName: { contains: q } },
-            { nik: { contains: q } },
-            { position: { contains: q } },
-            { department: { contains: q } },
-          ],
-        },
-        take: 4,
-        orderBy: { fullName: 'asc' },
-      }).catch(() => []),
+    const isUnitScoped = req.user?.roleCode === 'UNIT_MANAGER' && !!req.user?.businessUnitId;
+    const unitScopeFilter = isUnitScoped ? { businessUnitId: req.user!.businessUnitId! } : {};
+
+    const [
+      budgets,
+      coaAccounts,
+      journals,
+      purchaseRequests,
+      purchaseOrders,
+      pettyCash,
+      assets,
+      employees,
+    ] = await Promise.all([
+      prisma.budget
+        .findMany({
+          where: {
+            ...unitScopeFilter,
+            OR: [
+              { docNumber: { contains: q, mode: 'insensitive' } },
+              { title: { contains: q, mode: 'insensitive' } },
+              { notes: { contains: q, mode: 'insensitive' } },
+            ],
+          },
+          include: { businessUnit: { select: { code: true, name: true } } },
+          take: 5,
+          orderBy: { updatedAt: 'desc' },
+        })
+        .catch(() => []),
+      prisma.chartOfAccount
+        .findMany({
+          where: {
+            isActive: true,
+            code: { not: { contains: '-' } },
+            name: { not: { startsWith: '[LEGACY]' } },
+            OR: [
+              { code: { contains: q, mode: 'insensitive' } },
+              { name: { contains: q, mode: 'insensitive' } },
+              { type: { contains: q, mode: 'insensitive' } },
+            ],
+          },
+          take: 6,
+          orderBy: { code: 'asc' },
+        })
+        .catch(() => []),
+      prisma.journalEntry
+        .findMany({
+          where: {
+            ...unitScopeFilter,
+            OR: [
+              { journalNumber: { contains: q, mode: 'insensitive' } },
+              { description: { contains: q, mode: 'insensitive' } },
+              { sourceDocNumber: { contains: q, mode: 'insensitive' } },
+            ],
+          },
+          take: 5,
+          orderBy: { entryDate: 'desc' },
+        })
+        .catch(() => []),
+      prisma.purchaseRequest
+        .findMany({
+          where: {
+            ...unitScopeFilter,
+            OR: [
+              { docNumber: { contains: q, mode: 'insensitive' } },
+              { title: { contains: q, mode: 'insensitive' } },
+              { purpose: { contains: q, mode: 'insensitive' } },
+              { requestedByName: { contains: q, mode: 'insensitive' } },
+            ],
+          },
+          take: 4,
+          orderBy: { createdAt: 'desc' },
+        })
+        .catch(() => []),
+      prisma.purchaseOrder
+        .findMany({
+          where: {
+            ...unitScopeFilter,
+            OR: [
+              { docNumber: { contains: q, mode: 'insensitive' } },
+              { selectionJustification: { contains: q, mode: 'insensitive' } },
+              { vendor: { name: { contains: q, mode: 'insensitive' } } },
+            ],
+          },
+          include: { vendor: { select: { name: true } } },
+          take: 4,
+          orderBy: { createdAt: 'desc' },
+        })
+        .catch(() => []),
+      prisma.pettyCashSubmission
+        .findMany({
+          where: {
+            OR: [
+              { submissionNo: { contains: q, mode: 'insensitive' } },
+              { activityDescription: { contains: q, mode: 'insensitive' } },
+              { applicantName: { contains: q, mode: 'insensitive' } },
+              { vendorName: { contains: q, mode: 'insensitive' } },
+            ],
+          },
+          take: 4,
+          orderBy: { createdAt: 'desc' },
+        })
+        .catch(() => []),
+      prisma.fixedAsset
+        .findMany({
+          where: {
+            ...unitScopeFilter,
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { assetCode: { contains: q, mode: 'insensitive' } },
+              { location: { contains: q, mode: 'insensitive' } },
+              { brandModel: { contains: q, mode: 'insensitive' } },
+              { picPerson: { contains: q, mode: 'insensitive' } },
+              { category: { contains: q, mode: 'insensitive' } },
+            ],
+          },
+          take: 6,
+          orderBy: { updatedAt: 'desc' },
+        })
+        .catch(() => []),
+      prisma.employee
+        .findMany({
+          where: {
+            OR: [
+              { fullName: { contains: q, mode: 'insensitive' } },
+              { nik: { contains: q, mode: 'insensitive' } },
+              { position: { contains: q, mode: 'insensitive' } },
+              { department: { contains: q, mode: 'insensitive' } },
+            ],
+          },
+          take: 5,
+          orderBy: { fullName: 'asc' },
+        })
+        .catch(() => []),
     ]);
 
-    const results: any[] = [];
+    const allResults: any[] = [];
 
-    // 1. Assets
+    // 1. Budgets (RKAP Semula-Menjadi)
+    for (const b of budgets) {
+      allResults.push({
+        id: `bdg-${b.id}`,
+        entityId: b.id,
+        entityType: 'BUDGET',
+        scopeGroup: 'FINANCE',
+        category: 'Anggaran & RKAP',
+        icon: 'pi pi-chart-line',
+        title: `${b.docNumber} — ${b.title}`,
+        subtitle: `Unit: ${b.businessUnit?.code || 'PMO'} (${b.businessUnit?.name || '-'}) • Versi ${b.version}`,
+        badge: b.status,
+        badgeColor: b.status === 'APPROVED' || b.status === 'REVISED' ? 'emerald' : 'amber',
+        route: `/budgets?q=${encodeURIComponent(b.docNumber)}`,
+      });
+    }
+
+    // 2. COA Pertor 310 (70 Akun Resmi)
+    for (const c of coaAccounts) {
+      allResults.push({
+        id: `coa-${c.id}`,
+        entityId: c.id,
+        entityType: 'COA',
+        scopeGroup: 'COA',
+        category: 'Bagan Akun (COA Pertor 310)',
+        icon: 'pi pi-book',
+        title: `${c.code} — ${c.name}`,
+        subtitle: `Tipe: ${c.type} • Saldo Normal: ${c.normalBalance}`,
+        badge: c.type,
+        badgeColor: 'blue',
+        route: `/accounting?q=${encodeURIComponent(c.code)}`,
+      });
+    }
+
+    // 3. General Ledger Journals
+    for (const j of journals) {
+      allResults.push({
+        id: `jrn-${j.id}`,
+        entityId: j.id,
+        entityType: 'JOURNAL',
+        scopeGroup: 'FINANCE',
+        category: 'Jurnal & Buku Besar (GL)',
+        icon: 'pi pi-file-edit',
+        title: `Jurnal: ${j.journalNumber}`,
+        subtitle: `${j.description} • Ref: ${j.sourceDocNumber || 'Manual'}`,
+        badge: j.status,
+        badgeColor: j.status === 'POSTED' ? 'emerald' : 'amber',
+        route: `/accounting?q=${encodeURIComponent(j.journalNumber)}`,
+      });
+    }
+
+    // 4. Purchase Requests (PR)
+    for (const pr of purchaseRequests) {
+      allResults.push({
+        id: `pr-${pr.id}`,
+        entityId: pr.id,
+        entityType: 'PURCHASE_REQUEST',
+        scopeGroup: 'FINANCE',
+        category: 'Pengadaan & PO',
+        icon: 'pi pi-shopping-cart',
+        title: `PR: ${pr.docNumber} — ${pr.title}`,
+        subtitle: `Pemohon: ${pr.requestedByName} • Status: ${pr.status}`,
+        badge: pr.status,
+        badgeColor: pr.status === 'APPROVED' ? 'emerald' : 'blue',
+        route: `/procurement?q=${encodeURIComponent(pr.docNumber)}`,
+      });
+    }
+
+    // 5. Purchase Orders (PO)
+    for (const po of purchaseOrders) {
+      allResults.push({
+        id: `po-${po.id}`,
+        entityId: po.id,
+        entityType: 'PURCHASE_ORDER',
+        scopeGroup: 'FINANCE',
+        category: 'Pengadaan & PO',
+        icon: 'pi pi-box',
+        title: `PO: ${po.docNumber}`,
+        subtitle: `Vendor: ${po.vendor?.name || 'Rekanan'} • Status: ${po.status}`,
+        badge: po.status,
+        badgeColor: 'emerald',
+        route: `/procurement?q=${encodeURIComponent(po.docNumber)}`,
+      });
+    }
+
+    // 6. Petty Cash / SPJ (GUP/TUP)
+    for (const p of pettyCash) {
+      allResults.push({
+        id: `pc-${p.id}`,
+        entityId: p.id,
+        entityType: 'PETTY_CASH',
+        scopeGroup: 'FINANCE',
+        category: 'SPJ Kas Kecil (GUP/TUP)',
+        icon: 'pi pi-bolt',
+        title: `SPJ: ${p.submissionNo}`,
+        subtitle: `${p.activityDescription || 'Pengajuan Uang Persediaan'} • Pemohon: ${p.applicantName}`,
+        badge: p.status,
+        badgeColor: 'purple',
+        route: `/petty-cash?q=${encodeURIComponent(p.submissionNo)}`,
+      });
+    }
+
+    // 7. Assets & Inventory
     for (const a of assets) {
       const isPbi = a.ownershipStatus === 'PBI_UT_LOAN';
-      results.push({
+      allResults.push({
         id: `asset-${a.id}`,
+        entityId: a.id,
+        entityType: 'ASSET',
+        scopeGroup: 'ASSET',
         category: 'Aset & Inventaris',
         icon: 'pi pi-building',
         title: a.name,
@@ -808,38 +1006,13 @@ masterRouter.get('/omnisearch', async (req, res, next) => {
       });
     }
 
-    // 2. Petty Cash / SPJ (GUP/TUP)
-    for (const p of pettyCash) {
-      results.push({
-        id: `pc-${p.id}`,
-        category: 'SPJ Kas Kecil (GUP/TUP)',
-        icon: 'pi pi-bolt',
-        title: `SPJ: ${p.submissionNo}`,
-        subtitle: `${p.activityDescription || 'Pengajuan Uang Persediaan'} • Pemohon: ${p.applicantName}`,
-        badge: p.status,
-        badgeColor: 'purple',
-        route: `/petty-cash`,
-      });
-    }
-
-    // 3. Purchase Orders
-    for (const po of purchaseOrders) {
-      results.push({
-        id: `po-${po.id}`,
-        category: 'Pengadaan & PO',
-        icon: 'pi pi-box',
-        title: `PO: ${po.docNumber}`,
-        subtitle: `Vendor: ${po.vendor?.name || 'Rekanan'} • Status: ${po.status}`,
-        badge: po.status,
-        badgeColor: 'emerald',
-        route: `/procurement`,
-      });
-    }
-
-    // 4. Employees / SDM
+    // 8. Employees / SDM
     for (const e of employees) {
-      results.push({
+      allResults.push({
         id: `emp-${e.id}`,
+        entityId: e.id,
+        entityType: 'EMPLOYEE',
+        scopeGroup: 'HRIS',
         category: 'SDM & Payroll',
         icon: 'pi pi-user',
         title: e.fullName,
@@ -850,10 +1023,86 @@ masterRouter.get('/omnisearch', async (req, res, next) => {
       });
     }
 
+    const countsByScope = {
+      ALL: allResults.length,
+      ASSET: allResults.filter((r) => r.scopeGroup === 'ASSET').length,
+      FINANCE: allResults.filter((r) => r.scopeGroup === 'FINANCE' || r.scopeGroup === 'COA').length,
+      COA: allResults.filter((r) => r.scopeGroup === 'COA').length,
+      HRIS: allResults.filter((r) => r.scopeGroup === 'HRIS').length,
+    };
+
+    let filteredResults = allResults;
+    if (scope === 'ASSET') {
+      filteredResults = allResults.filter((r) => r.scopeGroup === 'ASSET');
+    } else if (scope === 'FINANCE') {
+      filteredResults = allResults.filter((r) => r.scopeGroup === 'FINANCE' || r.scopeGroup === 'COA');
+    } else if (scope === 'COA') {
+      filteredResults = allResults.filter((r) => r.scopeGroup === 'COA');
+    } else if (scope === 'HRIS') {
+      filteredResults = allResults.filter((r) => r.scopeGroup === 'HRIS');
+    }
+
     res.json({
       success: true,
-      data: results,
-      meta: { query: q, total: results.length },
+      data: filteredResults,
+      meta: {
+        query: q,
+        scope,
+        total: filteredResults.length,
+        countsByScope,
+        requestId: req.requestId,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// APP LAUNCHER METADATA API: Dynamic module catalog with role-aware access status and live counters
+masterRouter.get('/app-launcher', async (req, res, next) => {
+  try {
+    const userPerms = req.user?.permissions || [];
+    const hasPerm = (perm?: string) => {
+      if (!perm) return true;
+      return userPerms.includes('*') || userPerms.includes(perm);
+    };
+
+    const [pendingApprovalsCount, activeBudgetsCount, totalCoaCount, totalAssetsCount] = await Promise.all([
+      prisma.approvalRequest.count({ where: { status: 'PENDING' } }).catch(() => 0),
+      prisma.budget.count({ where: { status: { in: ['APPROVED', 'REVISED'] } } }).catch(() => 0),
+      prisma.chartOfAccount.count({ where: { isActive: true, code: { not: { contains: '-' } } } }).catch(() => 70),
+      prisma.fixedAsset.count().catch(() => 0),
+    ]);
+
+    const modules = [
+      { id: 'dashboard', title: 'Executive Dashboard', category: 'Ikhtisar', route: '/dashboard', icon: 'dashboard', locked: false },
+      { id: 'approvals', title: 'Approval Inbox', category: 'Otorisasi', route: '/approvals', icon: 'approvals', permission: 'approval:view', locked: !hasPerm('approval:view'), badge: pendingApprovalsCount > 0 ? `${pendingApprovalsCount} Pending` : undefined },
+      { id: 'budgets', title: 'Perencanaan Anggaran', category: 'Perencanaan', route: '/budgets', icon: 'budgets', permission: 'budget:view', locked: !hasPerm('budget:view'), badge: `${activeBudgetsCount} Aktif` },
+      { id: 'procurement', title: 'Pengadaan Lab & PO', category: 'Pengadaan', route: '/procurement', icon: 'procurement', permission: 'procurement:view', locked: !hasPerm('procurement:view') },
+      { id: 'expenses', title: 'Expenses & Klaim Biaya', category: 'Beban', route: '/procurement?tab=expenses', icon: 'expenses', permission: 'expense:view', locked: !hasPerm('expense:view') },
+      { id: 'revenue', title: 'Pendapatan & Kasir POS', category: 'Pendapatan', route: '/revenue', icon: 'revenue', permission: 'revenue:view', locked: !hasPerm('revenue:view') },
+      { id: 'reconciliation', title: 'Kas & Rekonsiliasi Bank', category: 'Perbankan', route: '/reconciliation', icon: 'reconciliation', permission: 'reconciliation:view', locked: !hasPerm('reconciliation:view') },
+      { id: 'accounting', title: 'Akuntansi & Buku Besar', category: 'Akuntansi', route: '/accounting', icon: 'accounting', permission: 'accounting:view', locked: !hasPerm('accounting:view'), badge: `${totalCoaCount} COA` },
+      { id: 'petty-cash', title: 'Uang Persediaan & SPJ', category: 'Perbendaharaan', route: '/petty-cash', icon: 'petty-cash', permission: 'procurement:view', locked: !hasPerm('procurement:view'), badge: 'GUP / TUP' },
+      { id: 'assets', title: 'Inventaris & Aset PMO', category: 'Logistik', route: '/assets', icon: 'assets', permission: 'accounting:view', locked: !hasPerm('accounting:view'), badge: `${totalAssetsCount} Item` },
+      { id: 'hris', title: 'SDM & Payroll PMO', category: 'Kepegawaian', route: '/hris', icon: 'hris', permission: 'admin:view', locked: !hasPerm('admin:view'), badge: 'HRIS' },
+      { id: 'reports', title: 'Laporan Keuangan ISAK 335', category: 'Laporan', route: '/reports', icon: 'reports', permission: 'report:view', locked: !hasPerm('report:view') },
+      { id: 'admin', title: 'Pengaturan & Audit Forensik', category: 'Tata Kelola', route: '/admin', icon: 'admin', permission: 'audit:view', locked: !hasPerm('audit:view') },
+      { id: 'ai-assistant', title: 'AI Financial Assistant', category: 'Peralatan Cerdas', action: 'ai', icon: 'ai', locked: false, badge: 'Copilot' },
+    ];
+
+    res.json({
+      success: true,
+      data: {
+        modules,
+        summary: {
+          totalModules: modules.length,
+          unlockedCount: modules.filter((m) => !m.locked).length,
+          lockedCount: modules.filter((m) => m.locked).length,
+          pendingApprovalsCount,
+        },
+      },
+      meta: { requestId: req.requestId },
     });
   } catch (err) {
     next(err);

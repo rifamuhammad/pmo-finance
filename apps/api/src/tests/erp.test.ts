@@ -2913,4 +2913,78 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       }
     });
   });
+
+  // =========================================================================
+  // 24. [KOI-132] [PMO-181] Navigasi Cepat, Omnisearch Cmd+K & App Launcher Modal (3)
+  // =========================================================================
+  describe('24. [KOI-132] [PMO-181] Navigasi Cepat, Omnisearch Cmd+K & App Launcher Modal', () => {
+    it('performs case-insensitive multi-domain Omnisearch across Budgets, 70 COA Pertor 310 accounts, Journals, and Assets', async () => {
+      // 1. Short query (< 2 chars) returns empty array cleanly
+      const shortRes = await request(app)
+        .get('/api/v1/master/omnisearch?q=a')
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(shortRes.status).toBe(200);
+      expect(shortRes.body.data).toEqual([]);
+      expect(shortRes.body.meta.total).toBe(0);
+
+      // 2. Search for Pertor 310 COA Account (e.g., "1101" or "Kas" / "Bank")
+      const coaRes = await request(app)
+        .get('/api/v1/master/omnisearch?q=1101')
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(coaRes.status).toBe(200);
+      expect(coaRes.body.success).toBe(true);
+      expect(Array.isArray(coaRes.body.data)).toBe(true);
+      expect(coaRes.body.data.length).toBeGreaterThan(0);
+      const coaHit = coaRes.body.data.find((r: any) => r.entityType === 'COA');
+      expect(coaHit).toBeDefined();
+      expect(coaHit.route).toContain('/accounting?q=');
+
+      // 3. Case-insensitive search for Budget RKAP ("bdg-" or "rkap")
+      const bdgRes = await request(app)
+        .get('/api/v1/master/omnisearch?q=bdg')
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(bdgRes.status).toBe(200);
+      expect(bdgRes.body.data.some((r: any) => r.entityType === 'BUDGET')).toBe(true);
+    });
+
+    it('filters Omnisearch results by scope (COA, FINANCE, ASSET, HRIS) and returns countsByScope metadata', async () => {
+      const res = await request(app)
+        .get('/api/v1/master/omnisearch?q=520&scope=COA')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.meta.scope).toBe('COA');
+      expect(res.body.meta.countsByScope).toBeDefined();
+      expect(typeof res.body.meta.countsByScope.COA).toBe('number');
+
+      for (const item of res.body.data) {
+        expect(item.scopeGroup).toBe('COA');
+        expect(item.entityType).toBe('COA');
+      }
+    });
+
+    it('retrieves role-aware App Launcher catalog (/master/app-launcher) with RBAC lock states and live module badges', async () => {
+      // 1. GM PMO has full unlocked access across all modules
+      const gmRes = await request(app)
+        .get('/api/v1/master/app-launcher')
+        .set('Authorization', `Bearer ${gmToken}`);
+
+      expect(gmRes.status).toBe(200);
+      expect(gmRes.body.success).toBe(true);
+      expect(Array.isArray(gmRes.body.data.modules)).toBe(true);
+      expect(gmRes.body.data.summary.totalModules).toBeGreaterThanOrEqual(14);
+      expect(gmRes.body.data.summary.lockedCount).toBe(0);
+
+      // 2. Cashier role has locked administrative/HRIS modules
+      const cashierRes = await request(app)
+        .get('/api/v1/master/app-launcher')
+        .set('Authorization', `Bearer ${cashierToken}`);
+
+      expect(cashierRes.status).toBe(200);
+      expect(cashierRes.body.data.summary.lockedCount).toBeGreaterThan(0);
+      const adminTile = cashierRes.body.data.modules.find((m: any) => m.id === 'admin');
+      expect(adminTile?.locked).toBe(true);
+    });
+  });
 });
