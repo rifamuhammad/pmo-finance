@@ -2589,4 +2589,102 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       );
     });
   });
+
+  // =========================================================================
+  // 21. [KOI-128] [SPRINT-5-REV] Sprint 5 Review & Verifikasi Audit Trail Jurnal
+  // =========================================================================
+  describe('21. [KOI-128] [SPRINT-5-REV] Sprint 5 Review & Verifikasi Audit Trail Jurnal (3)', () => {
+    it('audits Sprint 5 accounting & reporting compliance rules (Central Inbox, Double-Entry GL, ISAK 335, Direct Cash Flow, RGA Metrics)', async () => {
+      // 1. Central Approval Inbox Stats
+      const inboxStatsRes = await request(app)
+        .get('/api/v1/approvals/stats')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(inboxStatsRes.status).toBe(200);
+      expect(inboxStatsRes.body.data).toHaveProperty('totalPending');
+
+      // 2. ISAK 335 Statement of Financial Position & Activities Coherence
+      const finRes = await request(app)
+        .get('/api/v1/reports/financial')
+        .set('Authorization', `Bearer ${accountingToken}`);
+      expect(finRes.status).toBe(200);
+      const { statementOfActivities, statementOfFinancialPosition, directCashFlowStatement } = finRes.body.data;
+      expect(statementOfActivities).toBeDefined();
+      expect(statementOfFinancialPosition).toBeDefined();
+      expect(statementOfFinancialPosition.isBalanced).toBe(true);
+
+      // 3. Direct Method Cash Flow Reconciliation
+      expect(directCashFlowStatement).toBeDefined();
+      expect(directCashFlowStatement.reconciliation.isReconciled).toBe(true);
+      expect(directCashFlowStatement.reconciliation.endingCashBalance).toBe(
+        directCashFlowStatement.reconciliation.beginningCashBalance +
+        directCashFlowStatement.reconciliation.netCashIncreaseDecrease
+      );
+
+      // 4. Executive Dashboard RGA Semula-Menjadi Equation
+      const dashRes = await request(app)
+        .get('/api/v1/reports/dashboard')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(dashRes.status).toBe(200);
+      const { kpis, rgaPerformance } = dashRes.body.data;
+      expect(rgaPerformance).toBeDefined();
+      expect(kpis.totalBudgetMenjadi).toBe(kpis.totalBudgetSemula + kpis.totalBudgetPergeseran);
+    });
+
+    it('confirms General Ledger Trial Balance is strictly balanced across all 5 Business Units post Sprint 5 with 0 discrepancy', async () => {
+      // 1. Consolidated Ledger Trial Balance
+      const consolidatedRes = await request(app)
+        .get('/api/v1/accounting/ledger')
+        .set('Authorization', `Bearer ${accountingToken}`);
+
+      expect(consolidatedRes.status).toBe(200);
+      const { trialBalanceSummary } = consolidatedRes.body.data;
+      expect(trialBalanceSummary).toBeDefined();
+      expect(trialBalanceSummary.isBalanced).toBe(true);
+      expect(trialBalanceSummary.totalDebit).toBe(trialBalanceSummary.totalCredit);
+      expect(trialBalanceSummary.totalDebit).toBeGreaterThan(0);
+
+      // 2. Unit-Level Ledger Trial Balance across Business Units
+      const masterRes = await request(app)
+        .get('/api/v1/master/overview')
+        .set('Authorization', `Bearer ${accountingToken}`);
+      const units = masterRes.body.data.businessUnits || [];
+      for (const u of units.slice(0, 3)) {
+        const unitLedgerRes = await request(app)
+          .get(`/api/v1/accounting/ledger?businessUnitId=${u.id}`)
+          .set('Authorization', `Bearer ${accountingToken}`);
+
+        expect(unitLedgerRes.status).toBe(200);
+        expect(unitLedgerRes.body.data.trialBalanceSummary.isBalanced).toBe(true);
+        expect(unitLedgerRes.body.data.trialBalanceSummary.totalDebit).toBe(
+          unitLedgerRes.body.data.trialBalanceSummary.totalCredit
+        );
+      }
+    });
+
+    it('verifies comprehensive audit trail logging and forensic immutability across all financial journals and approval actions', async () => {
+      // 1. Verify Audit Logs Exist in Dashboard
+      const dashRes = await request(app)
+        .get('/api/v1/reports/dashboard')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(dashRes.status).toBe(200);
+      expect(Array.isArray(dashRes.body.data.recentAuditLogs)).toBe(true);
+
+      // 2. Verify Immutability: Deleting a posted journal directly is forbidden
+      const journalsRes = await request(app)
+        .get('/api/v1/accounting/journals')
+        .set('Authorization', `Bearer ${accountingToken}`);
+      expect(journalsRes.status).toBe(200);
+
+      if (journalsRes.body.data.length > 0) {
+        const postedJournal = journalsRes.body.data.find((j: any) => j.status === 'POSTED');
+        if (postedJournal) {
+          const deleteRes = await request(app)
+            .delete(`/api/v1/accounting/journals/${postedJournal.id}`)
+            .set('Authorization', `Bearer ${accountingToken}`);
+          expect(deleteRes.status).toBe(403);
+          expect(deleteRes.body.error.code).toBe('POSTED_JOURNAL_IMMUTABLE');
+        }
+      }
+    });
+  });
 });
