@@ -81,3 +81,31 @@ export async function downloadCsvReport(type: string): Promise<void> {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+export async function downloadPbiExcel(budgetId?: string, docNumber?: string): Promise<void> {
+  const token = localStorage.getItem('pmo_erp_token');
+  const path = budgetId
+    ? `${API_BASE}/budgets/${encodeURIComponent(budgetId)}/export/pbi-excel`
+    : `${API_BASE}/budgets/export/pbi-excel`;
+  const response = await fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    const json = await response.json().catch(() => null);
+    throw new Error(json?.error?.message || 'Gagal mengunduh file format resmi PBI Excel.');
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  const fileName = docNumber
+    ? `Format_Resmi_PBI_60_Kolom_${docNumber}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    : `Format_Resmi_PBI_60_Kolom_Semula_Menjadi_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

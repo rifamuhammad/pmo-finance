@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
-import { apiFetch } from '../services/api';
+import { apiFetch, downloadPbiExcel } from '../services/api';
 import { formatRupiah, formatDateTime } from '../utils/format';
 import { usePagination } from '../composables/usePagination';
 import StatusBadge from '../components/StatusBadge.vue';
@@ -25,6 +25,26 @@ const feedbackMsg = ref('');
 const budgets = ref<any[]>([]);
 const selectedBudget = ref<any>(null);
 const isDrawerOpen = ref(false);
+const isExporting = ref(false);
+
+async function handleExportPbiExcel(budget?: any) {
+  try {
+    isExporting.value = true;
+    errorMsg.value = '';
+    feedbackMsg.value = '';
+    if (budget) {
+      await downloadPbiExcel(budget.id, budget.docNumber);
+      feedbackMsg.value = `Berhasil mengunduh Format Resmi PBI (Tabel 60 Kolom) untuk anggaran ${budget.docNumber}.`;
+    } else {
+      await downloadPbiExcel();
+      feedbackMsg.value = 'Berhasil mengunduh Format Resmi PBI (Tabel 60 Kolom) konsolidasi seluruh anggaran.';
+    }
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mengekspor Format Resmi PBI Excel.';
+  } finally {
+    isExporting.value = false;
+  }
+}
 const master = ref<any>({ businessUnits: [], costCenters: [], fundSources: [], fiscalPeriods: [], chartOfAccounts: [] });
 
 const statusFilter = ref('');
@@ -694,6 +714,18 @@ onMounted(loadMasterAndBudgets);
 
       <div class="header-right-actions">
         <button
+          v-if="auth.hasPermission('budget:view')"
+          type="button"
+          class="pill-btn pill-btn-emerald"
+          :disabled="loading || isExporting"
+          @click="handleExportPbiExcel()"
+          title="Ekspor Format Resmi PBI Semula-Menjadi (Tabel 60 Kolom)"
+        >
+          <i class="pi pi-file-excel" :class="{ 'pi-spin': isExporting }"></i>
+          <span>{{ isExporting ? 'Mengekspor PBI...' : 'Ekspor Format Resmi PBI' }}</span>
+        </button>
+
+        <button
           type="button"
           class="pill-btn pill-btn-ghost"
           :disabled="loading"
@@ -1108,6 +1140,18 @@ onMounted(loadMasterAndBudgets);
 
           <!-- Action Buttons Bar -->
           <div class="drawer-actions-bar">
+            <button
+              v-if="auth.hasPermission('budget:view')"
+              type="button"
+              class="btn-drawer-action btn-drawer-emerald"
+              :disabled="isExporting"
+              @click="handleExportPbiExcel(selectedBudget)"
+              title="Unduh Format Resmi PBI 60 Kolom untuk Dokumen Ini"
+            >
+              <i class="pi pi-file-excel" :class="{ 'pi-spin': isExporting }"></i>
+              <span>Ekspor PBI 60 Kolom</span>
+            </button>
+
             <button
               v-if="['DRAFT', 'REJECTED'].includes(selectedBudget.status) && auth.hasPermission('budget:submit')"
               type="button"
@@ -2147,6 +2191,19 @@ onMounted(loadMasterAndBudgets);
   transform: translateY(-1px);
 }
 
+.pill-btn-emerald {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.08);
+}
+
+.pill-btn-emerald:hover:not(:disabled) {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  transform: translateY(-1px);
+}
+
 /* 4 Pastel Stat Cards (Exact Screenshot Vibe) */
 .pastel-kpi-grid {
   display: grid;
@@ -2778,6 +2835,8 @@ onMounted(loadMasterAndBudgets);
 .btn-drawer-success:hover { background: #059669; }
 .btn-drawer-warn { background: #f59e0b; color: #ffffff; }
 .btn-drawer-warn:hover { background: #d97706; }
+.btn-drawer-emerald { background: #059669; color: #ffffff; }
+.btn-drawer-emerald:hover { background: #047857; }
 
 .drawer-meter-card {
   background: #ffffff;

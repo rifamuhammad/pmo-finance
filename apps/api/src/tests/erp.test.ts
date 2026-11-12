@@ -2687,4 +2687,114 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       }
     });
   });
+
+  // =========================================================================
+  // 22. [KOI-130] [PMO-161] Generator Ekspor Excel Format Resmi PBI (Tabel 60 Kolom) (3)
+  // =========================================================================
+  describe('22. [KOI-130] [PMO-161] Generator Ekspor Excel Format Resmi PBI (Tabel 60 Kolom)', () => {
+    it('exports consolidated 60-column PBI Excel file with valid XLSX binary stream and official column headers', async () => {
+      const res = await request(app)
+        .get('/api/v1/budgets/export/pbi-excel')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .responseType('blob');
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      expect(res.headers['content-disposition']).toContain('.xlsx');
+      expect(res.body).toBeDefined();
+
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(res.body);
+
+      const worksheet = workbook.getWorksheet('PBI Semula - Menjadi') || workbook.worksheets[0];
+      expect(worksheet).toBeDefined();
+      if (!worksheet) return;
+
+      expect(worksheet.columns.length).toBe(60);
+
+      // Verify Row 4 (Group Headers)
+      const groupHeaderRow = worksheet.getRow(4);
+      expect(groupHeaderRow.getCell(1).value).toContain('INFORMASI MATA ANGGARAN');
+      expect(groupHeaderRow.getCell(14).value).toContain('PAGU ANGGARAN SEMULA');
+      expect(groupHeaderRow.getCell(26).value).toContain('PAGU ANGGARAN MENJADI');
+      expect(groupHeaderRow.getCell(48).value).toContain('EVALUASI REALISASI');
+
+      // Verify Row 5 (60 Detail Headers)
+      const detailHeaderRow = worksheet.getRow(5);
+      expect(detailHeaderRow.getCell(1).value).toBe('No.');
+      expect(detailHeaderRow.getCell(2).value).toBe('KODE IKPS');
+      expect(detailHeaderRow.getCell(12).value).toBe('KODE COA');
+      expect(detailHeaderRow.getCell(23).value).toContain('HARGA SATUAN');
+      expect(detailHeaderRow.getCell(24).value).toContain('JUMLAH BIAYA');
+      expect(detailHeaderRow.getCell(25).value).toBe('JUMLAH PAGU SEMULA');
+      expect(detailHeaderRow.getCell(46).value).toContain('JUMLAH BIAYA');
+      expect(detailHeaderRow.getCell(47).value).toBe('JUMLAH PAGU MENJADI');
+      expect(detailHeaderRow.getCell(48).value).toContain('SELISIH PERGESERAN');
+      expect(detailHeaderRow.getCell(49).value).toBe('REALISASI BEBAN AKTUAL');
+      expect(detailHeaderRow.getCell(52).value).toBe('SISA PAGU TERSEDIA');
+      expect(detailHeaderRow.getCell(53).value).toBe('DAYA SERAP (%)');
+      expect(detailHeaderRow.getCell(60).value).toBe('STATUS EVALUASI');
+    });
+
+    it('exports single budget 60-column PBI Excel file and verifies formulas & multi-volume line items', async () => {
+      const budgetsRes = await request(app)
+        .get('/api/v1/budgets')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(budgetsRes.status).toBe(200);
+      expect(budgetsRes.body.data.length).toBeGreaterThan(0);
+
+      const targetBudget = budgetsRes.body.data[0];
+      const res = await request(app)
+        .get(`/api/v1/budgets/${targetBudget.id}/export/pbi-excel`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .responseType('blob');
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      expect(res.headers['content-disposition']).toContain(targetBudget.docNumber);
+
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(res.body);
+
+      const worksheet = workbook.getWorksheet('PBI Semula - Menjadi') || workbook.worksheets[0];
+      expect(worksheet).toBeDefined();
+      if (!worksheet) return;
+
+      // Title row check (Row 2 has docNumber in metadata string)
+      expect(worksheet.getRow(2).getCell(1).value).toContain(targetBudget.docNumber);
+
+      // Verify Total row exists and contains Excel formula
+      const rowCount = worksheet.rowCount;
+      const totalRow = worksheet.getRow(rowCount);
+      expect(totalRow.getCell(1).value).toContain('TOTAL');
+
+      // Cell 25 (Pagu Semula total) should have formula SUM
+      const cellSemula = totalRow.getCell(25);
+      expect(cellSemula.value).toHaveProperty('formula');
+      expect(String((cellSemula.value as any).formula)).toContain('SUM');
+
+      // Cell 47 (Pagu Menjadi total) should have formula SUM
+      const cellMenjadi = totalRow.getCell(47);
+      expect(cellMenjadi.value).toHaveProperty('formula');
+      expect(String((cellMenjadi.value as any).formula)).toContain('SUM');
+
+      // Cell 48 (Selisih total) should have formula
+      const cellSelisih = totalRow.getCell(48);
+      expect(cellSelisih.value).toHaveProperty('formula');
+    });
+
+    it('enforces RBAC permissions on PBI Excel export (requires budget:view)', async () => {
+      const noAuthRes = await request(app)
+        .get('/api/v1/budgets/export/pbi-excel');
+      expect(noAuthRes.status).toBe(401);
+
+      const authorizedRes = await request(app)
+        .get('/api/v1/budgets/export/pbi-excel')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .responseType('blob');
+      expect(authorizedRes.status).toBe(200);
+    });
+  });
 });

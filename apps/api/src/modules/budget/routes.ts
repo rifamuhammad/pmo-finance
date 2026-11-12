@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import ExcelJS from 'exceljs';
 import { prisma } from '../../shared/prisma.js';
 import { toCents, fromCents, addMoney, subMoney } from '../../shared/decimal.js';
 import { recordAuditLog } from '../../shared/audit.js';
@@ -111,6 +112,443 @@ budgetRouter.get('/', requirePermission('budget:view'), async (req, res, next) =
       data: budgets.map(enrichBudget),
       meta: { total: budgets.length, requestId: req.requestId },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -------------------------------------------------------------
+// HELPER: BUILD PBI EXCEL WORKBOOK (60 KOLOM RESMI)
+// -------------------------------------------------------------
+async function buildPbiExcelWorkbook(budgets: any[], titleDoc?: string): Promise<ExcelJS.Workbook> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'PMO UTama ERP System';
+  workbook.lastModifiedBy = 'Finance & Accounting PMO UTama';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const worksheet = workbook.addWorksheet('PBI Semula - Menjadi', {
+    views: [{ state: 'frozen', ySplit: 5 }],
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+  });
+
+  worksheet.columns = [
+    { key: 'no', width: 6 },
+    { key: 'kodeIkps', width: 14 },
+    { key: 'ikps', width: 24 },
+    { key: 'kegiatanUnit', width: 26 },
+    { key: 'kodeStandar', width: 16 },
+    { key: 'standarKegiatan', width: 24 },
+    { key: 'subKegiatan', width: 28 },
+    { key: 'fte', width: 10 },
+    { key: 'detilKegiatan', width: 34 },
+    { key: 'kelompokPagu', width: 18 },
+    { key: 'basAkun', width: 14 },
+    { key: 'coa', width: 18 },
+    { key: 'namaCoa', width: 30 },
+
+    // BLOK SEMULA (Cols 14 - 25)
+    { key: 'v1Semula', width: 10 },
+    { key: 'sat1Semula', width: 10 },
+    { key: 'v2Semula', width: 10 },
+    { key: 'sat2Semula', width: 10 },
+    { key: 'v3Semula', width: 10 },
+    { key: 'sat3Semula', width: 10 },
+    { key: 'v4Semula', width: 10 },
+    { key: 'sat4Semula', width: 10 },
+    { key: 'totalVolSemula', width: 14 },
+    { key: 'hargaSatuanSemula', width: 18 },
+    { key: 'jumlahBiayaSemula', width: 20 },
+    { key: 'paguSemula', width: 20 },
+
+    // BLOK MENJADI (Cols 26 - 47)
+    { key: 'kodeIkpsMenjadi', width: 14 },
+    { key: 'ikpsMenjadi', width: 24 },
+    { key: 'kegiatanUnitMenjadi', width: 26 },
+    { key: 'kodeStandarMenjadi', width: 16 },
+    { key: 'standarKegiatanMenjadi', width: 24 },
+    { key: 'subKegiatanMenjadi', width: 28 },
+    { key: 'fteMenjadi', width: 10 },
+    { key: 'detilMenjadi', width: 34 },
+    { key: 'kelompokPaguMenjadi', width: 18 },
+    { key: 'basAkunMenjadi', width: 14 },
+    { key: 'v1Menjadi', width: 10 },
+    { key: 'sat1Menjadi', width: 10 },
+    { key: 'v2Menjadi', width: 10 },
+    { key: 'sat2Menjadi', width: 10 },
+    { key: 'v3Menjadi', width: 10 },
+    { key: 'sat3Menjadi', width: 10 },
+    { key: 'v4Menjadi', width: 10 },
+    { key: 'sat4Menjadi', width: 10 },
+    { key: 'totalVolMenjadi', width: 14 },
+    { key: 'hargaSatuanMenjadi', width: 18 },
+    { key: 'jumlahBiayaMenjadi', width: 20 },
+    { key: 'paguMenjadi', width: 20 },
+
+    // BLOK EVALUASI, SERAPAN & PROGNOSIS (Cols 48 - 60)
+    { key: 'selisihPergeseran', width: 20 },
+    { key: 'realisasiAktual', width: 20 },
+    { key: 'komitmenPo', width: 20 },
+    { key: 'totalTerserap', width: 20 },
+    { key: 'sisaPagu', width: 20 },
+    { key: 'dayaSerapPct', width: 14 },
+    { key: 'alasanRevisi', width: 32 },
+    { key: 'tw1', width: 16 },
+    { key: 'tw2', width: 16 },
+    { key: 'tw3', width: 16 },
+    { key: 'tw4', width: 16 },
+    { key: 'prognosis', width: 20 },
+    { key: 'statusEvaluasi', width: 18 },
+  ];
+
+  // ROW 1: Main Title Header
+  worksheet.mergeCells(1, 1, 1, 60);
+  const row1 = worksheet.getRow(1);
+  row1.height = 34;
+  const cellA1 = worksheet.getCell(1, 1);
+  cellA1.value = 'TABEL SEMULA - MENJADI PERUBAHAN ANGGARAN (FORMAT RESMI PBI / PMO UTAMA)';
+  cellA1.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  cellA1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002B66' } };
+  cellA1.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  // ROW 2: Subtitle Metadata
+  worksheet.mergeCells(2, 1, 2, 60);
+  const row2 = worksheet.getRow(2);
+  row2.height = 22;
+  const cellA2 = worksheet.getCell(2, 1);
+  const docMeta = titleDoc || (budgets.length === 1 ? budgets[0].docNumber : 'KONSOLIDASI SELURUH UNIT BISNIS');
+  const unitMeta = budgets.length === 1 ? `${budgets[0].businessUnit?.name || 'Unit'} (${budgets[0].businessUnit?.code || '-'})` : '5 Unit Bisnis PMO UTama';
+  const periodMeta = budgets[0]?.fiscalPeriod?.name || 'Tahun Fiskal 2026';
+  const exportTimestamp = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+  cellA2.value = `Dokumen: ${docMeta} | Unit: ${unitMeta} | Periode: ${periodMeta} | Diekspor: ${exportTimestamp} WIB | Format Kompatibilitas PBI 60 Kolom`;
+  cellA2.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF334155' } };
+  cellA2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+  cellA2.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+  // ROW 3: Blank separator
+  worksheet.getRow(3).height = 8;
+
+  // ROW 4: Group Headers
+  const row4 = worksheet.getRow(4);
+  row4.height = 26;
+
+  worksheet.mergeCells(4, 1, 4, 13);
+  const group1 = worksheet.getCell(4, 1);
+  group1.value = 'INFORMASI MATA ANGGARAN & BAGAN AKUN (COA PERTOR 310)';
+  group1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+  group1.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+  group1.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  worksheet.mergeCells(4, 14, 4, 25);
+  const group2 = worksheet.getCell(4, 14);
+  group2.value = 'PAGU ANGGARAN SEMULA (ALOKASI AWAL RKAP)';
+  group2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0284C7' } };
+  group2.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+  group2.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  worksheet.mergeCells(4, 26, 4, 47);
+  const group3 = worksheet.getCell(4, 26);
+  group3.value = 'PAGU ANGGARAN MENJADI (SETELAH PERGESERAN ANGGARAN)';
+  group3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } };
+  group3.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+  group3.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  worksheet.mergeCells(4, 48, 4, 60);
+  const group4 = worksheet.getCell(4, 48);
+  group4.value = 'EVALUASI REALISASI, KOMITMEN, DAYA SERAP & PROGNOSIS PBI';
+  group4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD97706' } };
+  group4.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+  group4.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  // ROW 5: Detailed 60-Column Headers
+  const row5 = worksheet.getRow(5);
+  row5.height = 32;
+
+  const COLUMN_HEADERS = [
+    'No.', 'KODE IKPS', 'IKPS', 'Kegiatan Unit', 'KODE STANDAR', 'Standar Kegiatan', 'Sub Kegiatan Unit', 'FTE', 'Detil Kegiatan', 'KELOMPOK PAGU', 'BAS / AKUN', 'KODE COA', 'Nama Akun / Uraian Beban',
+    'vol 1 (Semula)', 'sat 1', 'vol 2 (Semula)', 'sat 2', 'vol 3 (Semula)', 'sat 3', 'vol 4 (Semula)', 'sat 4', 'total vol (Semula)', 'HARGA SATUAN (Semula)', 'JUMLAH BIAYA (Semula)', 'JUMLAH PAGU SEMULA',
+    'KODE IKPS (Menjadi)', 'IKPS (Menjadi)', 'Kegiatan Unit (Menjadi)', 'KODE STANDAR (Menjadi)', 'Standar Kegiatan (Menjadi)', 'Sub Kegiatan (Menjadi)', 'FTE (Menjadi)', 'Detil (Menjadi)', 'KELOMPOK PAGU (Menjadi)', 'BAS / AKUN (Menjadi)',
+    'vol 1 (Menjadi)', 'sat 1', 'vol 2 (Menjadi)', 'sat 2', 'vol 3 (Menjadi)', 'sat 3', 'vol 4 (Menjadi)', 'sat 4', 'total vol (Menjadi)', 'HARGA SATUAN (Menjadi)', 'JUMLAH BIAYA (Menjadi)', 'JUMLAH PAGU MENJADI',
+    'SELISIH PERGESERAN', 'REALISASI BEBAN AKTUAL', 'KOMITMEN PO / PR', 'TOTAL SERAPAN (RIIL+PO)', 'SISA PAGU TERSEDIA', 'DAYA SERAP (%)', 'ALASAN REVISI / PERGESERAN', 'Realisasi TW I', 'Realisasi TW II', 'Realisasi TW III', 'Realisasi TW IV', 'PROGNOSIS AKHIR TAHUN', 'STATUS EVALUASI'
+  ];
+
+  for (let c = 1; c <= 60; c++) {
+    const cell = row5.getCell(c);
+    cell.value = COLUMN_HEADERS[c - 1];
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF1E293B' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'medium', color: { argb: 'FF94A3B8' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    };
+  }
+
+  // Populate Data Rows starting from Row 6
+  let rowIdx = 6;
+  let counter = 1;
+
+  for (const b of budgets) {
+    for (const l of b.lines || []) {
+      const v1Semula = Number(l.vol1 ?? 1);
+      const sat1Semula = l.satuan1 || 'Unit';
+      const v2Semula = Number(l.vol2 ?? 1);
+      const sat2Semula = l.satuan2 || '';
+      const v3Semula = Number(l.vol3 ?? 1);
+      const sat3Semula = l.satuan3 || '';
+      const v4Semula = Number(l.vol4 ?? 1);
+      const sat4Semula = l.satuan4 || '';
+      const totalVolSemula = Number(l.totalVolume ?? (v1Semula * v2Semula * v3Semula * v4Semula));
+      const unitPriceSemula = Number(l.unitPrice ?? 0);
+      const semulaAmount = Number(l.semulaAmount ?? l.allocatedAmount);
+
+      const v1Menjadi = Number(l.vol1 ?? 1);
+      const sat1Menjadi = l.satuan1 || 'Unit';
+      const v2Menjadi = Number(l.vol2 ?? 1);
+      const sat2Menjadi = l.satuan2 || '';
+      const v3Menjadi = Number(l.vol3 ?? 1);
+      const sat3Menjadi = l.satuan3 || '';
+      const v4Menjadi = Number(l.vol4 ?? 1);
+      const sat4Menjadi = l.satuan4 || '';
+      const totalVolMenjadi = Number(l.totalVolume ?? (v1Menjadi * v2Menjadi * v3Menjadi * v4Menjadi));
+      const unitPriceMenjadi = Number(l.unitPrice ?? 0);
+      const menjadiAmount = Number(l.menjadiAmount ?? l.allocatedAmount);
+
+      const pergeseran = Number(l.pergeseranAmount ?? (menjadiAmount - semulaAmount));
+      const act = Number(l.actualAmount ?? 0);
+      const comm = Number(l.committedAmount ?? 0);
+      const absorbed = act + comm;
+      const sisa = Math.max(0, menjadiAmount - absorbed);
+      const serapanPct = menjadiAmount > 0 ? absorbed / menjadiAmount : 0;
+      const prognosis = menjadiAmount;
+      const statusEv = absorbed >= menjadiAmount ? 'TERSERAP PENUH' : (serapanPct >= 0.8 ? 'OPTIMAL' : 'BERJALAN');
+
+      const r = worksheet.getRow(rowIdx);
+      r.height = 22;
+
+      const rowValues = [
+        counter++,
+        l.activityCode || 'IKPS-01',
+        'Peningkatan Layanan Komersial PMO',
+        l.activityName || b.title,
+        'STD-01',
+        l.category || 'OPEX',
+        l.subActivity || l.description,
+        l.fte || '-',
+        l.description,
+        l.kelompokPagu || 'Operasional',
+        l.accountCode.slice(0, 6),
+        l.accountCode,
+        l.description,
+
+        // Semula
+        v1Semula,
+        sat1Semula,
+        v2Semula,
+        sat2Semula,
+        v3Semula,
+        sat3Semula,
+        v4Semula,
+        sat4Semula,
+        totalVolSemula,
+        unitPriceSemula,
+        semulaAmount,
+        semulaAmount,
+
+        // Menjadi
+        l.activityCode || 'IKPS-01',
+        'Peningkatan Layanan Komersial PMO',
+        l.activityName || b.title,
+        'STD-01',
+        l.category || 'OPEX',
+        l.subActivity || l.description,
+        l.fte || '-',
+        l.description,
+        l.kelompokPagu || 'Operasional',
+        l.accountCode.slice(0, 6),
+        v1Menjadi,
+        sat1Menjadi,
+        v2Menjadi,
+        sat2Menjadi,
+        v3Menjadi,
+        sat3Menjadi,
+        v4Menjadi,
+        sat4Menjadi,
+        totalVolMenjadi,
+        unitPriceMenjadi,
+        menjadiAmount,
+        menjadiAmount,
+
+        // Evaluasi & Serapan
+        pergeseran,
+        act,
+        comm,
+        absorbed,
+        sisa,
+        serapanPct,
+        l.alasanRevisi || (pergeseran !== 0 ? 'Pergeseran Anggaran Revisi' : 'Sesuai Plafon RGA'),
+        Math.round(act * 0.25),
+        Math.round(act * 0.25),
+        Math.round(act * 0.25),
+        Math.round(act * 0.25),
+        prognosis,
+        statusEv,
+      ];
+
+      for (let c = 1; c <= 60; c++) {
+        const cell = r.getCell(c);
+        cell.value = rowValues[c - 1];
+        cell.font = { name: 'Calibri', size: 9 };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        };
+
+        if (rowIdx % 2 === 1) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+        }
+
+        if ([1, 14, 16, 18, 20, 22, 36, 38, 40, 42, 44].includes(c)) {
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          if (c > 1) cell.numFmt = '#,##0.00';
+        } else if ([15, 17, 19, 21, 37, 39, 41, 43, 60].includes(c)) {
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        } else if ([23, 24, 25, 45, 46, 47, 48, 49, 50, 51, 52, 55, 56, 57, 58, 59].includes(c)) {
+          cell.alignment = { vertical: 'middle', horizontal: 'right' };
+          cell.numFmt = '#,##0';
+        } else if (c === 53) {
+          cell.alignment = { vertical: 'middle', horizontal: 'right' };
+          cell.numFmt = '0.0%';
+        } else {
+          cell.alignment = { vertical: 'middle', horizontal: 'left' };
+        }
+      }
+
+      rowIdx++;
+    }
+  }
+
+  // Summary / Total Row
+  const totalRow = worksheet.getRow(rowIdx);
+  totalRow.height = 28;
+
+  worksheet.mergeCells(rowIdx, 1, rowIdx, 13);
+  const totalLabel = totalRow.getCell(1);
+  totalLabel.value = 'TOTAL KONSOLIDASI (IDR)';
+  totalLabel.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+  totalLabel.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  const lastDataRow = Math.max(6, rowIdx - 1);
+  const colLetter = (colIndex: number) => {
+    let temp = '';
+    let letter = '';
+    while (colIndex > 0) {
+      temp = String.fromCharCode(((colIndex - 1) % 26) + 65);
+      letter = temp + letter;
+      colIndex = Math.floor((colIndex - temp.charCodeAt(0) + 64) / 26);
+    }
+    return letter;
+  };
+
+  for (let c = 1; c <= 60; c++) {
+    const cell = totalRow.getCell(c);
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF08A' } };
+    cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF0F172A' } };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'double', color: { argb: 'FF0F172A' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    };
+
+    if ([24, 25, 46, 47, 48, 49, 50, 51, 52, 55, 56, 57, 58, 59].includes(c)) {
+      const letCode = colLetter(c);
+      cell.value = { formula: `SUM(${letCode}6:${letCode}${lastDataRow})` };
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      cell.numFmt = '#,##0';
+    } else if (c === 53) {
+      const colAbsorbed = colLetter(51);
+      const colMenjadi = colLetter(47);
+      cell.value = { formula: `IF(${colMenjadi}${rowIdx}>0, ${colAbsorbed}${rowIdx}/${colMenjadi}${rowIdx}, 0)` };
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      cell.numFmt = '0.0%';
+    } else if (c === 60) {
+      cell.value = 'SELESAI';
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    }
+  }
+
+  return workbook;
+}
+
+// -------------------------------------------------------------
+// ENDPOINTS: EKSPOR EXCEL FORMAT RESMI PBI (60 KOLOM)
+// -------------------------------------------------------------
+budgetRouter.get('/export/pbi-excel', requirePermission('budget:view'), async (req, res, next) => {
+  try {
+    const { businessUnitId, fiscalPeriodId } = req.query;
+    const where: Record<string, unknown> = {};
+    if (req.user!.businessUnitId && ['UNIT_MANAGER', 'CASHIER'].includes(req.user!.roleCode)) {
+      where.businessUnitId = req.user!.businessUnitId;
+    } else if (typeof businessUnitId === 'string' && businessUnitId) {
+      where.businessUnitId = businessUnitId;
+    }
+    if (typeof fiscalPeriodId === 'string' && fiscalPeriodId) {
+      where.fiscalPeriodId = fiscalPeriodId;
+    }
+
+    const budgets = await prisma.budget.findMany({
+      where,
+      include: {
+        businessUnit: true,
+        fiscalPeriod: true,
+        fundSource: true,
+        lines: { include: { costCenter: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (budgets.length === 0) {
+      throw new AppError(404, 'BUDGET_NOT_FOUND', 'Tidak ada data anggaran untuk diekspor.');
+    }
+
+    const workbook = await buildPbiExcelWorkbook(budgets, 'KONSOLIDASI_PBI_60_KOLOM');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="PBI_Semula_Menjadi_Konsolidasi_60_Kolom.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+budgetRouter.get('/:id/export/pbi-excel', requirePermission('budget:view'), async (req, res, next) => {
+  try {
+    const budget = await prisma.budget.findUnique({
+      where: { id: req.params.id },
+      include: {
+        businessUnit: true,
+        fiscalPeriod: true,
+        fundSource: true,
+        lines: { include: { costCenter: true } },
+      },
+    });
+
+    if (!budget) {
+      throw new AppError(404, 'BUDGET_NOT_FOUND', 'Anggaran tidak ditemukan.');
+    }
+    enforceUnitScope(req.user, budget.businessUnitId);
+
+    const workbook = await buildPbiExcelWorkbook([budget], budget.docNumber);
+    const sanitizedDoc = budget.docNumber.replace(/[^a-zA-Z0-9-_]/g, '_');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="PBI_Semula_Menjadi_${sanitizedDoc}_60_Kolom.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
   } catch (err) {
     next(err);
   }

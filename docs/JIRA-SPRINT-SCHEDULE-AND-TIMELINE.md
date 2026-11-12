@@ -203,13 +203,13 @@ gantt
 * **Periode:** Senin, 18 Jan 2027 – Selasa, 26 Jan 2027
 * **Sasaran Sprint:** Kompatibilitas data ke universitas pusat (format 60 kolom), pencarian instan omnibar, AI assistant keuangan, dan forensic audit trail.
 
-| Kode Tiket | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`PMO-161`** | Generator Ekspor Excel Format Resmi PBI (Tabel 60 Kolom Tanpa Re-Typing) | **Susah** | 3 Hari | Sen, 18 Jan 2027 | Rab, 20 Jan 2027 | **Highest** | `To Do` |
-| **`PMO-171`** | Perekaman Otomatis Mutasi Data & Jejak Audit (Forensic Audit Trail) | **Sedang** | 2 Hari | Rab, 20 Jan 2027 | Kam, 21 Jan 2027 | **High** | `To Do` |
-| **`PMO-181`** | Navigasi Cepat, Omnisearch Cmd+K & App Launcher Modal | **Sedang** | 2 Hari | Jum, 22 Jan 2027 | Sen, 25 Jan 2027 | **Medium** | `To Do` |
-| **`PMO-182`** | Widget Asisten Keuangan AI Terintegrasi (Context-Aware Financial AI) | **Sedang** | 2 Hari | Sen, 25 Jan 2027 | Sel, 26 Jan 2027 | **Medium** | `To Do` |
-| **`SPRINT-6-REV`**| Sprint 6 Review & Kesiapan UAT Lintas Modul | **Review** | 1 Hari | Sel, 26 Jan 2027 | Sel, 26 Jan 2027 | **High** | `To Do` |
+| Kode Tiket | Jira Key | Judul Pekerjaan | Kompleksitas | Durasi | Start Date | Due Date | Priority | Status |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`PMO-161`** | `KOI-130` | Generator Ekspor Excel Format Resmi PBI (Tabel 60 Kolom Tanpa Re-Typing) | **Susah** | 3 Hari | Sen, 18 Jan 2027 | Rab, 20 Jan 2027 | **Highest** | `In Review` |
+| **`PMO-171`** | - | Perekaman Otomatis Mutasi Data & Jejak Audit (Forensic Audit Trail) | **Sedang** | 2 Hari | Rab, 20 Jan 2027 | Kam, 21 Jan 2027 | **High** | `To Do` |
+| **`PMO-181`** | - | Navigasi Cepat, Omnisearch Cmd+K & App Launcher Modal | **Sedang** | 2 Hari | Jum, 22 Jan 2027 | Sen, 25 Jan 2027 | **Medium** | `To Do` |
+| **`PMO-182`** | - | Widget Asisten Keuangan AI Terintegrasi (Context-Aware Financial AI) | **Sedang** | 2 Hari | Sen, 25 Jan 2027 | Sel, 26 Jan 2027 | **Medium** | `To Do` |
+| **`SPRINT-6-REV`**| - | Sprint 6 Review & Kesiapan UAT Lintas Modul | **Review** | 1 Hari | Sel, 26 Jan 2027 | Sel, 26 Jan 2027 | **High** | `To Do` |
 
 ---
 
