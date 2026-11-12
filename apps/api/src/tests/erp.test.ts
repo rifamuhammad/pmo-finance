@@ -2508,4 +2508,85 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       );
     });
   });
+
+  describe('20. [KOI-127] [PMO-151] Executive Dashboard & Analitik Kinerja RGA Real-Time Serapan Anggaran (3)', () => {
+    it('fetches executive dashboard metrics with RGA Target, Semula-Menjadi pagu shift, and Burn Rate calculations', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/dashboard')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      const { data } = res.body;
+      expect(data).toBeDefined();
+      expect(data.kpis).toBeDefined();
+
+      // 1. Core KPIs & RGA Target
+      expect(data.kpis.totalBudgetAllocated).toBeTypeOf('number');
+      expect(data.kpis.totalRevenueTarget).toBeTypeOf('number');
+      expect(data.kpis.revenueAchievementPercent).toBeTypeOf('number');
+
+      // 2. Semula-Menjadi Pagu Pergeseran
+      expect(data.kpis.totalBudgetSemula).toBeTypeOf('number');
+      expect(data.kpis.totalBudgetPergeseran).toBeTypeOf('number');
+      expect(data.kpis.totalBudgetMenjadi).toBeTypeOf('number');
+      expect(data.kpis.pergeseranPercent).toBeTypeOf('number');
+      expect(data.kpis.totalBudgetMenjadi).toBe(
+        data.kpis.totalBudgetSemula + data.kpis.totalBudgetPergeseran
+      );
+
+      // 3. Burn Rate & Prognosis
+      expect(data.kpis.monthlyBurnRate).toBeTypeOf('number');
+      expect(data.kpis.projectedYearEndExpense).toBeTypeOf('number');
+      expect(data.kpis.projectedAbsorptionRate).toBeTypeOf('number');
+
+      // 4. Structured rgaPerformance Object
+      const { rgaPerformance } = data;
+      expect(rgaPerformance).toBeDefined();
+      expect(rgaPerformance.standard).toBe('RGA_PMO_UTAMA');
+      expect(rgaPerformance.totalAbsorbed).toBe(
+        rgaPerformance.budgetCommitted + rgaPerformance.expenseActual
+      );
+      expect(rgaPerformance.burnRate).toBeDefined();
+      expect(rgaPerformance.burnRate.monthlyBurnRate).toBe(data.kpis.monthlyBurnRate);
+    });
+
+    it('verifies 5 PMO Business Units RGA performance breakdown and revenue target achievement', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/dashboard')
+        .set('Authorization', `Bearer ${gmToken}`);
+
+      expect(res.status).toBe(200);
+      const { unitPerformance } = res.body.data;
+      expect(Array.isArray(unitPerformance)).toBe(true);
+      expect(unitPerformance.length).toBeGreaterThanOrEqual(4);
+
+      for (const unit of unitPerformance) {
+        expect(unit.unitCode).toBeDefined();
+        expect(unit.unitName).toBeDefined();
+        expect(unit.allocated).toBeTypeOf('number');
+        expect(unit.actualExpense).toBeTypeOf('number');
+        expect(unit.invoicedRevenue).toBeTypeOf('number');
+        expect(unit.revenueTarget).toBeTypeOf('number');
+        expect(unit.revenueAchievementPercent).toBeTypeOf('number');
+        expect(unit.budgetSemula).toBeTypeOf('number');
+        expect(unit.budgetPergeseran).toBeTypeOf('number');
+        expect(unit.budgetMenjadi).toBeTypeOf('number');
+      }
+    });
+
+    it('filters executive dashboard metrics by businessUnitId and preserves isolated unit RGA analytics', async () => {
+      const res = await request(app)
+        .get(`/api/v1/reports/dashboard?businessUnitId=${unitDiklatId}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      const { data } = res.body;
+      expect(data).toBeDefined();
+      expect(data.kpis.totalBudgetAllocated).toBeTypeOf('number');
+      expect(data.rgaPerformance).toBeDefined();
+      expect(data.rgaPerformance.totalAbsorbed).toBe(
+        data.rgaPerformance.budgetCommitted + data.rgaPerformance.expenseActual
+      );
+    });
+  });
 });

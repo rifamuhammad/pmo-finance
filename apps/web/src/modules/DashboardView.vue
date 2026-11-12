@@ -229,16 +229,17 @@ const displayProducts = computed(() => {
   ];
 });
 
-// Kinerja 4 Divisi PMO UTama (IT Solution, MICE, TCI, Klinik Pratama)
+// Kinerja 5 Unit Bisnis PMO UTama (RGA & USALI Aligned)
 const divisionPerformance = computed(() => {
   if (dashboard.value?.unitPerformance?.length) {
-    return dashboard.value.unitPerformance.filter((u: any) => u.unitCode !== 'BU-PUSAT' && u.unitCode !== 'PMO-MGMT');
+    return dashboard.value.unitPerformance;
   }
   return [
-    { unitCode: 'BU-ITS', unitName: 'IT Solution', invoicedRevenue: 170000000, actualExpense: 95000000, utilizationPercent: 68 },
-    { unitCode: 'BU-MICE', unitName: 'MICE & Wisma', invoicedRevenue: 145000000, actualExpense: 85000000, utilizationPercent: 74 },
-    { unitCode: 'BU-TCI', unitName: 'TCI (Diklat & Sertifikasi)', invoicedRevenue: 100000000, actualExpense: 60000000, utilizationPercent: 62 },
-    { unitCode: 'BU-KLINIK', unitName: 'Klinik Pratama', invoicedRevenue: 65000000, actualExpense: 42000000, utilizationPercent: 55 },
+    { unitCode: 'BU-DIKLAT', unitName: 'Pusat Pelatihan & Sertifikasi', invoicedRevenue: 120000000, actualExpense: 75000000, utilizationPercent: 62, revenueTarget: 150000000, revenueAchievementPercent: 80 },
+    { unitCode: 'BU-TCI', unitName: 'Taman Cerita Indonesia', invoicedRevenue: 100000000, actualExpense: 60000000, utilizationPercent: 60, revenueTarget: 130000000, revenueAchievementPercent: 77 },
+    { unitCode: 'BU-MICE', unitName: 'Pusat Konvensi & Acara', invoicedRevenue: 145000000, actualExpense: 85000000, utilizationPercent: 70, revenueTarget: 180000000, revenueAchievementPercent: 81 },
+    { unitCode: 'BU-WIRA', unitName: 'Wirausaha & Retail', invoicedRevenue: 85000000, actualExpense: 50000000, utilizationPercent: 58, revenueTarget: 110000000, revenueAchievementPercent: 77 },
+    { unitCode: 'BU-ITS', unitName: 'IT Solution & Layanan Digital', invoicedRevenue: 170000000, actualExpense: 95000000, utilizationPercent: 68, revenueTarget: 200000000, revenueAchievementPercent: 85 },
   ];
 });
 
@@ -500,6 +501,93 @@ onMounted(loadDashboard);
             <span class="trend-text">tersedia untuk realisasi</span>
           </div>
         </article>
+      </section>
+
+      <!-- 1.5. RGA & Semula-Menjadi Executive Analytics Row -->
+      <section class="rga-analytics-card" style="margin-bottom: 24px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="background: #e0f2fe; color: #0369a1; font-weight: 700; font-size: 0.72rem; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.03em;">
+                RGA &amp; PERGESERAN ANGGARAN (PERTORS 310)
+              </span>
+              <span style="font-size: 0.78rem; color: #64748b;">Kompilasi Real-Time 5 Unit Bisnis PMO</span>
+            </div>
+            <h2 style="margin: 6px 0 0 0; font-size: 1.15rem; font-weight: 700; color: #0f172a;">
+              Analitik Kinerja RGA &amp; Pagu Semula - Menjadi
+            </h2>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 12px;">
+            <div style="text-align: right;">
+              <span style="font-size: 0.72rem; color: #64748b; display: block;">Laju Serapan Bulanan (Burn Rate)</span>
+              <strong style="font-size: 0.92rem; color: #0f172a;">
+                {{ formatRupiah(dashboard?.rgaPerformance?.burnRate?.monthlyBurnRate || dashboard?.kpis?.monthlyBurnRate || 0) }} / bln
+              </strong>
+            </div>
+            <div style="height: 24px; width: 1px; background: #cbd5e1;"></div>
+            <div style="text-align: right;">
+              <span style="font-size: 0.72rem; color: #64748b; display: block;">Proyeksi Serapan Akhir Tahun</span>
+              <strong style="font-size: 0.92rem; color: #059669;">
+                {{ dashboard?.rgaPerformance?.burnRate?.projectedAbsorptionRate || dashboard?.kpis?.projectedAbsorptionRate || 0 }}% Plafon
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;">
+          <!-- Card 1: Target Pendapatan RGA -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px;">
+            <span style="font-size: 0.75rem; color: #64748b; font-weight: 600; display: block;">Target Pendapatan RGA</span>
+            <div style="font-size: 1.1rem; font-weight: 800; color: #0f172a; margin: 4px 0;">
+              {{ formatRupiah(dashboard?.rgaPerformance?.revenueTarget || dashboard?.kpis?.totalRevenueTarget || 0) }}
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem;">
+              <span style="color: #64748b;">Realisasi Faktur:</span>
+              <strong style="color: #0369a1;">{{ dashboard?.rgaPerformance?.revenueAchievementPercent || dashboard?.kpis?.revenueAchievementPercent || 0 }}% Tercapai</strong>
+            </div>
+          </div>
+
+          <!-- Card 2: Pagu Anggaran Semula -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px;">
+            <span style="font-size: 0.75rem; color: #64748b; font-weight: 600; display: block;">Pagu Anggaran Semula</span>
+            <div style="font-size: 1.1rem; font-weight: 800; color: #475569; margin: 4px 0;">
+              {{ formatRupiah(dashboard?.rgaPerformance?.budgetSemula || dashboard?.kpis?.totalBudgetSemula || dashboard?.kpis?.totalBudgetAllocated || 0) }}
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem;">
+              <span style="color: #64748b;">Alokasi Awal:</span>
+              <span style="color: #64748b;">SK Rektor Awal</span>
+            </div>
+          </div>
+
+          <!-- Card 3: Pergeseran Pagu Anggaran -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px;">
+            <span style="font-size: 0.75rem; color: #64748b; font-weight: 600; display: block;">Pergeseran Anggaran</span>
+            <div
+              style="font-size: 1.1rem; font-weight: 800; margin: 4px 0;"
+              :style="{ color: (dashboard?.rgaPerformance?.budgetPergeseran ?? 0) >= 0 ? '#059669' : '#dc2626' }"
+            >
+              {{ (dashboard?.rgaPerformance?.budgetPergeseran ?? 0) >= 0 ? '+' : '' }}{{ formatRupiah(dashboard?.rgaPerformance?.budgetPergeseran || dashboard?.kpis?.totalBudgetPergeseran || 0) }}
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem;">
+              <span style="color: #64748b;">Deviasi Pergeseran:</span>
+              <strong :style="{ color: (dashboard?.rgaPerformance?.budgetPergeseran ?? 0) >= 0 ? '#059669' : '#dc2626' }">
+                {{ dashboard?.rgaPerformance?.pergeseranPercent || dashboard?.kpis?.pergeseranPercent || 0 }}%
+              </strong>
+            </div>
+          </div>
+
+          <!-- Card 4: Pagu Anggaran Menjadi -->
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 12px;">
+            <span style="font-size: 0.75rem; color: #166534; font-weight: 600; display: block;">Pagu Anggaran Menjadi</span>
+            <div style="font-size: 1.1rem; font-weight: 800; color: #15803d; margin: 4px 0;">
+              {{ formatRupiah(dashboard?.rgaPerformance?.budgetMenjadi || dashboard?.kpis?.totalBudgetMenjadi || dashboard?.kpis?.totalBudgetAllocated || 0) }}
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem;">
+              <span style="color: #166534;">Daya Serap (Riil+PO):</span>
+              <strong style="color: #15803d;">{{ dashboard?.kpis?.totalSerapanPercent || 0 }}%</strong>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- 2. Row 2: Orders Overview (Smooth Dual Bezier Curve Chart) & Serapan Anggaran (Donut Radial) -->
@@ -870,14 +958,14 @@ onMounted(loadDashboard);
         </article>
       </section>
 
-      <!-- 3. Row 3: Kinerja 4 Divisi PMO & Analisis Arus Kas Bulanan -->
+      <!-- 3. Row 3: Kinerja 5 Unit Bisnis PMO & Analisis Arus Kas Bulanan -->
       <section class="dashboard-row-grid split-40-60">
-        <!-- 4 Divisions Performance Card -->
+        <!-- 5 Divisions Performance Card -->
         <article class="poital-card division-card">
           <div class="card-header-bar">
             <div>
-              <h2 class="card-title">Kinerja 4 Divisi PMO</h2>
-              <span class="card-subtitle">Pendapatan & Serapan per Unit Bisnis</span>
+              <h2 class="card-title">Kinerja 5 Unit Bisnis PMO</h2>
+              <span class="card-subtitle">Target RGA, Pendapatan &amp; Serapan per Unit</span>
             </div>
           </div>
 
@@ -892,8 +980,11 @@ onMounted(loadDashboard);
                   <div class="division-progress-bar" :style="{ width: `${unit.utilizationPercent ?? 0}%` }"></div>
                 </div>
               </div>
-              <div class="division-metric-col">
+              <div class="division-metric-col" style="text-align: right;">
                 <span class="div-rev money">{{ formatRupiah(unit.invoicedRevenue) }}</span>
+                <span v-if="unit.revenueTarget" style="font-size: 0.7rem; color: #64748b; display: block; margin-top: 1px;">
+                  Target: {{ formatRupiah(unit.revenueTarget) }} ({{ unit.revenueAchievementPercent || 0 }}%)
+                </span>
                 <span class="div-serapan">{{ unit.utilizationPercent ?? 0 }}% terserap</span>
               </div>
             </div>

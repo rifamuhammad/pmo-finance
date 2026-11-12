@@ -32,6 +32,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-124` | [PMO-131] Core Double-Entry Ledger Engine & Validasi Keseimbangan Debet/Kredit | `feature/KOI-124-core-double-entry-ledger-engine` | `In Review` | [KOI-124-core-double-entry-ledger-engine.md](./KOI-124-core-double-entry-ledger-engine.md) |
 | `KOI-125` | [PMO-141] Generator Laporan Posisi Keuangan (Neraca) & Aktivitas ISAK 335 | `feature/KOI-125-generator-laporan-neraca-aktivitas-isak-335` | `In Review` | [KOI-125-generator-laporan-neraca-aktivitas-isak-335.md](./KOI-125-generator-laporan-neraca-aktivitas-isak-335.md) |
 | `KOI-126` | [PMO-142] Generator Laporan Arus Kas Metode Langsung (Direct Method) | `feature/KOI-126-generator-laporan-arus-kas-metode-langsung` | `In Review` | [KOI-126-generator-laporan-arus-kas-metode-langsung.md](./KOI-126-generator-laporan-arus-kas-metode-langsung.md) |
+| `KOI-127` | [PMO-151] Executive Dashboard & Analitik Kinerja RGA Real-Time Serapan Anggaran | `feature/KOI-127-executive-dashboard-analitik-kinerja-rga` | `In Review` | [KOI-127-executive-dashboard-analitik-kinerja-rga.md](./KOI-127-executive-dashboard-analitik-kinerja-rga.md) |
 
 ---
 

@@ -194,7 +194,7 @@ gantt
 | **`PMO-131`** | `KOI-124` | Core Double-Entry Ledger Engine & Validasi Keseimbangan Debet/Kredit | **Susah** | 3 Hari | Kam, 07 Jan 2027 | Sen, 11 Jan 2027 | **Highest** | `In Review` |
 | **`PMO-141`** | `KOI-125` | Generator Laporan Posisi Keuangan (Neraca) & Aktivitas ISAK 335 | **Susah** | 3 Hari | Sen, 11 Jan 2027 | Rab, 13 Jan 2027 | **Highest** | `In Review` |
 | **`PMO-142`** | `KOI-126` | Generator Laporan Arus Kas Metode Langsung (Direct Method) | **Sedang** | 2 Hari | Rab, 13 Jan 2027 | Kam, 14 Jan 2027 | **High** | `In Review` |
-| **`PMO-151`** | - | Executive Dashboard & Analitik Kinerja RGA Real-Time Serapan Anggaran | **Gampang** | 2 Hari | Kam, 14 Jan 2027 | Jum, 15 Jan 2027 | **Medium** | `To Do` |
+| **`PMO-151`** | `KOI-127` | Executive Dashboard & Analitik Kinerja RGA Real-Time Serapan Anggaran | **Gampang** | 2 Hari | Kam, 14 Jan 2027 | Jum, 15 Jan 2027 | **Medium** | `In Review` |
 | **`SPRINT-5-REV`**| - | Sprint 5 Review & Verifikasi Audit Trail Jurnal | **Review** | 1 Hari | Jum, 15 Jan 2027 | Jum, 15 Jan 2027 | **High** | `To Do` |
 
 ---

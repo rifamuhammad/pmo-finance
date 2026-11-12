@@ -64,6 +64,7 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
             ? { customerInvoice: { businessUnitId: unitFilter.businessUnitId as string } }
             : {}),
         },
+        include: { customerInvoice: true },
       }),
       prisma.vendorInvoice.findMany({
         where: { ...unitFilter, status: { not: 'VOID' } },
@@ -138,7 +139,7 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
       };
     });
 
-    // 4 Divisi PMO UTama Performance Summary (USALI Aligned)
+    // 4 Divisi / 5 Unit Bisnis PMO UTama Performance Summary (USALI & RGA Aligned)
     const unitPerformance = businessUnits.map((u) => {
       const unitBudgets = budgets.filter((b) => b.businessUnitId === u.id);
       const unitAllocated = unitBudgets.reduce((acc, b) => acc + Number(b.totalAllocated), 0);
@@ -149,6 +150,17 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
       const unitRevenue = customerInvoices
         .filter((inv) => inv.businessUnitId === u.id)
         .reduce((acc, inv) => acc + Number(inv.totalAmount), 0);
+      const unitCash = payments
+        .filter((p) => p.customerInvoice?.businessUnitId === u.id)
+        .reduce((acc, p) => acc + Number(p.netAmount), 0);
+
+      const unitRevenueTarget = unitBudgets.reduce((acc, b) => acc + Number(b.revenueTarget || 0), 0);
+      const unitRevenueAchievement = unitRevenueTarget > 0 ? Math.round((unitRevenue / unitRevenueTarget) * 100) : 0;
+
+      const unitLines = unitBudgets.flatMap((b) => b.lines);
+      const unitSemula = unitLines.reduce((acc, l) => acc + Number(l.semulaAmount ?? l.allocatedAmount), 0) || unitAllocated;
+      const unitPergeseran = unitLines.reduce((acc, l) => acc + Number(l.pergeseranAmount ?? 0), 0);
+      const unitMenjadi = unitLines.reduce((acc, l) => acc + Number(l.menjadiAmount ?? l.allocatedAmount), 0) || unitAllocated;
 
       const serapan = unitAllocated > 0 ? Math.round(((unitCommitted + unitExpense) / unitAllocated) * 100) : 0;
 
@@ -160,6 +172,12 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
         committed: unitCommitted,
         actualExpense: unitExpense,
         invoicedRevenue: unitRevenue,
+        cashReceived: unitCash,
+        revenueTarget: unitRevenueTarget,
+        revenueAchievementPercent: unitRevenueAchievement,
+        budgetSemula: unitSemula,
+        budgetPergeseran: unitPergeseran,
+        budgetMenjadi: unitMenjadi,
         operatingMargin: unitRevenue - unitExpense,
         utilizationPercent: serapan,
       };
@@ -286,6 +304,68 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
       });
     }
 
+    // -------------------------------------------------------------
+    // RGA (RENCANA KERJA & ANGGARAN) & SEMULA-MENJADI ANALYTICS
+    // -------------------------------------------------------------
+    const totalRevenueTarget = budgets.reduce((acc, b) => acc + Number(b.revenueTarget || 0), 0);
+    const revenueAchievementPercent = totalRevenueTarget > 0 ? Math.round((totalInvoicedRevenue / totalRevenueTarget) * 100) : 0;
+    const revenueAchievementCashPercent = totalRevenueTarget > 0 ? Math.round((totalCashReceivedNet / totalRevenueTarget) * 100) : 0;
+
+    let totalBudgetSemula = 0;
+    let totalBudgetPergeseran = 0;
+    let totalBudgetMenjadi = 0;
+
+    for (const b of budgets) {
+      for (const l of b.lines) {
+        const semula = Number(l.semulaAmount ?? l.allocatedAmount);
+        const pergeseran = Number(l.pergeseranAmount ?? 0);
+        const menjadi = Number(l.menjadiAmount ?? l.allocatedAmount);
+        totalBudgetSemula += semula;
+        totalBudgetPergeseran += pergeseran;
+        totalBudgetMenjadi += menjadi;
+      }
+    }
+
+    if (totalBudgetSemula === 0 && totalBudgetAllocated > 0) {
+      totalBudgetSemula = totalBudgetAllocated;
+      totalBudgetMenjadi = totalBudgetAllocated;
+    }
+
+    const pergeseranPercent = totalBudgetSemula > 0
+      ? Number(((totalBudgetPergeseran / totalBudgetSemula) * 100).toFixed(2))
+      : 0;
+
+    const activeExpenseMonths = monthlyExp.filter((m) => m > 0).length || 1;
+    const monthlyBurnRate = Math.round(totalExpenseActual / activeExpenseMonths);
+    const projectedYearEndExpense = monthlyBurnRate * 12;
+    const projectedAbsorptionRate = totalBudgetAllocated > 0
+      ? Math.round((projectedYearEndExpense / totalBudgetAllocated) * 100)
+      : 0;
+
+    const rgaPerformance = {
+      standard: 'RGA_PMO_UTAMA',
+      revenueTarget: totalRevenueTarget,
+      invoicedRevenue: totalInvoicedRevenue,
+      cashReceived: totalCashReceivedNet,
+      revenueAchievementPercent,
+      revenueAchievementCashPercent,
+      budgetSemula: totalBudgetSemula,
+      budgetPergeseran: totalBudgetPergeseran,
+      budgetMenjadi: totalBudgetMenjadi,
+      pergeseranPercent,
+      budgetCommitted: totalBudgetCommitted,
+      expenseActual: totalExpenseActual,
+      totalAbsorbed: totalBudgetCommitted + totalExpenseActual,
+      availableBudget,
+      absorptionPercent: totalSerapanPercent,
+      unitBreakdown: unitPerformance,
+      burnRate: {
+        monthlyBurnRate,
+        projectedYearEndExpense,
+        projectedAbsorptionRate,
+      },
+    };
+
     res.json({
       success: true,
       data: {
@@ -308,7 +388,18 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
           komitmenPoPercent,
           totalSerapanPercent,
           sisaPlafonPercent,
+          totalRevenueTarget,
+          revenueAchievementPercent,
+          revenueAchievementCashPercent,
+          totalBudgetSemula,
+          totalBudgetPergeseran,
+          totalBudgetMenjadi,
+          pergeseranPercent,
+          monthlyBurnRate,
+          projectedYearEndExpense,
+          projectedAbsorptionRate,
         },
+        rgaPerformance,
         budgetByCategory: budgetByCategory.filter((c) => c.allocated > 0 || c.actual > 0),
         unitPerformance,
         reconSummary,
