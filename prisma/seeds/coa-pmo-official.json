@@ -198,6 +198,15 @@
     "businessUnit": "PMO-MGMT"
   },
   {
+    "code": "320101010100",
+    "name": "Aset Neto Dengan Pembatasan (Restricted) - Dana Terikat DIPA",
+    "type": "EQUITY",
+    "normalBalance": "CREDIT",
+    "isControlAccount": false,
+    "category": "Aset Neto Dengan Pembatasan",
+    "businessUnit": "PMO-MGMT"
+  },
+  {
     "code": "420301010100",
     "name": "Pendapatan Kursus & Workshop",
     "type": "REVENUE",

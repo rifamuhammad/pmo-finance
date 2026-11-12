@@ -90,12 +90,12 @@
       <div v-if="activeTab === 'financial'" class="erp-stack">
         <div class="erp-card erp-card-pad erp-row-between">
           <div>
-            <span class="erp-badge erp-badge-demo">LAPORAN KEUANGAN KONSOLIDASI [DATA DEMO]</span>
+            <span class="erp-badge erp-badge-info">STANDAR ISAK 335 (ENTITAS NIRLABA UT PTNBH)</span>
             <h2 class="erp-section-title" style="margin-top: 6px;">
-              Ringkasan Laba Rugi, Posisi Keuangan (Neraca), dan Arus Kas
+              Laporan Posisi Keuangan (Neraca) &amp; Laporan Aktivitas
             </h2>
             <p class="erp-subtitle">
-              Disusun otomatis dari jurnal terposting dan realisasi anggaran per unit kerja PMO Utama.
+              Disusun otomatis dari seluruh jurnal umum terposting dengan pemisahan Aset Neto Tanpa Pembatasan (Unrestricted) dan Dengan Pembatasan (Restricted) sesuai ISAK 335 &amp; Pertor 310.
             </p>
           </div>
           <div class="erp-row">
@@ -108,36 +108,37 @@
 
         <div class="erp-kpi-grid">
           <div class="erp-card erp-kpi-card">
-            <span class="erp-kpi-label">Total Pendapatan Usaha (Laba Rugi)</span>
+            <span class="erp-kpi-label">Total Pendapatan Komersial PMO</span>
             <span class="erp-kpi-value">{{ formatIdr(financial.incomeStatement.totalRevenue) }}</span>
-            <span class="erp-kpi-sub">Akun kelompok 4xxx terposting</span>
+            <span class="erp-kpi-sub">Akun kelompok 4xxx Pertor 310</span>
           </div>
           <div class="erp-card erp-kpi-card">
-            <span class="erp-kpi-label">Total Beban Operasional &amp; Pokok</span>
+            <span class="erp-kpi-label">Total Beban Operasional PMO</span>
             <span class="erp-kpi-value">{{ formatIdr(financial.incomeStatement.totalExpense) }}</span>
-            <span class="erp-kpi-sub">Akun kelompok 5xxx terposting</span>
+            <span class="erp-kpi-sub">Belanja pegawai, pemeliharaan &amp; depresiasi</span>
           </div>
           <div class="erp-card erp-kpi-card">
-            <span class="erp-kpi-label">Laba / (Rugi) Bersih Periode Berjalan</span>
-            <span class="erp-kpi-value">{{ formatIdr(financial.incomeStatement.netIncome) }}</span>
-            <span class="erp-kpi-sub">Surplus operasional sebelum pajak korporasi</span>
-          </div>
-          <div class="erp-card erp-kpi-card">
-            <span class="erp-kpi-label">Arus Kas Bersih Operasional (Cashflow)</span>
-            <span class="erp-kpi-value">{{ formatIdr(financial.cashFlowStatement.netOperatingCashFlow) }}</span>
-            <span class="erp-kpi-sub">
-              Kas masuk {{ formatIdr(financial.cashFlowStatement.cashInFromCustomers) }} vs Kas keluar {{ formatIdr(financial.cashFlowStatement.cashOutForExpenses) }}
+            <span class="erp-kpi-label">Surplus / (Defisit) Neto Berjalan</span>
+            <span class="erp-kpi-value" :style="{ color: Number(financial.incomeStatement.netIncome) >= 0 ? '#059669' : '#dc2626' }">
+              {{ formatIdr(financial.incomeStatement.netIncome) }}
             </span>
+            <span class="erp-kpi-sub">Kenaikan / (penurunan) Aset Neto Berjalan</span>
+          </div>
+          <div class="erp-card erp-kpi-card">
+            <span class="erp-kpi-label">Total Aset Neto PMO (ISAK 335)</span>
+            <span class="erp-kpi-value">{{ formatIdr(financial.balanceSheet.totalNetAssets || financial.balanceSheet.totalEquity) }}</span>
+            <span class="erp-kpi-sub">Tanpa Pembatasan + Dengan Pembatasan</span>
           </div>
         </div>
 
         <div class="erp-grid-2">
-          <!-- Income Statement -->
+          <!-- Statement of Activities (ISAK 335) -->
           <section class="erp-card">
             <div class="erp-card-header">
               <div>
-                <h3 class="erp-section-title">Laporan Laba Rugi (Income Statement)</h3>
-                <p class="erp-subtitle">Pendapatan dan beban berdasarkan akun buku besar</p>
+                <span class="erp-badge erp-badge-info">AKTIVITAS OPERASIONAL</span>
+                <h3 class="erp-section-title" style="margin-top: 4px;">Laporan Aktivitas (Statement of Activities)</h3>
+                <p class="erp-subtitle">Penyajian pendapatan usaha dan beban operasional menurut standar ISAK 335</p>
               </div>
             </div>
             <div class="erp-table-wrap">
@@ -146,16 +147,27 @@
                   <tr>
                     <th>Kode</th>
                     <th>Nama Akun</th>
-                    <th>Kelompok</th>
+                    <th>Klasifikasi</th>
                     <th class="num">Saldo (IDR)</th>
                   </tr>
                 </thead>
                 <tbody>
+                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
+                    <td colspan="4">I. PENDAPATAN OPERASIONAL &amp; KOMERSIAL UNIT</td>
+                  </tr>
                   <tr v-for="acc in financial.incomeStatement.revenueAccounts" :key="acc.code">
                     <td><code>{{ acc.code }}</code></td>
                     <td style="font-weight: 600;">{{ acc.name }}</td>
                     <td><span class="erp-badge erp-badge-success">PENDAPATAN</span></td>
                     <td class="num">{{ formatIdr(acc.balance) }}</td>
+                  </tr>
+                  <tr style="font-weight: 600; border-bottom: 2px solid var(--border-subtle);">
+                    <td colspan="3" style="text-align: right;">Total Pendapatan:</td>
+                    <td class="num">{{ formatIdr(financial.incomeStatement.totalRevenue) }}</td>
+                  </tr>
+
+                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
+                    <td colspan="4">II. BEBAN OPERASIONAL PMO UTAMA</td>
                   </tr>
                   <tr v-for="acc in financial.incomeStatement.expenseAccounts" :key="acc.code">
                     <td><code>{{ acc.code }}</code></td>
@@ -163,21 +175,39 @@
                     <td><span class="erp-badge erp-badge-warning">BEBAN</span></td>
                     <td class="num">{{ formatIdr(acc.balance) }}</td>
                   </tr>
-                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
-                    <td colspan="3">LABA / (RUGI) BERSIH PERIODE BERJALAN</td>
-                    <td class="num">{{ formatIdr(financial.incomeStatement.netIncome) }}</td>
+                  <tr style="font-weight: 600; border-bottom: 2px solid var(--border-subtle);">
+                    <td colspan="3" style="text-align: right;">Total Beban Operasional:</td>
+                    <td class="num">{{ formatIdr(financial.incomeStatement.totalExpense) }}</td>
+                  </tr>
+
+                  <tr style="background: #f0fdf4; font-weight: 700;">
+                    <td colspan="3">SURPLUS / (DEFISIT) NETO PERIODE BERJALAN</td>
+                    <td class="num" :style="{ color: Number(financial.incomeStatement.netIncome) >= 0 ? '#059669' : '#dc2626' }">
+                      {{ formatIdr(financial.incomeStatement.netIncome) }}
+                    </td>
+                  </tr>
+
+                  <!-- Alokasi Aset Neto ISAK 335 -->
+                  <tr style="background: var(--bg-surface-muted); font-size: 0.8rem; font-weight: 600;">
+                    <td colspan="3">↳ Kenaikan / (Penurunan) Aset Neto Tanpa Pembatasan</td>
+                    <td class="num">{{ formatIdr(financial.statementOfActivities?.unrestrictedSurplus ?? financial.incomeStatement.netIncome) }}</td>
+                  </tr>
+                  <tr style="background: var(--bg-surface-muted); font-size: 0.8rem; font-weight: 600;">
+                    <td colspan="3">↳ Kenaikan / (Penurunan) Aset Neto Terikat (Restricted)</td>
+                    <td class="num">{{ formatIdr(financial.statementOfActivities?.restrictedSurplus ?? 0) }}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </section>
 
-          <!-- Balance Sheet -->
+          <!-- Statement of Financial Position (Neraca ISAK 335) -->
           <section class="erp-card">
             <div class="erp-card-header">
               <div>
-                <h3 class="erp-section-title">Laporan Posisi Keuangan (Neraca)</h3>
-                <p class="erp-subtitle">Aset = Liabilitas + Ekuitas (termasuk laba berjalan)</p>
+                <span class="erp-badge erp-badge-info">POSISI KEUANGAN</span>
+                <h3 class="erp-section-title" style="margin-top: 4px;">Laporan Posisi Keuangan (Neraca ISAK 335)</h3>
+                <p class="erp-subtitle">Aset = Liabilitas + Aset Neto (Unrestricted &amp; Restricted)</p>
               </div>
               <StatusBadge :status="financial.balanceSheet.isBalanced ? 'MATCHED' : 'DISCREPANCY'" />
             </div>
@@ -186,17 +216,34 @@
                 <thead>
                   <tr>
                     <th>Kode</th>
-                    <th>Nama Akun</th>
-                    <th>Posisi</th>
-                    <th class="num">Nilai Tercatat (IDR)</th>
+                    <th>Pos &amp; Nama Akun</th>
+                    <th>Klasifikasi</th>
+                    <th class="num">Nilai (IDR)</th>
                   </tr>
                 </thead>
                 <tbody>
+                  <!-- I. ASET -->
+                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
+                    <td colspan="4">I. ASET (ASSETS)</td>
+                  </tr>
                   <tr v-for="acc in financial.balanceSheet.assetAccounts" :key="acc.code">
                     <td><code>{{ acc.code }}</code></td>
                     <td style="font-weight: 600;">{{ acc.name }}</td>
-                    <td><span class="erp-badge erp-badge-info">ASET</span></td>
+                    <td>
+                      <span class="erp-badge" :class="acc.code.startsWith('11') ? 'erp-badge-info' : 'erp-badge-neutral'">
+                        {{ acc.code.startsWith('11') ? 'ASET LANCAR' : 'ASET TETAP' }}
+                      </span>
+                    </td>
                     <td class="num">{{ formatIdr(acc.balance) }}</td>
+                  </tr>
+                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
+                    <td colspan="3">TOTAL ASET</td>
+                    <td class="num">{{ formatIdr(financial.balanceSheet.totalAssets) }}</td>
+                  </tr>
+
+                  <!-- II. LIABILITAS -->
+                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
+                    <td colspan="4">II. LIABILITAS (LIABILITIES)</td>
                   </tr>
                   <tr v-for="acc in financial.balanceSheet.liabilityAccounts" :key="acc.code">
                     <td><code>{{ acc.code }}</code></td>
@@ -204,24 +251,52 @@
                     <td><span class="erp-badge erp-badge-warning">LIABILITAS</span></td>
                     <td class="num">{{ formatIdr(acc.balance) }}</td>
                   </tr>
-                  <tr v-for="acc in financial.balanceSheet.equityAccounts" :key="acc.code">
+                  <tr style="font-weight: 600; border-bottom: 2px solid var(--border-subtle);">
+                    <td colspan="3" style="text-align: right;">Total Liabilitas:</td>
+                    <td class="num">{{ formatIdr(financial.balanceSheet.totalLiabilities) }}</td>
+                  </tr>
+
+                  <!-- III. ASET NETO (NET ASSETS - ISAK 335) -->
+                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
+                    <td colspan="4">III. ASET NETO (NET ASSETS - ISAK 335)</td>
+                  </tr>
+                  <!-- Aset Neto Tanpa Pembatasan -->
+                  <tr v-for="acc in (financial.balanceSheet.netAssetsUnrestricted?.accounts || financial.balanceSheet.equityAccounts)" :key="acc.code">
                     <td><code>{{ acc.code }}</code></td>
                     <td style="font-weight: 600;">{{ acc.name }}</td>
-                    <td><span class="erp-badge erp-badge-neutral">EKUITAS</span></td>
+                    <td><span class="erp-badge erp-badge-neutral">TANPA PEMBATASAN</span></td>
                     <td class="num">{{ formatIdr(acc.balance) }}</td>
                   </tr>
                   <tr>
                     <td><code>3999</code></td>
-                    <td style="font-weight: 600;">Laba / Surplus Periode Berjalan</td>
-                    <td><span class="erp-badge erp-badge-neutral">EKUITAS</span></td>
+                    <td style="font-weight: 600;">Surplus / (Defisit) Periode Berjalan</td>
+                    <td><span class="erp-badge erp-badge-neutral">TANPA PEMBATASAN</span></td>
                     <td class="num">{{ formatIdr(financial.balanceSheet.currentPeriodEarnings) }}</td>
                   </tr>
-                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
-                    <td colspan="3">TOTAL ASET</td>
-                    <td class="num">{{ formatIdr(financial.balanceSheet.totalAssets) }}</td>
+                  <tr style="font-size: 0.82rem; font-weight: 600;">
+                    <td colspan="3" style="text-align: right; color: var(--text-muted);">Subtotal Aset Neto Tanpa Pembatasan:</td>
+                    <td class="num">{{ formatIdr(financial.balanceSheet.netAssetsUnrestricted?.endingBalance ?? (financial.balanceSheet.totalEquity)) }}</td>
                   </tr>
-                  <tr style="background: var(--bg-surface-muted); font-weight: 700;">
-                    <td colspan="3">TOTAL LIABILITAS &amp; EKUITAS</td>
+
+                  <!-- Aset Neto Dengan Pembatasan (Restricted) -->
+                  <tr v-for="acc in (financial.balanceSheet.netAssetsRestricted?.accounts || [])" :key="acc.code">
+                    <td><code>{{ acc.code }}</code></td>
+                    <td style="font-weight: 600;">{{ acc.name }}</td>
+                    <td><span class="erp-badge erp-badge-demo">DENGAN PEMBATASAN</span></td>
+                    <td class="num">{{ formatIdr(acc.balance) }}</td>
+                  </tr>
+                  <tr v-if="(financial.balanceSheet.netAssetsRestricted?.accounts || []).length > 0" style="font-size: 0.82rem; font-weight: 600;">
+                    <td colspan="3" style="text-align: right; color: var(--text-muted);">Subtotal Aset Neto Dengan Pembatasan:</td>
+                    <td class="num">{{ formatIdr(financial.balanceSheet.netAssetsRestricted?.endingBalance ?? 0) }}</td>
+                  </tr>
+
+                  <tr style="background: #f8fafc; font-weight: 700;">
+                    <td colspan="3">TOTAL ASET NETO (NET ASSETS)</td>
+                    <td class="num">{{ formatIdr(financial.balanceSheet.totalNetAssets || financial.balanceSheet.totalEquity) }}</td>
+                  </tr>
+
+                  <tr style="background: var(--bg-surface-muted); font-weight: 700; border-top: 2px solid var(--border-color);">
+                    <td colspan="3">TOTAL LIABILITAS &amp; ASET NETO</td>
                     <td class="num">{{ formatIdr(financial.balanceSheet.totalLiabilitiesAndEquity) }}</td>
                   </tr>
                 </tbody>

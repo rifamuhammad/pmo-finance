@@ -2349,4 +2349,66 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(doubleRev.body.error.code).toBe('ALREADY_REVERSED');
     });
   });
+
+  describe('18. [KOI-125] [PMO-141] Generator Laporan Posisi Keuangan (Neraca) & Aktivitas ISAK 335 (3)', () => {
+    it('generates consolidated Statement of Activities and calculates net surplus/deficit', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/financial')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.standard).toBe('ISAK_335');
+      expect(res.body.data.statementOfActivities).toBeDefined();
+      expect(res.body.data.statementOfActivities.totalRevenue).toBeTypeOf('number');
+      expect(res.body.data.statementOfActivities.totalExpense).toBeTypeOf('number');
+      expect(res.body.data.statementOfActivities.surplusDeficit).toBe(
+        res.body.data.statementOfActivities.totalRevenue - res.body.data.statementOfActivities.totalExpense
+      );
+      expect(res.body.data.statementOfActivities.unrestrictedSurplus).toBe(
+        res.body.data.statementOfActivities.surplusDeficit
+      );
+    });
+
+    it('generates Statement of Financial Position under ISAK 335 with Unrestricted vs Restricted Net Assets and verifies balance equation', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/financial')
+        .set('Authorization', `Bearer ${accountingToken}`);
+
+      expect(res.status).toBe(200);
+      const sfp = res.body.data.statementOfFinancialPosition;
+      expect(sfp).toBeDefined();
+      expect(sfp.standard).toBe('ISAK_335');
+
+      // 1. Assets
+      expect(sfp.totalAssets).toBe(sfp.totalCurrentAssets + sfp.totalNonCurrentAssets);
+
+      // 2. Liabilities
+      expect(sfp.totalLiabilities).toBe(sfp.totalCurrentLiabilities + sfp.totalLongTermLiabilities);
+
+      // 3. Net Assets (ISAK 335)
+      expect(sfp.netAssets).toBeDefined();
+      expect(sfp.netAssets.unrestricted).toBeDefined();
+      expect(sfp.netAssets.restricted).toBeDefined();
+      expect(sfp.netAssets.totalNetAssets).toBe(
+        sfp.netAssets.unrestricted.endingBalance + sfp.netAssets.restricted.endingBalance
+      );
+
+      // 4. Fundamental Equation: Total Assets = Total Liabilities + Total Net Assets
+      expect(sfp.totalLiabilitiesAndNetAssets).toBe(sfp.totalLiabilities + sfp.netAssets.totalNetAssets);
+      expect(sfp.isBalanced).toBe(true);
+      expect(Math.abs(sfp.totalAssets - sfp.totalLiabilitiesAndNetAssets)).toBeLessThan(1);
+    });
+
+    it('filters ISAK 335 Financial Statements by businessUnitId and preserves balance equation per unit', async () => {
+      const res = await request(app)
+        .get(`/api/v1/reports/financial?businessUnitId=${unitDiklatId}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      const sfp = res.body.data.statementOfFinancialPosition;
+      expect(sfp).toBeDefined();
+      expect(sfp.isBalanced).toBe(true);
+      expect(Math.abs(sfp.totalAssets - sfp.totalLiabilitiesAndNetAssets)).toBeLessThan(1);
+    });
+  });
 });

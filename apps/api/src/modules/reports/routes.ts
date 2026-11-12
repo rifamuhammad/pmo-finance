@@ -361,12 +361,23 @@ reportsRouter.get('/financial', requirePermission('report:view'), async (req, re
         debitCents += toCents(l.debit);
         creditCents += toCents(l.credit);
       }
-      const netCents = acc.normalBalance === 'DEBIT' ? debitCents - creditCents : creditCents - debitCents;
+      const isContraAsset = acc.type === 'ASSET' && acc.normalBalance === 'CREDIT';
+      let netCents = 0n;
+      if (isContraAsset) {
+        // Contra asset (Akumulasi Penyusutan) reduces total assets
+        netCents = debitCents - creditCents;
+      } else if (acc.normalBalance === 'DEBIT') {
+        netCents = debitCents - creditCents;
+      } else {
+        netCents = creditCents - debitCents;
+      }
+
       return {
         code: acc.code,
         name: acc.name,
         type: acc.type,
         normalBalance: acc.normalBalance,
+        isContraAsset,
         debit: Number(fromCents(debitCents)),
         credit: Number(fromCents(creditCents)),
         balance: Number(fromCents(netCents)),
@@ -379,14 +390,38 @@ reportsRouter.get('/financial', requirePermission('report:view'), async (req, re
     const liabilityAccounts = balances.filter((b) => b.type === 'LIABILITY');
     const equityAccounts = balances.filter((b) => b.type === 'EQUITY');
 
+    // ISAK 335 Asset Categories
+    const currentAssetAccounts = balances.filter((b) => b.type === 'ASSET' && b.code.startsWith('11'));
+    const nonCurrentAssetAccounts = balances.filter((b) => b.type === 'ASSET' && !b.code.startsWith('11'));
+    const totalCurrentAssets = currentAssetAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const totalNonCurrentAssets = nonCurrentAssetAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const totalAssets = totalCurrentAssets + totalNonCurrentAssets;
+
+    // ISAK 335 Liability Categories
+    const currentLiabilityAccounts = balances.filter((b) => b.type === 'LIABILITY' && b.code.startsWith('21'));
+    const longTermLiabilityAccounts = balances.filter((b) => b.type === 'LIABILITY' && !b.code.startsWith('21'));
+    const totalCurrentLiabilities = currentLiabilityAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const totalLongTermLiabilities = longTermLiabilityAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const totalLiabilities = totalCurrentLiabilities + totalLongTermLiabilities;
+
+    // ISAK 335 Net Assets (Aset Neto Tanpa Pembatasan vs Dengan Pembatasan)
+    const unrestrictedAccounts = balances.filter((b) => b.code.startsWith('31'));
+    const restrictedAccounts = balances.filter((b) => b.code.startsWith('32'));
+    const unrestrictedBeginning = unrestrictedAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const restrictedBeginning = restrictedAccounts.reduce((acc, a) => acc + a.balance, 0);
+
     const totalRevenue = revenueAccounts.reduce((acc, a) => acc + a.balance, 0);
     const totalExpense = expenseAccounts.reduce((acc, a) => acc + a.balance, 0);
-    const netIncome = totalRevenue - totalExpense;
+    const netIncome = totalRevenue - totalExpense; // Surplus / (Defisit) Neto Periode Berjalan
 
-    const totalAssets = assetAccounts.reduce((acc, a) => acc + a.balance, 0);
-    const totalLiabilities = liabilityAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const unrestrictedEnding = unrestrictedBeginning + netIncome;
+    const restrictedEnding = restrictedBeginning;
+    const totalNetAssets = unrestrictedEnding + restrictedEnding;
+
     const totalEquityBeforeCurrentIncome = equityAccounts.reduce((acc, a) => acc + a.balance, 0);
-    const totalLiabilitiesAndEquity = totalLiabilities + totalEquityBeforeCurrentIncome + netIncome;
+    const totalLiabilitiesAndNetAssets = totalLiabilities + totalNetAssets;
+    const totalLiabilitiesAndEquity = totalLiabilitiesAndNetAssets;
+    const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndNetAssets) < 1;
 
     const cashInFromCustomers = payments.reduce((acc, p) => acc + Number(p.netAmount), 0);
     const cashOutForExpenses = expenses.reduce((acc, e) => acc + Number(e.totalAmount), 0);
@@ -416,12 +451,23 @@ reportsRouter.get('/financial', requirePermission('report:view'), async (req, re
     res.json({
       success: true,
       data: {
+        standard: 'ISAK_335',
         incomeStatement: {
           revenueAccounts,
           expenseAccounts,
           totalRevenue,
           totalExpense,
           netIncome,
+        },
+        statementOfActivities: {
+          standard: 'ISAK_335',
+          revenueAccounts,
+          expenseAccounts,
+          totalRevenue,
+          totalExpense,
+          surplusDeficit: netIncome,
+          unrestrictedSurplus: netIncome,
+          restrictedSurplus: 0,
         },
         balanceSheet: {
           assetAccounts,
@@ -430,9 +476,52 @@ reportsRouter.get('/financial', requirePermission('report:view'), async (req, re
           currentPeriodEarnings: netIncome,
           totalAssets,
           totalLiabilities,
-          totalEquity: totalEquityBeforeCurrentIncome + netIncome,
+          totalEquity: totalNetAssets,
           totalLiabilitiesAndEquity,
-          isBalanced: Math.abs(totalAssets - totalLiabilitiesAndEquity) < 1,
+          isBalanced,
+          netAssetsUnrestricted: {
+            accounts: unrestrictedAccounts,
+            beginningBalance: unrestrictedBeginning,
+            currentPeriodSurplus: netIncome,
+            endingBalance: unrestrictedEnding,
+          },
+          netAssetsRestricted: {
+            accounts: restrictedAccounts,
+            beginningBalance: restrictedBeginning,
+            currentPeriodSurplus: 0,
+            endingBalance: restrictedEnding,
+          },
+          totalNetAssets,
+        },
+        statementOfFinancialPosition: {
+          standard: 'ISAK_335',
+          currentAssets: currentAssetAccounts,
+          nonCurrentAssets: nonCurrentAssetAccounts,
+          totalCurrentAssets,
+          totalNonCurrentAssets,
+          totalAssets,
+          currentLiabilities: currentLiabilityAccounts,
+          longTermLiabilities: longTermLiabilityAccounts,
+          totalCurrentLiabilities,
+          totalLongTermLiabilities,
+          totalLiabilities,
+          netAssets: {
+            unrestricted: {
+              accounts: unrestrictedAccounts,
+              beginningBalance: unrestrictedBeginning,
+              currentPeriodSurplus: netIncome,
+              endingBalance: unrestrictedEnding,
+            },
+            restricted: {
+              accounts: restrictedAccounts,
+              beginningBalance: restrictedBeginning,
+              currentPeriodSurplus: 0,
+              endingBalance: restrictedEnding,
+            },
+            totalNetAssets,
+          },
+          totalLiabilitiesAndNetAssets,
+          isBalanced,
         },
         cashFlowStatement: {
           cashInFromCustomers,
