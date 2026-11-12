@@ -426,6 +426,152 @@ reportsRouter.get('/financial', requirePermission('report:view'), async (req, re
     const cashInFromCustomers = payments.reduce((acc, p) => acc + Number(p.netAmount), 0);
     const cashOutForExpenses = expenses.reduce((acc, e) => acc + Number(e.totalAmount), 0);
 
+    // -------------------------------------------------------------
+    // ISAK 335 DIRECT METHOD CASH FLOW STATEMENT
+    // -------------------------------------------------------------
+    const isCashAccount = (code: string) =>
+      code.startsWith('1101') || code === '110501010100' || code === '1-1110' || code === '1-1120';
+
+    const journalEntriesForCashFlow = await prisma.journalEntry.findMany({
+      where: entryWhere,
+      include: { lines: { include: { account: true } } },
+      orderBy: { entryDate: 'asc' },
+    });
+
+    let operatingInflowsFromCustomers = 0;
+    let operatingInflowsOther = 0;
+    let operatingOutflowsToSuppliers = 0;
+    let operatingOutflowsToEmployees = 0;
+    let operatingOutflowsToPettyCash = 0;
+    let operatingOutflowsTaxesAndOther = 0;
+
+    let investingInflowsDisposals = 0;
+    let investingOutflowsCapEx = 0;
+
+    let financingInflowsContributions = 0;
+    let financingOutflowsWithdrawals = 0;
+
+    for (const jrn of journalEntriesForCashFlow) {
+      const isAllCash = jrn.lines.every((l) => isCashAccount(l.accountCode));
+      if (isAllCash) continue;
+
+      const cashLines = jrn.lines.filter((l) => isCashAccount(l.accountCode));
+      const nonCashLines = jrn.lines.filter((l) => !isCashAccount(l.accountCode));
+      if (cashLines.length === 0 || nonCashLines.length === 0) continue;
+
+      const totalCashDebit = cashLines.reduce((acc, l) => acc + Number(l.debit), 0);
+      const totalCashCredit = cashLines.reduce((acc, l) => acc + Number(l.credit), 0);
+
+      if (totalCashDebit > totalCashCredit) {
+        const netInflow = totalCashDebit - totalCashCredit;
+        const hasCode = (prefix: string) => nonCashLines.some((l) => l.accountCode.startsWith(prefix));
+
+        if (hasCode('4') || hasCode('1103') || hasCode('2103')) {
+          operatingInflowsFromCustomers += netInflow;
+        } else if (hasCode('12')) {
+          investingInflowsDisposals += netInflow;
+        } else if (hasCode('3')) {
+          financingInflowsContributions += netInflow;
+        } else {
+          operatingInflowsOther += netInflow;
+        }
+      } else if (totalCashCredit > totalCashDebit) {
+        const netOutflow = totalCashCredit - totalCashDebit;
+        const hasCode = (prefix: string) =>
+          nonCashLines.some((l) => l.accountCode.startsWith(prefix) || l.accountCode === prefix);
+
+        if (hasCode('5201')) {
+          operatingOutflowsToEmployees += netOutflow;
+        } else if (hasCode('110501010100')) {
+          operatingOutflowsToPettyCash += netOutflow;
+        } else if (hasCode('2101') || hasCode('5203') || hasCode('5202') || hasCode('5209') || hasCode('5-1400')) {
+          operatingOutflowsToSuppliers += netOutflow;
+        } else if (hasCode('12')) {
+          investingOutflowsCapEx += netOutflow;
+        } else if (hasCode('3')) {
+          financingOutflowsWithdrawals += netOutflow;
+        } else {
+          operatingOutflowsTaxesAndOther += netOutflow;
+        }
+      }
+    }
+
+    const totalOperatingInflows = operatingInflowsFromCustomers + operatingInflowsOther;
+    const totalOperatingOutflows =
+      operatingOutflowsToSuppliers +
+      operatingOutflowsToEmployees +
+      operatingOutflowsToPettyCash +
+      operatingOutflowsTaxesAndOther;
+    const netOperatingCashFlow = totalOperatingInflows - totalOperatingOutflows;
+
+    const totalInvestingInflows = investingInflowsDisposals;
+    const totalInvestingOutflows = investingOutflowsCapEx;
+    const netInvestingCashFlow = totalInvestingInflows - totalInvestingOutflows;
+
+    const totalFinancingInflows = financingInflowsContributions;
+    const totalFinancingOutflows = financingOutflowsWithdrawals;
+    const netFinancingCashFlow = totalFinancingInflows - totalFinancingOutflows;
+
+    const netCashIncreaseDecrease = netOperatingCashFlow + netInvestingCashFlow + netFinancingCashFlow;
+
+    const cashAndBankAccounts = balances
+      .filter((b) => isCashAccount(b.code))
+      .map((b) => ({
+        code: b.code,
+        name: b.name,
+        balance: b.balance,
+      }));
+    const endingCashBalance = cashAndBankAccounts.reduce((acc, a) => acc + a.balance, 0);
+    const beginningCashBalance = endingCashBalance - netCashIncreaseDecrease;
+
+    const directCashFlowStatement = {
+      standard: 'ISAK_335',
+      operatingActivities: {
+        inflows: {
+          fromCustomers: operatingInflowsFromCustomers,
+          otherOperating: operatingInflowsOther,
+          totalInflows: totalOperatingInflows,
+        },
+        outflows: {
+          toSuppliers: operatingOutflowsToSuppliers,
+          toEmployees: operatingOutflowsToEmployees,
+          pettyCashDisbursements: operatingOutflowsToPettyCash,
+          taxesAndOther: operatingOutflowsTaxesAndOther,
+          totalOutflows: totalOperatingOutflows,
+        },
+        netOperatingCashFlow,
+      },
+      investingActivities: {
+        inflows: {
+          assetDisposals: totalInvestingInflows,
+          totalInflows: totalInvestingInflows,
+        },
+        outflows: {
+          capitalExpenditures: totalInvestingOutflows,
+          totalOutflows: totalInvestingOutflows,
+        },
+        netInvestingCashFlow,
+      },
+      financingActivities: {
+        inflows: {
+          capitalContributions: totalFinancingInflows,
+          totalInflows: totalFinancingInflows,
+        },
+        outflows: {
+          capitalWithdrawals: totalFinancingOutflows,
+          totalOutflows: totalFinancingOutflows,
+        },
+        netFinancingCashFlow,
+      },
+      reconciliation: {
+        netCashIncreaseDecrease,
+        beginningCashBalance,
+        endingCashBalance,
+        cashAndBankAccounts,
+        isReconciled: Math.abs(endingCashBalance - (beginningCashBalance + netCashIncreaseDecrease)) < 1,
+      },
+    };
+
     const budgetVsActualRows = budgets.flatMap((b) =>
       b.lines.map((l) => {
         const alloc = Number(l.allocatedAmount);
@@ -524,10 +670,12 @@ reportsRouter.get('/financial', requirePermission('report:view'), async (req, re
           isBalanced,
         },
         cashFlowStatement: {
-          cashInFromCustomers,
-          cashOutForExpenses,
-          netOperatingCashFlow: cashInFromCustomers - cashOutForExpenses,
+          cashInFromCustomers: directCashFlowStatement.operatingActivities.inflows.totalInflows,
+          cashOutForExpenses: directCashFlowStatement.operatingActivities.outflows.totalOutflows,
+          netOperatingCashFlow: directCashFlowStatement.operatingActivities.netOperatingCashFlow,
+          directMethod: directCashFlowStatement,
         },
+        directCashFlowStatement,
         budgetVsActualRows,
       },
       meta: { requestId: req.requestId },

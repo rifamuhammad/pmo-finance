@@ -1,7 +1,7 @@
 | id | task | status | notes |
 | --- | --- | --- | --- |
-| koi125-1 | Setup Jira Task KOI-125 linked to Epic KOI-122 & Git Branch | completed | Branch feature/KOI-125-generator-laporan-neraca-aktivitas-isak-335 aktif |
-| koi125-2 | Refactor backend query /api/v1/reports/financial for ISAK 335 Net Assets separation & Statement of Activities | completed | Pisahkan Unrestricted (31) vs Restricted (32), contra-asset deduction & Surplus/Defisit Neto |
-| koi125-3 | Refactor UI ReportsStrategyView.vue to present Laporan Posisi Keuangan & Laporan Aktivitas ISAK 335 | completed | Format Aset = Liabilitas + Aset Neto, KPI cards, dan alokasi surplus |
-| koi125-4 | Add Section 18 integration tests in apps/api/src/tests/erp.test.ts for KOI-125 ISAK 335 | completed | 60/60 Vitest integration tests passing 100% |
-| koi125-5 | Quality Gate (typecheck, tests, build), docs, commit, push & set Jira to In Review | completed | Strictly In Review (anti-Done), PR link disiapkan |
+| koi126-1 | Setup Jira Task KOI-126 linked to Epic KOI-122 & Git Branch | completed | Branch feature/KOI-126-generator-laporan-arus-kas-metode-langsung aktif |
+| koi126-2 | Backend Direct Cash Flow Engine in apps/api/src/modules/reports/routes.ts | completed | Ekstraksi mutasi kas riil: Operasi, Investasi, Pendanaan & rekonsiliasi saldo kas/bank |
+| koi126-3 | Refactor UI ReportsStrategyView.vue to present Laporan Arus Kas Metode Langsung | completed | 3 kluster arus kas, rincian penerimaan/pengeluaran, dan kartu saldo kas & bank |
+| koi126-4 | Add Section 19 integration tests in apps/api/src/tests/erp.test.ts for KOI-126 Direct Cash Flow | completed | 63/63 passing tests termasuk 3 test suite baru Section 19 |
+| koi126-5 | Quality Gate (typecheck, tests, build), docs, commit, push & set Jira to In Review | completed | Strictly In Review (anti-Done), PR link disiapkan |

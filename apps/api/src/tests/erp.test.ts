@@ -2411,4 +2411,101 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(Math.abs(sfp.totalAssets - sfp.totalLiabilitiesAndNetAssets)).toBeLessThan(1);
     });
   });
+
+  describe('19. [KOI-126] [PMO-142] Generator Laporan Arus Kas Metode Langsung (Direct Method) (3)', () => {
+    it('generates ISAK 335 Direct Method Cash Flow Statement with Operating, Investing, and Financing clusters', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/financial')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      const cfs = res.body.data.directCashFlowStatement;
+      expect(cfs).toBeDefined();
+      expect(cfs.standard).toBe('ISAK_335');
+
+      // 1. Operating Activities
+      expect(cfs.operatingActivities).toBeDefined();
+      expect(cfs.operatingActivities.inflows).toBeDefined();
+      expect(cfs.operatingActivities.inflows.totalInflows).toBe(
+        cfs.operatingActivities.inflows.fromCustomers + cfs.operatingActivities.inflows.otherOperating
+      );
+      expect(cfs.operatingActivities.outflows).toBeDefined();
+      expect(cfs.operatingActivities.outflows.totalOutflows).toBe(
+        cfs.operatingActivities.outflows.toSuppliers +
+        cfs.operatingActivities.outflows.toEmployees +
+        cfs.operatingActivities.outflows.pettyCashDisbursements +
+        cfs.operatingActivities.outflows.taxesAndOther
+      );
+      expect(cfs.operatingActivities.netOperatingCashFlow).toBe(
+        cfs.operatingActivities.inflows.totalInflows - cfs.operatingActivities.outflows.totalOutflows
+      );
+
+      // 2. Investing Activities
+      expect(cfs.investingActivities).toBeDefined();
+      expect(cfs.investingActivities.netInvestingCashFlow).toBe(
+        cfs.investingActivities.inflows.totalInflows - cfs.investingActivities.outflows.totalOutflows
+      );
+
+      // 3. Financing Activities
+      expect(cfs.financingActivities).toBeDefined();
+      expect(cfs.financingActivities.netFinancingCashFlow).toBe(
+        cfs.financingActivities.inflows.totalInflows - cfs.financingActivities.outflows.totalOutflows
+      );
+
+      // 4. Net Cash Increase/Decrease
+      const totalNetIncrease =
+        cfs.operatingActivities.netOperatingCashFlow +
+        cfs.investingActivities.netInvestingCashFlow +
+        cfs.financingActivities.netFinancingCashFlow;
+      expect(cfs.reconciliation.netCashIncreaseDecrease).toBe(totalNetIncrease);
+    });
+
+    it('verifies reconciliation of ending cash balance with physical cash and bank accounts in General Ledger', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/financial')
+        .set('Authorization', `Bearer ${accountingToken}`);
+
+      expect(res.status).toBe(200);
+      const cfs = res.body.data.directCashFlowStatement;
+      expect(cfs).toBeDefined();
+
+      const { reconciliation } = cfs;
+      expect(reconciliation).toBeDefined();
+      expect(reconciliation.isReconciled).toBe(true);
+
+      // Math equation: Ending Cash = Beginning Cash + Net Increase/Decrease
+      expect(reconciliation.endingCashBalance).toBe(
+        reconciliation.beginningCashBalance + reconciliation.netCashIncreaseDecrease
+      );
+
+      // Cash and Bank Accounts must sum to endingCashBalance
+      expect(Array.isArray(reconciliation.cashAndBankAccounts)).toBe(true);
+      const sumAccounts = reconciliation.cashAndBankAccounts.reduce(
+        (sum: number, acc: { balance: number }) => sum + acc.balance,
+        0
+      );
+      expect(reconciliation.endingCashBalance).toBe(sumAccounts);
+
+      // Legacy & Direct Compatibility
+      expect(res.body.data.cashFlowStatement).toBeDefined();
+      expect(res.body.data.cashFlowStatement.directMethod).toBeDefined();
+      expect(res.body.data.cashFlowStatement.netOperatingCashFlow).toBe(
+        cfs.operatingActivities.netOperatingCashFlow
+      );
+    });
+
+    it('filters Direct Cash Flow Statement by businessUnitId with accurate unit-level reconciliation', async () => {
+      const res = await request(app)
+        .get(`/api/v1/reports/financial?businessUnitId=${unitDiklatId}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      const cfs = res.body.data.directCashFlowStatement;
+      expect(cfs).toBeDefined();
+      expect(cfs.reconciliation.isReconciled).toBe(true);
+      expect(cfs.reconciliation.endingCashBalance).toBe(
+        cfs.reconciliation.beginningCashBalance + cfs.reconciliation.netCashIncreaseDecrease
+      );
+    });
+  });
 });

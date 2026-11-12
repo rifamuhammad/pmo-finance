@@ -305,104 +305,279 @@
           </section>
         </div>
 
-        <!-- Cash Flow Statement: Pemisahan Tegas Arus Kas Masuk (Inflow) vs Kas Keluar (Outflow) -->
+        <!-- Cash Flow Statement: Laporan Arus Kas Metode Langsung (Direct Method - ISAK 335) -->
         <section class="erp-card">
           <div class="erp-card-header">
             <div>
-              <span class="erp-badge erp-badge-demo">ARUS KAS KEUANGAN PMO</span>
+              <span class="erp-badge erp-badge-demo">ISAK 335: METODE LANGSUNG</span>
               <h3 class="erp-section-title" style="margin-top: 4px;">
-                Laporan Arus Kas (Pemisahan Pendapatan Inflow vs Pengeluaran Outflow)
+                Laporan Arus Kas (Direct Cash Flow Statement)
               </h3>
               <p class="erp-subtitle">
-                Alur keuangan kas dan bank riil yang memisahkan penerimaan operasional unit bisnis dan pengeluaran belanja/gaji/SPJ.
+                Mutasi kas dan bank riil yang diklasifikasikan ke dalam aktivitas operasi, investasi, dan pendanaan serta rekonsiliasi saldo kas buku besar.
               </p>
             </div>
             <div style="text-align: right;">
-              <span class="erp-kpi-label">SURPLUS / (DEFISIT) KAS</span>
+              <span class="erp-kpi-label">KENAIKAN / (PENURUNAN) BERSIH KAS</span>
               <strong
                 class="erp-kpi-value"
-                :style="{ color: Number(financial.cashFlowStatement.netOperatingCashFlow) >= 0 ? '#059669' : '#dc2626' }"
+                :style="{ color: Number(financial.directCashFlowStatement?.reconciliation?.netCashIncreaseDecrease ?? financial.cashFlowStatement.netOperatingCashFlow) >= 0 ? '#059669' : '#dc2626' }"
               >
-                {{ formatIdr(financial.cashFlowStatement.netOperatingCashFlow) }}
+                {{ formatIdr(financial.directCashFlowStatement?.reconciliation?.netCashIncreaseDecrease ?? financial.cashFlowStatement.netOperatingCashFlow) }}
               </strong>
             </div>
           </div>
 
-          <div class="erp-grid-2" style="padding: 16px; gap: 16px;">
-            <!-- INFLOWS -->
-            <div style="border: 1px solid #a7f3d0; border-radius: 12px; background: #f0fdf4; padding: 14px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                <h4 style="margin: 0; color: #047857; font-size: 0.95rem; font-weight: 700;">
-                  🟢 ARUS KAS MASUK (INFLOWS / PENDAPATAN)
-                </h4>
-                <span class="erp-badge erp-badge-success">PENERIMAAN KAS</span>
+          <!-- Kluster 1: Aktivitas Operasi -->
+          <div style="padding: 16px 16px 8px 16px;">
+            <div style="border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-surface); padding: 14px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <div>
+                  <h4 style="margin: 0; font-size: 0.98rem; font-weight: 700; color: var(--text-primary);">
+                    1. ARUS KAS DARI AKTIVITAS OPERASI
+                  </h4>
+                  <span style="font-size: 0.78rem; color: var(--text-secondary);">
+                    Penerimaan dari pelanggan &amp; pengeluaran operasional (pemasok, beban pegawai, UMK kas kecil)
+                  </span>
+                </div>
+                <div style="text-align: right;">
+                  <span style="font-size: 0.75rem; color: var(--text-secondary); display: block;">Arus Kas Bersih Operasi</span>
+                  <strong
+                    style="font-size: 1.05rem;"
+                    :style="{ color: Number(financial.directCashFlowStatement?.operatingActivities?.netOperatingCashFlow ?? financial.cashFlowStatement.netOperatingCashFlow) >= 0 ? '#059669' : '#dc2626' }"
+                  >
+                    {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.netOperatingCashFlow ?? financial.cashFlowStatement.netOperatingCashFlow) }}
+                  </strong>
+                </div>
               </div>
-              <table class="erp-table" style="background: transparent;">
+
+              <div class="erp-grid-2" style="gap: 16px;">
+                <!-- INFLOWS -->
+                <div style="border: 1px solid #a7f3d0; border-radius: 8px; background: #f0fdf4; padding: 12px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: #047857; font-size: 0.88rem;">🟢 ARUS KAS MASUK (INFLOWS)</strong>
+                    <span class="erp-badge erp-badge-success">OPERASIONAL</span>
+                  </div>
+                  <table class="erp-table" style="background: transparent;">
+                    <tbody>
+                      <tr>
+                        <td>Penerimaan Kas dari Pelanggan &amp; Piutang Usaha</td>
+                        <td class="num" style="font-weight: 700; color: #047857;">
+                          + {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.inflows?.fromCustomers ?? financial.cashFlowStatement.cashInFromCustomers) }}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Penerimaan Operasional Lainnya</td>
+                        <td class="num" style="font-weight: 600; color: #047857;">
+                          + {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.inflows?.otherOperating ?? 0) }}
+                        </td>
+                      </tr>
+                      <tr style="border-top: 2px solid #6ee7b7; font-weight: 800; background: #ecfdf5;">
+                        <td style="color: #065f46;">TOTAL ARUS KAS MASUK OPERASI</td>
+                        <td class="num" style="color: #047857; font-size: 0.95rem;">
+                          {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.inflows?.totalInflows ?? financial.cashFlowStatement.cashInFromCustomers) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- OUTFLOWS -->
+                <div style="border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; padding: 12px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: #b91c1c; font-size: 0.88rem;">🔴 ARUS KAS KELUAR (OUTFLOWS)</strong>
+                    <span class="erp-badge erp-badge-warning">OPERASIONAL</span>
+                  </div>
+                  <table class="erp-table" style="background: transparent;">
+                    <tbody>
+                      <tr>
+                        <td>Pembayaran kepada Pemasok &amp; Pengadaan Vendor</td>
+                        <td class="num" style="font-weight: 600; color: #b91c1c;">
+                          - {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.outflows?.toSuppliers ?? financial.cashFlowStatement.cashOutForExpenses) }}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Pembayaran Beban Pegawai &amp; Payroll SDM</td>
+                        <td class="num" style="font-weight: 600; color: #b91c1c;">
+                          - {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.outflows?.toEmployees ?? 0) }}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Penyaluran Uang Muka Kerja (UMK) / Kas Kecil Unit</td>
+                        <td class="num" style="font-weight: 600; color: #b91c1c;">
+                          - {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.outflows?.pettyCashDisbursements ?? 0) }}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Pembayaran Pajak &amp; Beban Operasional Lain</td>
+                        <td class="num" style="font-weight: 600; color: #b91c1c;">
+                          - {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.outflows?.taxesAndOther ?? 0) }}
+                        </td>
+                      </tr>
+                      <tr style="border-top: 2px solid #fca5a5; font-weight: 800; background: #fff1f2;">
+                        <td style="color: #991b1b;">TOTAL ARUS KAS KELUAR OPERASI</td>
+                        <td class="num" style="color: #b91c1c; font-size: 0.95rem;">
+                          - {{ formatIdr(financial.directCashFlowStatement?.operatingActivities?.outflows?.totalOutflows ?? financial.cashFlowStatement.cashOutForExpenses) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kluster 2 & 3: Aktivitas Investasi & Pendanaan -->
+          <div class="erp-grid-2" style="padding: 8px 16px 8px 16px; gap: 16px;">
+            <!-- INVESTING -->
+            <div style="border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-surface); padding: 14px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                <h4 style="margin: 0; font-size: 0.92rem; font-weight: 700; color: var(--text-primary);">
+                  2. AKTIVITAS INVESTASI
+                </h4>
+                <strong
+                  style="font-size: 0.95rem;"
+                  :style="{ color: Number(financial.directCashFlowStatement?.investingActivities?.netInvestingCashFlow || 0) >= 0 ? '#059669' : '#dc2626' }"
+                >
+                  {{ formatIdr(financial.directCashFlowStatement?.investingActivities?.netInvestingCashFlow || 0) }}
+                </strong>
+              </div>
+              <table class="erp-table">
                 <tbody>
                   <tr>
-                    <td>Penerimaan Pembayaran Faktur Klien MICE, TCI &amp; IT</td>
-                    <td class="num" style="font-weight: 700; color: #047857;">
-                      + {{ formatIdr(financial.cashFlowStatement.cashInFromCustomers) }}
+                    <td>Penerimaan Penjualan / Pelepasan Aset Tetap</td>
+                    <td class="num" style="color: #047857; font-weight: 600;">
+                      + {{ formatIdr(financial.directCashFlowStatement?.investingActivities?.inflows?.assetDisposals || 0) }}
                     </td>
                   </tr>
                   <tr>
-                    <td>Penerimaan Kasir POS, Klinik Pratama &amp; Retail</td>
-                    <td class="num" style="font-weight: 600; color: #047857;">
-                      + {{ formatIdr(Math.round(Number(financial.cashFlowStatement.cashInFromCustomers) * 0.15)) }}
+                    <td>Pengeluaran Perolehan Aset Tetap (CapEx)</td>
+                    <td class="num" style="color: #b91c1c; font-weight: 600;">
+                      - {{ formatIdr(financial.directCashFlowStatement?.investingActivities?.outflows?.capitalExpenditures || 0) }}
                     </td>
                   </tr>
-                  <tr>
-                    <td>Penerimaan Lain-Lain &amp; Service Charge MICE Terbayar</td>
-                    <td class="num" style="font-weight: 600; color: #047857;">
-                      + {{ formatIdr(Math.round(Number(financial.cashFlowStatement.cashInFromCustomers) * 0.08)) }}
-                    </td>
-                  </tr>
-                  <tr style="border-top: 2px solid #6ee7b7; font-weight: 800; background: #ecfdf5;">
-                    <td style="color: #065f46;">TOTAL PENERIMAAN KAS BERJALAN</td>
-                    <td class="num" style="color: #047857; font-size: 1rem;">
-                      {{ formatIdr(Math.round(Number(financial.cashFlowStatement.cashInFromCustomers) * 1.23)) }}
+                  <tr style="border-top: 1px solid var(--border-color); font-weight: 700; background: var(--bg-surface-muted);">
+                    <td>Arus Kas Bersih Aktivitas Investasi</td>
+                    <td class="num">
+                      {{ formatIdr(financial.directCashFlowStatement?.investingActivities?.netInvestingCashFlow || 0) }}
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
 
-            <!-- OUTFLOWS -->
-            <div style="border: 1px solid #fecaca; border-radius: 12px; background: #fef2f2; padding: 14px;">
+            <!-- FINANCING -->
+            <div style="border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-surface); padding: 14px;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                <h4 style="margin: 0; color: #b91c1c; font-size: 0.95rem; font-weight: 700;">
-                  🔴 ARUS KAS KELUAR (OUTFLOWS / PENGELUARAN)
+                <h4 style="margin: 0; font-size: 0.92rem; font-weight: 700; color: var(--text-primary);">
+                  3. AKTIVITAS PENDANAAN
                 </h4>
-                <span class="erp-badge erp-badge-warning">PENGELUARAN KAS</span>
+                <strong
+                  style="font-size: 0.95rem;"
+                  :style="{ color: Number(financial.directCashFlowStatement?.financingActivities?.netFinancingCashFlow || 0) >= 0 ? '#059669' : '#dc2626' }"
+                >
+                  {{ formatIdr(financial.directCashFlowStatement?.financingActivities?.netFinancingCashFlow || 0) }}
+                </strong>
               </div>
-              <table class="erp-table" style="background: transparent;">
+              <table class="erp-table">
                 <tbody>
                   <tr>
-                    <td>Pembayaran Pengadaan Vendor &amp; Kontrak PO</td>
-                    <td class="num" style="font-weight: 700; color: #b91c1c;">
-                      - {{ formatIdr(Math.round(Number(financial.cashFlowStatement.cashOutForExpenses) * 0.55)) }}
+                    <td>Penerimaan Setoran Modal / RKAP / DIPA</td>
+                    <td class="num" style="color: #047857; font-weight: 600;">
+                      + {{ formatIdr(financial.directCashFlowStatement?.financingActivities?.inflows?.capitalContributions || 0) }}
                     </td>
                   </tr>
                   <tr>
-                    <td>Reimbursement Uang Persediaan (GUP &amp; SPJ Operasional)</td>
-                    <td class="num" style="font-weight: 600; color: #b91c1c;">
-                      - {{ formatIdr(Math.round(Number(financial.cashFlowStatement.cashOutForExpenses) * 0.25)) }}
+                    <td>Penarikan Modal / Dividen / Prive</td>
+                    <td class="num" style="color: #b91c1c; font-weight: 600;">
+                      - {{ formatIdr(financial.directCashFlowStatement?.financingActivities?.outflows?.capitalWithdrawals || 0) }}
                     </td>
                   </tr>
-                  <tr>
-                    <td>Beban Gaji &amp; Payroll Pegawai SDM PMO UTama</td>
-                    <td class="num" style="font-weight: 600; color: #b91c1c;">
-                      - {{ formatIdr(Math.round(Number(financial.cashFlowStatement.cashOutForExpenses) * 0.20)) }}
-                    </td>
-                  </tr>
-                  <tr style="border-top: 2px solid #fca5a5; font-weight: 800; background: #fff1f2;">
-                    <td style="color: #991b1b;">TOTAL PENGELUARAN KAS BERJALAN</td>
-                    <td class="num" style="color: #b91c1c; font-size: 1rem;">
-                      - {{ formatIdr(financial.cashFlowStatement.cashOutForExpenses) }}
+                  <tr style="border-top: 1px solid var(--border-color); font-weight: 700; background: var(--bg-surface-muted);">
+                    <td>Arus Kas Bersih Aktivitas Pendanaan</td>
+                    <td class="num">
+                      {{ formatIdr(financial.directCashFlowStatement?.financingActivities?.netFinancingCashFlow || 0) }}
                     </td>
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          <!-- Kluster 4: Rekonsiliasi Saldo Kas & Bank -->
+          <div style="padding: 8px 16px 16px 16px;">
+            <div style="border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; padding: 14px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                <div>
+                  <h4 style="margin: 0; color: #1d4ed8; font-size: 0.95rem; font-weight: 700;">
+                    4. REKONSILIASI SALDO KAS &amp; SETARA KAS
+                  </h4>
+                  <span style="font-size: 0.78rem; color: var(--text-secondary);">
+                    Kesesuaian kenaikan/penurunan bersih terhadap saldo buku besar Kas &amp; Bank
+                  </span>
+                </div>
+                <div>
+                  <span
+                    v-if="financial.directCashFlowStatement?.reconciliation?.isReconciled"
+                    class="erp-badge erp-badge-success"
+                  >
+                    ✓ REKONSILIASI COCOK (0 SELISIH)
+                  </span>
+                  <span v-else class="erp-badge erp-badge-warning">
+                    PERIKSA JURNAL KAS
+                  </span>
+                </div>
+              </div>
+
+              <div class="erp-grid-3" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;">
+                <div style="background: white; border-radius: 8px; padding: 10px; border: 1px solid #dbeafe;">
+                  <span style="font-size: 0.75rem; color: var(--text-secondary); display: block;">Saldo Awal Kas &amp; Bank</span>
+                  <strong style="font-size: 1rem; color: var(--text-primary);">
+                    {{ formatIdr(financial.directCashFlowStatement?.reconciliation?.beginningCashBalance || 0) }}
+                  </strong>
+                </div>
+                <div style="background: white; border-radius: 8px; padding: 10px; border: 1px solid #dbeafe;">
+                  <span style="font-size: 0.75rem; color: var(--text-secondary); display: block;">Kenaikan / (Penurunan) Bersih</span>
+                  <strong
+                    style="font-size: 1rem;"
+                    :style="{ color: Number(financial.directCashFlowStatement?.reconciliation?.netCashIncreaseDecrease || 0) >= 0 ? '#059669' : '#dc2626' }"
+                  >
+                    {{ formatIdr(financial.directCashFlowStatement?.reconciliation?.netCashIncreaseDecrease || 0) }}
+                  </strong>
+                </div>
+                <div style="background: white; border-radius: 8px; padding: 10px; border: 1px solid #dbeafe;">
+                  <span style="font-size: 0.75rem; color: var(--text-secondary); display: block;">Saldo Akhir Kas &amp; Bank</span>
+                  <strong style="font-size: 1rem; color: #1d4ed8;">
+                    {{ formatIdr(financial.directCashFlowStatement?.reconciliation?.endingCashBalance || 0) }}
+                  </strong>
+                </div>
+              </div>
+
+              <!-- Breakdown Physical Cash & Bank Accounts -->
+              <div v-if="financial.directCashFlowStatement?.reconciliation?.cashAndBankAccounts?.length">
+                <span style="font-size: 0.78rem; font-weight: 700; color: #1e40af; margin-bottom: 6px; display: block;">
+                  Rincian Rekening Kas &amp; Bank di Buku Besar:
+                </span>
+                <table class="erp-table" style="background: white; border-radius: 8px; overflow: hidden;">
+                  <thead>
+                    <tr>
+                      <th style="width: 140px;">Kode Akun</th>
+                      <th>Nama Akun Rekening</th>
+                      <th class="num" style="width: 180px;">Saldo Akhir</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="acc in financial.directCashFlowStatement.reconciliation.cashAndBankAccounts"
+                      :key="acc.code"
+                    >
+                      <td style="font-family: monospace; font-size: 0.8rem;">{{ acc.code }}</td>
+                      <td>{{ acc.name }}</td>
+                      <td class="num" style="font-weight: 600;">{{ formatIdr(acc.balance) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
