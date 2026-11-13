@@ -200,6 +200,7 @@ gantt
 ---
 
 ### SPRINT 6: Enterprise Tools, Omnisearch, AI Assistant & Ekspor PBI
+* **Parent Epic Jira:** `KOI-129` (`[SPRINT 6] Enterprise Tools, Omnisearch, AI Assistant & Ekspor PBI`)
 * **Periode:** Senin, 18 Jan 2027 – Selasa, 26 Jan 2027
 * **Sasaran Sprint:** Kompatibilitas data ke universitas pusat (format 60 kolom), pencarian instan omnibar, AI assistant keuangan, dan forensic audit trail.
 
@@ -209,7 +210,7 @@ gantt
 | **`PMO-171`** | `KOI-131` | Perekaman Otomatis Mutasi Data & Jejak Audit (Forensic Audit Trail) | **Sedang** | 2 Hari | Rab, 20 Jan 2027 | Kam, 21 Jan 2027 | **High** | `In Review` |
 | **`PMO-181`** | `KOI-132` | Navigasi Cepat, Omnisearch Cmd+K & App Launcher Modal | **Sedang** | 2 Hari | Jum, 22 Jan 2027 | Sen, 25 Jan 2027 | **Medium** | `In Review` |
 | **`PMO-182`** | `KOI-133` | Widget Asisten Keuangan AI Terintegrasi (Context-Aware Financial AI) | **Sedang** | 2 Hari | Sen, 25 Jan 2027 | Sel, 26 Jan 2027 | **Medium** | `In Review` |
-| **`SPRINT-6-REV`**| - | Sprint 6 Review & Kesiapan UAT Lintas Modul | **Review** | 1 Hari | Sel, 26 Jan 2027 | Sel, 26 Jan 2027 | **High** | `To Do` |
+| **`SPRINT-6-REV`**| `KOI-134` | Sprint 6 Review & Kesiapan UAT Lintas Modul | **Review** | 1 Hari | Sel, 26 Jan 2027 | Sel, 26 Jan 2027 | **High** | `In Review` |
 
 ---
 

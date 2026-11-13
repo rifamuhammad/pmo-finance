@@ -1,8 +1,7 @@
 | id | task | status | notes |
 | --- | --- | --- | --- |
-| koi133-1 | Setup Jira Task KOI-133 linked to Epic KOI-129 & Git Branch | completed | Branch feature/KOI-133-widget-asisten-keuangan-ai-terintegrasi aktif, Jira KOI-133 In Progress |
-| koi133-2 | Enhance Context-Aware Financial AI engine in apps/api/src/shared/qwen.ts & reports/routes.ts | completed | Added GET /reports/ai-assistant/context & enriched POST /reports/ai-assistant with PBI Semula-Menjadi, RGA, ISAK 335/GL, Petty Cash & Cut-off rules |
-| koi133-3 | Upgrade AiAssistantWidget.vue in apps/web with live context snapshot & quick prompts | completed | Connected live context API, real-time financial KPIs in copilot drawer & 6 categorized quick prompts |
-| koi133-4 | Add Section 25 automated integration tests in erp.test.ts | completed | 81/81 passing tests termasuk 3 test baru Section 25 |
-| koi133-5 | Full Quality Gate verification (npm test, typecheck, build) | completed | 81/81 passing, 0 type errors, clean Vite build (6.95s) & API build |
-| koi133-6 | Technical documentation, task index, commit, push, transition KOI-133 to In Review | completed | Strict anti-Done rule enforced, Jira KOI-133 In Review |
+| koi134-1 | Setup Jira Task KOI-134 linked to Epic KOI-129 & Git Branch | completed | Branch feature/KOI-134-sprint-6-review-kesiapan-uat-lintas-modul aktif, Jira KOI-134 In Progress |
+| koi134-2 | Add Sprint 6 UAT Readiness Audit endpoint (/reports/sprint6-readiness) in apps/api/src/modules/reports/routes.ts | completed | Audited PBI 60-col export, Forensic Audit Trail, 8-domain Omnisearch, Context-Aware AI & 5-unit GL balance |
+| koi134-3 | Add Section 26 Sprint 6 Review & UAT Readiness integration tests in erp.test.ts | completed | Added 3 end-to-end integration tests in Section 26 |
+| koi134-4 | Full Quality Gate verification (npm test, typecheck, build) | completed | 84/84 integration tests passing, 0 typecheck errors, clean production build |
+| koi134-5 | Technical documentation, task index, commit, push, transition KOI-134 & Epic KOI-129 to In Review | completed | Strict anti-Done rule enforced (KOI-134 and Epic KOI-129 in In Review) |

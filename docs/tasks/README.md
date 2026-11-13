@@ -38,6 +38,7 @@ Direktori ini memuat dokumentasi terisolasi per task/tiket Jira. Setiap tiket di
 | `KOI-131` | [PMO-171] Perekaman Otomatis Mutasi Data & Jejak Audit (Forensic Audit Trail) | `feature/KOI-131-perekaman-otomatis-mutasi-data-jejak-audit-forensik` | `In Review` | [KOI-131-perekaman-otomatis-mutasi-data-jejak-audit-forensik.md](./KOI-131-perekaman-otomatis-mutasi-data-jejak-audit-forensik.md) |
 | `KOI-132` | [PMO-181] Navigasi Cepat, Omnisearch Cmd+K & App Launcher Modal | `feature/KOI-132-navigasi-cepat-omnisearch-cmd-k-app-launcher` | `In Review` | [KOI-132-navigasi-cepat-omnisearch-cmd-k-app-launcher.md](./KOI-132-navigasi-cepat-omnisearch-cmd-k-app-launcher.md) |
 | `KOI-133` | [PMO-182] Widget Asisten Keuangan AI Terintegrasi (Context-Aware Financial AI) | `feature/KOI-133-widget-asisten-keuangan-ai-terintegrasi` | `In Review` | [KOI-133-widget-asisten-keuangan-ai-terintegrasi.md](./KOI-133-widget-asisten-keuangan-ai-terintegrasi.md) |
+| `KOI-134` | [SPRINT-6-REV] Sprint 6 Review & Kesiapan UAT Lintas Modul | `feature/KOI-134-sprint-6-review-kesiapan-uat-lintas-modul` | `In Review` | [KOI-134-sprint-6-review-kesiapan-uat-lintas-modul.md](./KOI-134-sprint-6-review-kesiapan-uat-lintas-modul.md) |
 
 ---
 

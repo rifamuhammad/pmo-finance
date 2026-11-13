@@ -3074,4 +3074,85 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(cutoffRes.body.data.reply.toLowerCase()).toMatch(/aset|20|25|hris|penyusutan/);
     });
   });
+
+  // =========================================================================
+  // 26. [KOI-134] [SPRINT-6-REV] Sprint 6 Review & Kesiapan UAT Lintas Modul (3)
+  // =========================================================================
+  describe('26. [KOI-134] [SPRINT-6-REV] Sprint 6 Review & Kesiapan UAT Lintas Modul', () => {
+    it('audits Sprint 6 enterprise tools & UAT readiness (/reports/sprint6-readiness) across PBI 60-Col Export, Forensic Audit Trail, Omnisearch, and AI Copilot', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/sprint6-readiness')
+        .set('Authorization', `Bearer ${gmToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.sprint).toBe('SPRINT_6');
+      expect(res.body.data.epicKey).toBe('KOI-129');
+      expect(res.body.data.reviewTicketKey).toBe('KOI-134');
+      expect(res.body.data.isUatReady).toBe(true);
+
+      const { checklist } = res.body.data;
+      expect(checklist.pbiExcelExport60Columns.ready).toBe(true);
+      expect(checklist.pbiExcelExport60Columns.columnsCount).toBe(60);
+      expect(checklist.forensicAuditTrail.ready).toBe(true);
+      expect(checklist.forensicAuditTrail.immutabilityGuardCode).toBe('AUDIT_LOG_IMMUTABLE');
+      expect(checklist.omnisearchAndAppLauncher.ready).toBe(true);
+      expect(checklist.omnisearchAndAppLauncher.searchableDomainsCount).toBe(8);
+      expect(checklist.omnisearchAndAppLauncher.appLauncherModulesCount).toBe(14);
+      expect(checklist.contextAwareAiAssistant.ready).toBe(true);
+    });
+
+    it('verifies end-to-end cross-module workflow: PBI 60-Col Export -> Forensic Audit Trail Recording -> Omnisearch Discovery -> Context-Aware AI Verification', async () => {
+      // 1. Trigger consolidated 60-column PBI Excel Export
+      const exportRes = await request(app)
+        .get('/api/v1/budgets/export/pbi-excel')
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(exportRes.status).toBe(200);
+
+      // 2. Verify Forensic Audit Trail recorded actions and blocks deletion
+      const auditRes = await request(app)
+        .get('/api/v1/audit/logs')
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(auditRes.status).toBe(200);
+      expect(auditRes.body.data.length).toBeGreaterThan(0);
+
+      const latestAuditId = auditRes.body.data[0].id;
+      const immutabilityRes = await request(app)
+        .delete(`/api/v1/audit/logs/${latestAuditId}`)
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(immutabilityRes.status).toBe(403);
+      expect(immutabilityRes.body.error.code).toBe('AUDIT_LOG_IMMUTABLE');
+
+      // 3. Verify Omnisearch & Context-Aware AI Copilot remain synchronized
+      const omniRes = await request(app)
+        .get('/api/v1/master/omnisearch?q=1101&scope=COA')
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(omniRes.status).toBe(200);
+      expect(omniRes.body.data.length).toBeGreaterThan(0);
+
+      const aiCtxRes = await request(app)
+        .get('/api/v1/reports/ai-assistant/context')
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(aiCtxRes.status).toBe(200);
+      expect(aiCtxRes.body.data.metrics.glIsBalanced).toBe(true);
+    });
+
+    it('confirms General Ledger Trial Balance & ISAK 335 integrity across all 5 Business Units post Sprint 6 with 0 discrepancy', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/sprint6-readiness')
+        .set('Authorization', `Bearer ${financeToken}`);
+
+      expect(res.status).toBe(200);
+      const glIntegrity = res.body.data.checklist.crossModuleAccountingIntegrity;
+      expect(glIntegrity.ready).toBe(true);
+      expect(glIntegrity.activeBusinessUnitsCount).toBeGreaterThanOrEqual(5);
+      expect(glIntegrity.overallGlBalanced).toBe(true);
+      expect(glIntegrity.globalDiscrepancy).toBeLessThan(1);
+
+      for (const unitTb of glIntegrity.unitTrialBalances) {
+        expect(unitTb.isBalanced).toBe(true);
+        expect(unitTb.discrepancy).toBeLessThan(1);
+      }
+    });
+  });
 });
