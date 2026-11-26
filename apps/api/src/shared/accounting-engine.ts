@@ -26,6 +26,49 @@ export interface CreateJournalInput {
   lines: JournalLineInput[];
 }
 
+export async function resolveOpenFiscalPeriodForDate(
+  tx: Prisma.TransactionClient | typeof prisma,
+  targetDate: Date = new Date()
+) {
+  const openPeriods = await tx.fiscalPeriod.findMany({
+    where: { isClosed: false, status: 'OPEN' },
+    orderBy: { startDate: 'desc' },
+  });
+  if (openPeriods.length === 0) {
+    return tx.fiscalPeriod.findFirst({
+      where: { isClosed: false },
+      orderBy: { startDate: 'desc' },
+    });
+  }
+
+  const targetMs = targetDate.getTime();
+  // 1. Prefer an OPEN period covering targetDate, choosing the narrowest range (monthly FP-YYYY-MM over annual FY-YYYY)
+  const covering = openPeriods
+    .filter((p) => p.startDate.getTime() <= targetMs && p.endDate.getTime() >= targetMs)
+    .sort((a, b) => (a.endDate.getTime() - a.startDate.getTime()) - (b.endDate.getTime() - b.startDate.getTime()));
+  if (covering.length > 0) return covering[0];
+
+  // 2. Prefer an OPEN monthly period (FP-*) in the same calendar year as targetDate
+  const targetYear = targetDate.getUTCFullYear();
+  const sameYearMonthly = openPeriods.find(
+    (p) => p.code.startsWith('FP-') && p.startDate.getUTCFullYear() === targetYear
+  );
+  if (sameYearMonthly) return sameYearMonthly;
+
+  // 3. Fallback to the latest OPEN monthly period (FP-*) already started, else latest OPEN period covering now
+  const nowMs = Date.now();
+  const activeMonthly = openPeriods.find((p) => p.code.startsWith('FP-') && p.startDate.getTime() <= nowMs);
+  if (activeMonthly) return activeMonthly;
+
+  const anyMonthly = openPeriods.find((p) => p.code.startsWith('FP-'));
+  if (anyMonthly) return anyMonthly;
+
+  const coveringNow = openPeriods
+    .filter((p) => p.startDate.getTime() <= nowMs && p.endDate.getTime() >= nowMs)
+    .sort((a, b) => (a.endDate.getTime() - a.startDate.getTime()) - (b.endDate.getTime() - b.startDate.getTime()));
+  return coveringNow[0] || openPeriods[0];
+}
+
 export async function createOrGetBalancedJournal(
   input: CreateJournalInput,
   tx: Prisma.TransactionClient | typeof prisma = prisma
@@ -70,13 +113,10 @@ export async function createOrGetBalancedJournal(
     );
   }
 
-  // Resolve fiscal period
+  // Resolve fiscal period matching entryDate (prefers monthly FP-* over annual FY-*)
   let period = input.fiscalPeriodId
     ? await tx.fiscalPeriod.findUnique({ where: { id: input.fiscalPeriodId } })
-    : await tx.fiscalPeriod.findFirst({
-        where: { isClosed: false },
-        orderBy: { startDate: 'desc' },
-      });
+    : await resolveOpenFiscalPeriodForDate(tx, input.entryDate);
 
   if (!period) {
     throw new AppError(400, 'NO_OPEN_FISCAL_PERIOD', 'Tidak ditemukan periode fiskal aktif untuk memposting jurnal.');
@@ -98,8 +138,22 @@ export async function createOrGetBalancedJournal(
     );
   }
 
-  const count = await tx.journalEntry.count();
-  const journalNumber = `JRN-${period.code}-${String(count + 1).padStart(4, '0')}`;
+  const jPrefix = `JRN-${period.code}-`;
+  const existingJournals = await tx.journalEntry.findMany({
+    where: { journalNumber: { startsWith: jPrefix } },
+    select: { journalNumber: true },
+  });
+  let maxSeq = existingJournals.length;
+  for (const row of existingJournals) {
+    const num = parseInt(row.journalNumber.slice(jPrefix.length), 10);
+    if (!Number.isNaN(num) && num > maxSeq) maxSeq = num;
+  }
+  let seq = maxSeq + 1;
+  let journalNumber = `${jPrefix}${String(seq).padStart(4, '0')}`;
+  while (await tx.journalEntry.findUnique({ where: { journalNumber }, select: { id: true } })) {
+    seq++;
+    journalNumber = `${jPrefix}${String(seq).padStart(4, '0')}`;
+  }
   const shouldPost = input.autoPost !== false;
 
   const created = await tx.journalEntry.create({

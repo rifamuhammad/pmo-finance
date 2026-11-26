@@ -224,6 +224,7 @@ async function main() {
         'revenue:view',
         'revenue:create',
         'payment:view',
+        'payment:create',
         'report:view',
       ],
     },
@@ -273,8 +274,26 @@ async function main() {
         'procurement:view',
         'expense:view',
         'revenue:view',
+        'payment:view',
         'accounting:view',
         'accounting:manage',
+        'report:view',
+        'report:export',
+      ],
+    },
+    {
+      code: 'REVENUE_OPERATOR',
+      name: 'Operator Penerimaan (Staf PIC Penerimaan)',
+      description: 'Operator harian Modul Penerimaan lintas 4 unit bisnis (MICE, Klinik, IT Solution, TCI): input Buku Harian (Kwitansi, Tanda Terima, Invoice), unggah bukti, pengingat approval ke Manajer Keuangan, rekonsiliasi Bank Mandiri, pembukuan BKU/Pajak, dan laporan penerimaan. Tidak berwenang menyetujui (approve) atau mengakses modul pengeluaran.',
+      approvalLimit: '0.00',
+      permissions: [
+        'dashboard:view',
+        'revenue:view',
+        'revenue:create',
+        'payment:view',
+        'payment:create',
+        'reconciliation:view',
+        'reconciliation:manage',
         'report:view',
         'report:export',
       ],
@@ -287,6 +306,7 @@ async function main() {
       permissions: [
         'dashboard:view',
         'revenue:view',
+        'revenue:create',
         'payment:view',
         'payment:create',
         'cashier:view',
@@ -527,6 +547,14 @@ async function main() {
       isDemoData: true,
     },
     {
+      email: 'penerimaan@pmoutama.demo.id',
+      fullName: 'Rina Kartika (Operator Penerimaan)',
+      passwordHash: defaultPassHash,
+      roleCode: 'REVENUE_OPERATOR',
+      businessUnitId: null,
+      isDemoData: true,
+    },
+    {
       email: 'kasir@pmoutama.demo.id',
       fullName: 'Dimas Aditya (Petugas Kasir)',
       passwordHash: defaultPassHash,
@@ -678,25 +706,25 @@ async function main() {
       {
         transactionType: 'OFFICIAL_INVOICE_ISSUED',
         description: 'Pengakuan piutang komersial dan pendapatan unit bisnis resmi',
-        debitAccountCode: '110301010100',
+        debitAccountCode: '110302030100',
         creditAccountCode: '420301010200',
       },
       {
         transactionType: 'OFFICIAL_PAYMENT_RECEIVED',
-        description: 'Penerimaan kas bank operasional atas pelunasan piutang komersial resmi',
-        debitAccountCode: '110101020100',
-        creditAccountCode: '110301010100',
+        description: 'Penerimaan Bank Mandiri atas pelunasan piutang komersial resmi',
+        debitAccountCode: '110102010100',
+        creditAccountCode: '110302030100',
       },
       {
         transactionType: 'OFFICIAL_EXPENSE_PAID',
-        description: 'Pencairan beban operasional riil dari rekening bank operasional resmi',
+        description: 'Pencairan beban operasional riil dari rekening Bank Pengeluaran PMO',
         debitAccountCode: '520201010100',
-        creditAccountCode: '110101020100',
+        creditAccountCode: '110102010300',
       },
       {
         transactionType: 'OFFICIAL_CASHIER_DEPOSIT',
-        description: 'Setoran fisik uang kasir unit ke rekening bank operasional resmi',
-        debitAccountCode: '110101020100',
+        description: 'Setoran fisik uang kasir unit ke rekening Bank Mandiri Penerimaan',
+        debitAccountCode: '110102010100',
         creditAccountCode: '110101010100',
       },
       // Pemetaan Legacy (untuk kelangsungan modul yang belum dimigrasi)
@@ -902,7 +930,7 @@ async function main() {
         unitPrice: '45000000.00',
         unit: 'Event',
         taxCode: 'PB1-10',
-        revenueAccountCode: '420301070202', // Pendapatan Sewa Ballroom & Gedung UTCC
+        revenueAccountCode: '420301070200', // Pendapatan Sewa Gedung dan Bangunan
       },
       {
         sku: 'SRV-MICE-002',
@@ -912,7 +940,7 @@ async function main() {
         unitPrice: '650000.00',
         unit: 'Malam',
         taxCode: 'PB1-10',
-        revenueAccountCode: '420301070201', // Pendapatan Sewa Kamar Wisma UT
+        revenueAccountCode: '420301070200', // Pendapatan Sewa Gedung dan Bangunan
       },
       {
         sku: 'SRV-ITS-001',
@@ -922,7 +950,7 @@ async function main() {
         unitPrice: '60000000.00',
         unit: 'Tahun',
         taxCode: 'PPN-11',
-        revenueAccountCode: '420301040100', // Pendapatan Layanan Hosting & Cloud Service
+        revenueAccountCode: '420301040200', // Pendapatan Jasa Teknologi Informasi Bidang Nonakademik
       },
       {
         sku: 'SRV-KLN-001',
@@ -932,7 +960,7 @@ async function main() {
         unitPrice: '1250000.00',
         unit: 'Orang',
         taxCode: 'BEBAS',
-        revenueAccountCode: '420301060400', // Pendapatan Tindakan Medis & Keperawatan
+        revenueAccountCode: '420301069900', // Pendapatan Jasa Poliklinik Lainnya
       },
       {
         sku: 'SRV-KLN-002',
@@ -947,34 +975,25 @@ async function main() {
     ],
   });
 
-  // 11. Bank Accounts & Cash Registers
+  // 11. Bank Accounts & Cash Registers (2 Rekening Resmi: Mandiri Penerimaan & BTN Pengeluaran)
   await prisma.bankAccount.createMany({
     data: [
       {
         code: 'BNK-MDR-01',
-        bankName: 'Bank Mandiri (Persero) Tbk - Kantor Kas UT',
-        accountNumberMasked: '124-00-****-8891',
+        bankName: 'Bank Mandiri (Final) - Penerimaan Usaha Non Akademik',
+        accountNumberMasked: '164-00-2022-999-5',
+        accountHolder: 'PTNBH UT .USAHA NON AKADEMIK',
+        businessUnitId: unitPusat.id,
+        glAccountCode: '110102010100',
+        currentBalance: '0.00',
+      },
+      {
+        code: 'BNK-BTN-01',
+        bankName: 'Bank BTN (Persero) Tbk - Rekening Pengeluaran PMO',
+        accountNumberMasked: '000-41-****-2209',
         accountHolder: 'PMO UTama - Rekening Operasional & Pengeluaran',
         businessUnitId: unitPusat.id,
-        glAccountCode: '110101020100',
-        currentBalance: '0.00',
-      },
-      {
-        code: 'BNK-BRI-01',
-        bankName: 'Bank BRI (Persero) Tbk - Kantor Kas UT',
-        accountNumberMasked: '088-41-****-2209',
-        accountHolder: 'PMO UTama - Rekening Penerimaan Komersial Unit',
-        businessUnitId: unitPusat.id,
-        glAccountCode: '110101020200',
-        currentBalance: '0.00',
-      },
-      {
-        code: 'BNK-BNI-01',
-        bankName: 'Bank BNI - Cabang Kampus Utama (Legacy)',
-        accountNumberMasked: '088-41-****-2209',
-        accountHolder: 'PMO UTama - Penerimaan Layanan (Legacy)',
-        businessUnitId: unitTci.id,
-        glAccountCode: '1-1130',
+        glAccountCode: '110102010300',
         currentBalance: '0.00',
       },
     ],

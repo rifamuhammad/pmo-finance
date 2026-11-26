@@ -82,6 +82,48 @@ export async function downloadCsvReport(type: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+export async function downloadApiBlob(path: string, fallbackFileName: string): Promise<void> {
+  const token = localStorage.getItem('pmo_erp_token');
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    const json = await response.json().catch(() => null);
+    throw new Error(json?.error?.message || 'Gagal mengunduh file ekspor.');
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  const cd = response.headers.get('content-disposition');
+  const match = cd?.match(/filename="?([^"]+)"?/i);
+  link.download = match?.[1] || fallbackFileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+export async function fetchApiBlob(path: string): Promise<{ blob: Blob; contentType: string; fileName: string }> {
+  const token = localStorage.getItem('pmo_erp_token');
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    const json = await response.json().catch(() => null);
+    throw new Error(json?.error?.message || 'Gagal memuat file lampiran.');
+  }
+
+  const blob = await response.blob();
+  const contentType = response.headers.get('content-type') || blob.type || 'application/octet-stream';
+  const cd = response.headers.get('content-disposition');
+  const match = cd?.match(/filename="?([^"]+)"?/i);
+  return { blob, contentType, fileName: match?.[1] || 'bukti-pembayaran' };
+}
+
 export async function downloadPbiExcel(budgetId?: string, docNumber?: string): Promise<void> {
   const token = localStorage.getItem('pmo_erp_token');
   const path = budgetId

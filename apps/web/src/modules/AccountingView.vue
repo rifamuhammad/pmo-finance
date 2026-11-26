@@ -1035,7 +1035,7 @@ const journalForm = ref({
   description: '',
   lines: [
     { accountCode: '520101030100', description: 'Belanja Pegawai Tidak Tetap (Gaji PUT PK)', debit: 1500000, credit: 0 },
-    { accountCode: '110101020200', description: 'Bank BRI Penerimaan Komersial PMO', debit: 0, credit: 1500000 },
+    { accountCode: '110102010300', description: 'Rekening Giro Bank Pengeluaran Operasional PMO', debit: 0, credit: 1500000 },
   ],
 });
 

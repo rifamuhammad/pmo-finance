@@ -647,6 +647,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
   describe('4. Customer Order, Invoice, Idempotent Payment, Webhook, Refund & Cashier Closeout', () => {
     let customerId = '';
     let productId = '';
+    let originalProductPrice: number | null = null;
     let salesOrderId = '';
     let invoiceId = '';
     let paymentId = '';
@@ -658,6 +659,59 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       ]);
       customerId = custRes.body.data[0].id;
       productId = prodRes.body.data[0].id;
+      originalProductPrice = Number(prodRes.body.data[0].unitPrice);
+    });
+
+    afterAll(async () => {
+      try {
+        if (productId && originalProductPrice !== null) {
+          await prisma.productService.update({
+            where: { id: productId },
+            data: { unitPrice: originalProductPrice },
+          });
+        }
+        if (invoiceId) {
+          const [invRefunds, invPayments] = await Promise.all([
+            prisma.refund.findMany({ where: { customerInvoiceId: invoiceId }, select: { id: true } }),
+            prisma.payment.findMany({ where: { customerInvoiceId: invoiceId }, select: { id: true, journalEntryId: true } }),
+          ]);
+          const refundIds = invRefunds.map((r) => r.id);
+          const payIds = invPayments.map((p) => p.id);
+          const directJournalIds = invPayments.map((p) => p.journalEntryId).filter(Boolean) as string[];
+
+          const journals = await prisma.journalEntry.findMany({
+            where: {
+              OR: [
+                { id: { in: directJournalIds } },
+                { sourceId: invoiceId },
+                ...(refundIds.length ? [{ sourceId: { in: refundIds } }] : []),
+                ...(payIds.length ? [{ sourceId: { in: payIds } }] : []),
+              ],
+            },
+            select: { id: true },
+          });
+          const journalIds = journals.map((j) => j.id);
+
+          if (refundIds.length) {
+            await prisma.refund.deleteMany({ where: { id: { in: refundIds } } });
+          }
+          if (payIds.length) {
+            await prisma.payment.deleteMany({ where: { id: { in: payIds } } });
+          }
+          await prisma.customerInvoiceLine.deleteMany({ where: { customerInvoiceId: invoiceId } });
+          await prisma.customerInvoice.deleteMany({ where: { id: invoiceId } });
+          if (salesOrderId) {
+            await prisma.salesOrderLine.deleteMany({ where: { salesOrderId } });
+            await prisma.salesOrder.deleteMany({ where: { id: salesOrderId } });
+          }
+          if (journalIds.length) {
+            await prisma.journalLine.deleteMany({ where: { journalEntryId: { in: journalIds } } });
+            await prisma.journalEntry.deleteMany({ where: { id: { in: journalIds } } });
+          }
+        }
+      } catch {
+        // Ignore cleanup errors if test exited early
+      }
     });
 
     it('creates Sales Order + Customer Invoice and keeps service delivery independent from payment status', async () => {
@@ -731,6 +785,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(partialRes.status).toBe(201);
       expect(partialRes.body.data.idempotentReplay).toBe(false);
       expect(partialRes.body.data.payment.netAmount).toBe(4965000);
+      expect(partialRes.body.data.payment.approvalStatus).toBe('PENDING_APPROVAL');
       paymentId = partialRes.body.data.payment.id;
 
       // Retry with the exact same idempotencyKey -> must return 200 idempotentReplay: true without double counting
@@ -748,6 +803,14 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(retryRes.status).toBe(200);
       expect(retryRes.body.data.idempotentReplay).toBe(true);
       expect(retryRes.body.data.payment.id).toBe(paymentId);
+
+      // Finance Manager approves the payment receipt -> posts cash journal & settles invoice balance
+      const approvePayRes = await request(app)
+        .post(`/api/v1/revenue/payments/${paymentId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(approvePayRes.status).toBe(200);
+      expect(approvePayRes.body.data.approvalStatus).toBe('APPROVED');
+      expect(approvePayRes.body.data.status).toBe('CONFIRMED');
 
       // Webhook with invalid signature -> must reject with 401
       const webhookPayload = {
@@ -789,6 +852,11 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
         .send({ amount: 1000000, reason: 'Koreksi kelebihan bayar peserta pelatihan' });
       expect(okRefund.status).toBe(201);
       expect(okRefund.body.data.status).toBe('PROCESSED');
+
+      // Partial refund must keep invoice in PARTIALLY_PAID (not REFUNDED) when paidAmount & balanceDue > 0
+      const invAfterRefund = await prisma.customerInvoice.findUnique({ where: { id: invoiceId } });
+      expect(invAfterRefund?.status).toBe('PARTIALLY_PAID');
+      expect(Number(invAfterRefund?.balanceDue || 0)).toBeGreaterThan(0);
     });
 
     it('prevents duplicate OPEN cashier sessions on same register and flags discrepancy on closeout', async () => {
@@ -826,7 +894,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(dupOpen.body.error.code).toBe('REGISTER_ALREADY_OPEN');
     });
 
-    it('records cash deposit to Bank BRI (110101020200 vs 110101010100) and closes cashier session with balanced journal (PMO-082)', async () => {
+    it('records cash deposit to Bank Mandiri Penerimaan (110102010100 vs 110101010100) and closes cashier session with balanced journal (PMO-082)', async () => {
       const cshRes = await request(app)
         .get('/api/v1/revenue/cashier/sessions')
         .set('Authorization', `Bearer ${cashierToken}`);
@@ -837,9 +905,12 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       const bnkRes = await request(app)
         .get('/api/v1/reconciliation/bank-accounts')
         .set('Authorization', `Bearer ${financeToken}`);
-      const bankAccountId = bnkRes.body.data[0].id;
+      const mandiriAccount =
+        bnkRes.body.data.find((b: any) => b.domain === 'PENERIMAAN' || b.glAccountCode === '110102010100') ||
+        bnkRes.body.data[0];
+      const bankAccountId = mandiriAccount.id;
 
-      // Deposit Rp 500.000 to bank
+      // Deposit Rp 500.000 to Bank Mandiri (Penerimaan)
       const depRes = await request(app)
         .post('/api/v1/revenue/cashier/deposits')
         .set('Authorization', `Bearer ${cashierToken}`)
@@ -848,7 +919,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
           bankAccountId,
           amount: 500000,
           referenceNo: `SLIP-DEP-${Date.now().toString().slice(-6)}`,
-          notes: 'Setoran kasir loket ke rekening Bank BRI',
+          notes: 'Setoran kasir loket ke rekening Bank Mandiri Penerimaan',
         });
       expect(depRes.status).toBe(201);
       expect(depRes.body.data.depositNumber).toBeDefined();
@@ -862,8 +933,8 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(jrn?.lines.length).toBe(2);
       const debitLine = jrn?.lines.find((l) => Number(l.debit) > 0);
       const creditLine = jrn?.lines.find((l) => Number(l.credit) > 0);
-      expect(debitLine?.accountCode).toBe('110101020200'); // Bank BRI Penerimaan Komersial
-      expect(creditLine?.accountCode).toBe('110101010100'); // Kas Operasional Loket Unit
+      expect(debitLine?.accountCode).toBe('110102010100'); // Rekening Giro Bank Mandiri Penerimaan PMO
+      expect(creditLine?.accountCode).toBe('110101010100'); // Kas Uang Persediaan
 
       // Close cashier session
       const closeRes = await request(app)
@@ -914,23 +985,25 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(previewRes.body.data.summary.duplicateCount).toBe(1);
     });
 
-    it('parses Bank BRI CSV statement, auto-matches transactions, and calculates book vs bank summary (PMO-081)', async () => {
+    it('parses Bank Mandiri / BTN CSV statement, auto-matches transactions, and calculates book vs bank summary (PMO-081)', async () => {
       const bnkRes = await request(app)
         .get('/api/v1/reconciliation/bank-accounts')
         .set('Authorization', `Bearer ${financeToken}`);
-      const briAccount = bnkRes.body.data.find((b: any) => b.code.includes('BRI') || b.glAccountCode === '110101020200') || bnkRes.body.data[0];
+      expect(bnkRes.body.data.some((b: any) => b.domain === 'PENERIMAAN' && b.glAccountCode === '110102010100')).toBe(true);
+      expect(bnkRes.body.data.some((b: any) => b.domain === 'PENGELUARAN' && b.glAccountCode === '110102010300')).toBe(true);
+      const btnAccount = bnkRes.body.data.find((b: any) => b.domain === 'PENGELUARAN' || b.glAccountCode === '110102010300') || bnkRes.body.data[0];
 
-      // 1. Test CSV Parser for Bank BRI
+      // 1. Test CSV Parser for Bank BTN (Pengeluaran) / Bank Mandiri (Penerimaan)
       const testTs = Date.now();
       const csvRaw = `Tanggal,No Referensi,Keterangan,Debet,Kredit,Saldo
-2026-12-16,STR-BRI-${testTs}-01,SETORAN KASIR POS PMO UTAMA,0,500000,10500000
-2026-12-17,LS-BRI-${testTs}-02,PELUNASAN TAGIHAN VENDOR LS,19980000,0,8520000
-2026-12-18,ADM-BRI-${testTs}-03,BIAYA ADM REKENING BRI,25000,0,8495000`;
+2026-12-16,STR-MDR-${testTs}-01,SETORAN KASIR POS PMO UTAMA,0,500000,10500000
+2026-12-17,LS-BTN-${testTs}-02,PELUNASAN TAGIHAN VENDOR LS,19980000,0,8520000
+2026-12-18,ADM-BTN-${testTs}-03,BIAYA ADM REKENING BANK BTN,25000,0,8495000`;
 
       const parseRes = await request(app)
         .post('/api/v1/reconciliation/parse-csv')
         .set('Authorization', `Bearer ${financeToken}`)
-        .send({ rawContent: csvRaw, fileName: 'rekening-koran-bri-desember-2026.csv' });
+        .send({ rawContent: csvRaw, fileName: 'rekening-koran-btn-desember-2026.csv' });
 
       expect(parseRes.status).toBe(200);
       expect(parseRes.body.data.totalRows).toBe(3);
@@ -944,9 +1017,9 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
         .post('/api/v1/reconciliation/preview')
         .set('Authorization', `Bearer ${financeToken}`)
         .send({
-          bankAccountId: briAccount.id,
+          bankAccountId: btnAccount.id,
           periodLabel: 'Desember 2026',
-          fileName: 'rekening-koran-bri-desember-2026.csv',
+          fileName: 'rekening-koran-btn-desember-2026.csv',
           rows: parseRes.body.data.rows,
         });
 
@@ -959,9 +1032,9 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
         .post('/api/v1/reconciliation/import')
         .set('Authorization', `Bearer ${financeToken}`)
         .send({
-          bankAccountId: briAccount.id,
+          bankAccountId: btnAccount.id,
           periodLabel: 'Desember 2026',
-          fileName: 'rekening-koran-bri-desember-2026.csv',
+          fileName: 'rekening-koran-btn-desember-2026.csv',
           rows: parseRes.body.data.rows,
         });
 
@@ -971,7 +1044,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
 
       // 4. Test Reconciliation Summary endpoint
       const summaryRes = await request(app)
-        .get(`/api/v1/reconciliation/summary/${briAccount.id}`)
+        .get(`/api/v1/reconciliation/summary/${btnAccount.id}`)
         .set('Authorization', `Bearer ${financeToken}`);
 
       expect(summaryRes.status).toBe(200);
@@ -1280,7 +1353,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
         'BU-TCI': '420301010200',
         'BU-ITS': '420301040200',
         'BU-KLINIK': '420301060100',
-        'BU-MICE': '420301070202',
+        'BU-MICE': '420301070200',
         'PMO-MGMT': '420301090100',
       };
 
@@ -1289,9 +1362,24 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
         expect(expectedCoa).toBeDefined();
         const coa = await prisma.chartOfAccount.findUnique({ where: { code: expectedCoa } });
         expect(coa).toBeDefined();
+        expect(coa?.isActive).toBe(true);
         expect(coa?.type).toBe('REVENUE');
         expect(coa?.normalBalance).toBe('CREDIT');
       }
+
+      // Ensure 9 deprecated fabricated Klinik/MICE sub-codes are inactive
+      const deprecatedActive = await prisma.chartOfAccount.count({
+        where: {
+          isActive: true,
+          code: {
+            in: [
+              '420301060300', '420301060400', '420301060500', '420301060600', '420301060700',
+              '420301070201', '420301070202', '420301070203', '420301070204',
+            ],
+          },
+        },
+      });
+      expect(deprecatedActive).toBe(0);
     });
 
     it('confirms the General Ledger Trial Balance is strictly balanced after all Sprint 3 transactions', async () => {
@@ -1330,7 +1418,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(res.body.data.sbmStandards.OVERTIME_RATE_PER_HOUR).toBe(20000);
       expect(res.body.data.sbmStandards.COA_BEBAN_GAJI_PUT_PK).toBe('520101030100');
       expect(res.body.data.sbmStandards.COA_UTANG_PPH21).toBe('210201010100');
-      expect(res.body.data.sbmStandards.COA_BANK_BRI).toBe('110101020200');
+      expect(res.body.data.sbmStandards.COA_BANK_BRI).toBe('110102010300');
       expect(res.body.data.summary.totalGross).toBeGreaterThan(0);
       expect(res.body.data.summary.totalNetTakeHome).toBeGreaterThan(0);
     });
@@ -1357,7 +1445,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       );
       expect(accountingMapping.bebanGajiCoa).toBe('520101030100');
       expect(accountingMapping.utangPph21Coa).toBe('210201010100');
-      expect(accountingMapping.bankBriCoa).toBe('110101020200');
+      expect(accountingMapping.bankBriCoa).toBe('110102010300');
     });
 
     it('generates batch salary slips for period 12/2026 based on SBM 2026 & PPh 21 TER', async () => {
@@ -1621,7 +1709,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(rulesRes.body.data.MIN_THRESHOLD_EQUIPMENT).toBe(1000000);
       expect(rulesRes.body.data.MIN_THRESHOLD_BUILDING).toBe(20000000);
       expect(rulesRes.body.data.SUBSEQUENT_EXPENSE_RATIO_PERCENT).toBe(10);
-      expect(rulesRes.body.data.COA_MAPPING.ASSET_EQUIPMENT).toBe('120301010100');
+      expect(rulesRes.body.data.COA_MAPPING.ASSET_EQUIPMENT).toBe('120303010100');
       expect(rulesRes.body.data.COA_MAPPING.MAINTENANCE_EXPENSE).toBe('520901060100');
       expect(rulesRes.body.data.COA_MAPPING.LOW_VALUE_EXPENSE).toBe('520901020100');
 
@@ -1653,7 +1741,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(capValRes.status).toBe(200);
       expect(capValRes.body.data.isCapitalized).toBe(true);
       expect(capValRes.body.data.accountingTreatment).toBe('CAPITALIZED_TO_ASSET');
-      expect(capValRes.body.data.recommendedDebitCoa).toBe('120301010100');
+      expect(capValRes.body.data.recommendedDebitCoa).toBe('120303010100');
     });
 
     it('records routine subsequent maintenance expenditure <= 10% as EXPENSED_TO_MAINTENANCE without changing asset book value', async () => {
@@ -1719,7 +1807,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(capExpRes.status).toBe(201);
       expect(capExpRes.body.data.isCapitalized).toBe(true);
       expect(capExpRes.body.data.accountingTreatment).toBe('CAPITALIZED_TO_ASSET');
-      expect(capExpRes.body.data.coaDebit).toBe('120301010100');
+      expect(capExpRes.body.data.coaDebit).toBe('120303010100');
       expect(capExpRes.body.data.ratioPercent).toBeGreaterThan(10.0);
 
       // Book value and acquisition cost MUST increase by overhaul amount
@@ -1768,7 +1856,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(rulesRes.body.data.CUTOFF_DAY).toBe(20);
       expect(rulesRes.body.data.METHOD).toBe('STRAIGHT_LINE');
       expect(rulesRes.body.data.COA_DEBIT).toBe('520901030100');
-      expect(rulesRes.body.data.COA_CREDIT).toBe('120301020100');
+      expect(rulesRes.body.data.COA_CREDIT).toBe('120307020100');
 
       // 2. Asset acquired on 2026-03-15 (<= 20th) evaluating for period March 2026 -> Eligible
       const beforeCutoffRes = await request(app)
@@ -1855,7 +1943,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(assetDepRes.body.data[0].periodMonth).toBe(12);
     });
 
-    it('posts balanced double-entry journal to General Ledger (Debet 520901030100 vs Kredit 120301020100)', async () => {
+    it('posts balanced double-entry journal to General Ledger (Debet 520901030100 vs Kredit 120307020100)', async () => {
       const depWithJournalRes = await request(app)
         .post('/api/v1/assets/depreciate-period')
         .set('Authorization', `Bearer ${financeToken}`)
@@ -2275,7 +2363,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
           description: 'Pengadaan Perlengkapan Kebersihan Lab Unit Diklat',
           lines: [
             { accountCode: '520101030100', description: 'Beban Operasional Kebersihan Lab', debit: 750000, credit: 0 },
-            { accountCode: '110101020200', description: 'Kas Bank BRI Operasional Diklat', debit: 0, credit: 750000 },
+            { accountCode: '110102010300', description: 'Rekening Giro Bank Pengeluaran Operasional Diklat', debit: 0, credit: 750000 },
           ],
         });
 
@@ -3152,6 +3240,949 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       for (const unitTb of glIntegrity.unitTrialBalances) {
         expect(unitTb.isBalanced).toBe(true);
         expect(unitTb.discrepancy).toBeLessThan(1);
+      }
+    });
+  });
+
+  // =========================================================================
+  // 27. Role-Aware Portfolio Dashboard (1W/1M/1Q/1Y PnL, Neraca & Domain Scopes)
+  // =========================================================================
+  describe('27. Role-Aware Portfolio Dashboard & Multi-Timeframe PnL / Neraca (3)', () => {
+    it('returns balanced Neraca (Balance Sheet) and multi-timeframe PnL series (weekly, monthly, quarterly, yearly)', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/dashboard?range=quarterly&year=2026')
+        .set('Authorization', `Bearer ${gmToken}`);
+
+      expect(res.status).toBe(200);
+      const { portfolio, roleSummary } = res.body.data;
+      expect(portfolio).toBeDefined();
+      expect(portfolio.activeRange).toBe('quarterly');
+      expect(portfolio.pnlByRange.weekly.series).toHaveLength(8);
+      expect(portfolio.pnlByRange.monthly.series).toHaveLength(12);
+      expect(portfolio.pnlByRange.quarterly.series).toHaveLength(4);
+      expect(portfolio.pnlByRange.yearly.series).toHaveLength(3);
+
+      const bs = portfolio.balanceSheet;
+      expect(bs).toBeDefined();
+      expect(bs.totalAssets).toBeTypeOf('number');
+      expect(bs.totalLiabilities).toBeTypeOf('number');
+      expect(bs.netAssets).toBeTypeOf('number');
+      expect(bs.isBalanced).toBe(true);
+      expect(Array.isArray(bs.allocation)).toBe(true);
+      expect(bs.allocation.length).toBe(4);
+
+      expect(roleSummary.agingReceivables.totalOutstanding).toBe(
+        roleSummary.agingReceivables.current +
+        roleSummary.agingReceivables.days31to60 +
+        roleSummary.agingReceivables.days61to90 +
+        roleSummary.agingReceivables.over90
+      );
+      expect(roleSummary.agingPayables.totalOutstanding).toBe(
+        roleSummary.agingPayables.current +
+        roleSummary.agingPayables.days31to60 +
+        roleSummary.agingPayables.days61to90 +
+        roleSummary.agingPayables.over90
+      );
+    });
+
+    it('assigns strict roleProfile & allowedWorkspaces per user role (Penerimaan vs Pengeluaran RBAC)', async () => {
+      const [gmRes, unitRes, cashierRes, procRes, accRes, audRes] = await Promise.all([
+        request(app).get('/api/v1/reports/dashboard').set('Authorization', `Bearer ${gmToken}`),
+        request(app).get('/api/v1/reports/dashboard').set('Authorization', `Bearer ${unitMgrToken}`),
+        request(app).get('/api/v1/reports/dashboard').set('Authorization', `Bearer ${cashierToken}`),
+        request(app).get('/api/v1/reports/dashboard').set('Authorization', `Bearer ${procurementToken}`),
+        request(app).get('/api/v1/reports/dashboard').set('Authorization', `Bearer ${accountingToken}`),
+        request(app).get('/api/v1/reports/dashboard').set('Authorization', `Bearer ${auditorToken}`),
+      ]);
+
+      expect(gmRes.body.data.roleProfile.profileType).toBe('EXECUTIVE');
+      expect(gmRes.body.data.roleProfile.allowedWorkspaces).toEqual(['PENERIMAAN', 'PENGELUARAN']);
+
+      expect(unitRes.body.data.roleProfile.profileType).toBe('UNIT_MANAGER');
+      expect(unitRes.body.data.roleProfile.allowedWorkspaces).toEqual(['PENERIMAAN', 'PENGELUARAN']);
+
+      expect(cashierRes.body.data.roleProfile.profileType).toBe('REVENUE_OPS');
+      expect(cashierRes.body.data.roleProfile.allowedWorkspaces).toEqual(['PENERIMAAN']);
+
+      expect(procRes.body.data.roleProfile.profileType).toBe('PROCUREMENT_OPS');
+      expect(procRes.body.data.roleProfile.allowedWorkspaces).toEqual(['PENGELUARAN']);
+
+      expect(accRes.body.data.roleProfile.profileType).toBe('ACCOUNTING_TAX');
+      expect(accRes.body.data.roleProfile.allowedWorkspaces).toEqual(['PENERIMAAN', 'PENGELUARAN']);
+
+      expect(audRes.body.data.roleProfile.profileType).toBe('AUDITOR');
+      expect(audRes.body.data.roleProfile.isReadOnly).toBe(true);
+    });
+
+    it('exposes real domain operational summaries (penerimaanSummary, pengeluaranSummary, procurementQueue, pettyCashTaxQueue)', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/dashboard')
+        .set('Authorization', `Bearer ${accountingToken}`);
+
+      expect(res.status).toBe(200);
+      const rs = res.body.data.roleSummary;
+      expect(rs.penerimaanSummary.totalInvoiced).toBeTypeOf('number');
+      expect(rs.pengeluaranSummary.totalBudgetAllocated).toBeTypeOf('number');
+      expect(rs.procurementQueue.openPoCount).toBeTypeOf('number');
+      expect(rs.pettyCashTaxQueue.totalTaxPayable).toBeTypeOf('number');
+      expect(rs.cashierStatus.todayCashReceived).toBeTypeOf('number');
+      expect(rs.auditSummary.recentAuditCount).toBeTypeOf('number');
+    });
+  });
+
+  // =========================================================================
+  // 28. Modul Penerimaan PTNBH (4 Unit Bisnis, Pajak FP 020/030/040, HANGUS,
+  //     Direct Receipt, Lebih Bayar, Buku Harian, Surat Pajak & Aging .xlsx)
+  // =========================================================================
+  describe('28. Modul Penerimaan PTNBH (4 Unit Bisnis, Pajak, Buku Harian, Rekonsiliasi & Aging) (6)', () => {
+    let unitMiceId = '';
+    let unitKlinikId = '';
+    let unitItsId = '';
+    let unitTciId = '';
+    let testCustomerId = '';
+    let udayanaInvoiceId = '';
+    let gandariaInvoiceId = '';
+    let directReceiptId = '';
+
+    beforeAll(async () => {
+      const masterRes = await request(app)
+        .get('/api/v1/master/overview')
+        .set('Authorization', `Bearer ${gmToken}`);
+      expect(masterRes.status).toBe(200);
+      const units = masterRes.body.data.businessUnits;
+      unitMiceId = (units.find((u: any) => u.code === 'BU-MICE') || units[0]).id;
+      unitKlinikId = (units.find((u: any) => u.code === 'BU-KLINIK') || units[0]).id;
+      unitItsId = (units.find((u: any) => u.code === 'BU-ITS') || unitKonsulId).id;
+      unitTciId = (units.find((u: any) => u.code === 'BU-TCI') || unitDiklatId).id;
+
+      const custRes = await request(app)
+        .post('/api/v1/revenue/customers')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          name: `Universitas Uji PTNBH ${runTag}`,
+          organizationType: 'GOVERNMENT',
+          taxCollectorProfile: 'FP_020_INSTANSI',
+          taxIdNpwp: '00.111.222.3-401.000',
+          contactPerson: 'Bendahara PTNBH',
+          email: `keuangan.${runTag.toLowerCase()}@univ.ac.id`,
+          phone: '021-7490941',
+          address: 'Kampus PTNBH Indonesia',
+        });
+      expect(custRes.status).toBe(201);
+      testCustomerId = custRes.body.data.id;
+    });
+
+    it('calculates exact PTNBH tax preview & issues IT Solution FP 020 invoice (Bruto 771.380.000 -> Net 681.038.198) in 31-60d Aging', async () => {
+      const prevRes = await request(app)
+        .post('/api/v1/revenue/tax-preview')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          subtotal: 771380000,
+          discountPercent: 0,
+          taxScheme: 'PPN12_PPH23',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_020_INSTANSI',
+        });
+      expect(prevRes.status).toBe(200);
+      expect(prevRes.body.data.nilaiJual).toBe(694936937);
+      expect(prevRes.body.data.ppnAmount).toBe(76443063);
+      expect(prevRes.body.data.pph23Amount).toBe(13898739);
+      expect(prevRes.body.data.netReceivableAmount).toBe(681038198);
+      expect(prevRes.body.data.utRemitPpn).toBe(0);
+      expect(prevRes.body.data.utRemitPph23).toBe(0);
+
+      // Issue 45 days ago with dueInDays: 0 so it enters the 31-60 Hari aging bucket
+      const fortyFiveDaysAgo = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
+      const invRes = await request(app)
+        .post('/api/v1/revenue/invoices')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          customerId: testCustomerId,
+          businessUnitId: unitItsId,
+          invoiceType: 'TERMIN',
+          activityTitle: `Pembayaran Promise PKS Termin 2 ${runTag}`,
+          rincianLabel: 'Jasa Pengelolaan TI Promise',
+          revenueAccountCode: '420301040200',
+          taxScheme: 'PPN12_PPH23',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_020_INSTANSI',
+          issueDate: fortyFiveDaysAgo,
+          dueInDays: 0,
+          lines: [
+            {
+              description: 'Lisensi & Implementasi Sistem Promise Termin 2',
+              quantity: 1,
+              unitPrice: 771380000,
+            },
+          ],
+        });
+      expect(invRes.status).toBe(201);
+      udayanaInvoiceId = invRes.body.data.id;
+      expect(invRes.body.data.approvalStatus).toBe('PENDING_APPROVAL');
+      expect(invRes.body.data.nilaiJual).toBe(694936937);
+      expect(invRes.body.data.ppnAmount).toBe(76443063);
+      expect(invRes.body.data.pph23Amount).toBe(13898739);
+      expect(invRes.body.data.netReceivableAmount).toBe(681038198);
+      expect(invRes.body.data.balanceDue).toBe(681038198);
+
+      // Must NOT appear in Aging before Manager Finance approves
+      const agingPending = await request(app)
+        .get('/api/v1/revenue/aging')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(agingPending.body.data.invoices.some((i: any) => i.id === udayanaInvoiceId)).toBe(false);
+
+      // Approve Udayana Invoice
+      const appUdayana = await request(app)
+        .post(`/api/v1/revenue/customer-invoices/${udayanaInvoiceId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(appUdayana.status).toBe(200);
+      expect(appUdayana.body.data.status).toBe('ISSUED');
+      expect(appUdayana.body.data.approvalStatus).toBe('APPROVED');
+    });
+
+    it('supports 60% UT discount (Ruang Gandaria 800k -> 320k), blocks unintended overpayment, and records controlled allowOverpayment (+80k Pengembalian Dana)', async () => {
+      const invRes = await request(app)
+        .post('/api/v1/revenue/invoices')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          customerId: testCustomerId,
+          businessUnitId: unitMiceId,
+          invoiceType: 'PELUNASAN',
+          activityTitle: `Sewa Ruang Gandaria Diskon 60% ${runTag}`,
+          rincianLabel: 'Ruang Gandaria',
+          revenueAccountCode: '420301070100',
+          taxScheme: 'PPN12_PPH4_2',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_040_UMUM',
+          discountPercent: 60,
+          dueInDays: 7,
+          lines: [{ description: 'Sewa Ruang Gandaria Full Day', quantity: 1, unitPrice: 800000 }],
+        });
+      expect(invRes.status).toBe(201);
+      gandariaInvoiceId = invRes.body.data.id;
+      expect(invRes.body.data.discountAmount).toBe(480000);
+      expect(invRes.body.data.totalAmount).toBe(320000);
+
+      // Approve Gandaria Invoice before accepting payment
+      const appGandaria = await request(app)
+        .post(`/api/v1/revenue/customer-invoices/${gandariaInvoiceId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(appGandaria.status).toBe(200);
+
+      // Default allowOverpayment=false MUST still reject overpayment
+      const blockedRes = await request(app)
+        .post('/api/v1/revenue/payments')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          customerInvoiceId: gandariaInvoiceId,
+          method: 'BANK_TRANSFER',
+          grossAmount: 400000,
+          referenceNo: `TRF-BLOCK-${runTag}`,
+          idempotencyKey: `IDEMP-BLOCK-${runTag}`,
+        });
+      expect(blockedRes.status).toBe(409);
+      expect(blockedRes.body.error.code).toBe('PAYMENT_EXCEEDS_BALANCE');
+
+      // Explicit allowOverpayment=true accepts 400.000 and tracks 80.000 Pengembalian Dana
+      const overRes = await request(app)
+        .post('/api/v1/revenue/payments')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          customerInvoiceId: gandariaInvoiceId,
+          method: 'BANK_TRANSFER',
+          grossAmount: 400000,
+          allowOverpayment: true,
+          receiptType: 'KUITANSI',
+          referenceNo: `TRF-OVER-${runTag}`,
+          idempotencyKey: `IDEMP-OVER-${runTag}`,
+          notes: 'Lebih bayar klien Rp 80.000 masuk Pengembalian Dana',
+        });
+      expect(overRes.status).toBe(201);
+      expect(Number(overRes.body.data.payment.overpaymentAmount)).toBe(80000);
+
+      // Approve the overpayment receipt so it enters BKU & Surat Penarikan Pengembalian Dana
+      const appOverPay = await request(app)
+        .post(`/api/v1/revenue/payments/${overRes.body.data.payment.id}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(appOverPay.status).toBe(200);
+    });
+
+    it('issues Uang Muka invoice (TCI), voids it as HANGUS with reversal GL, and reissues cleanly', async () => {
+      const umRes = await request(app)
+        .post('/api/v1/revenue/invoices')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          customerId: testCustomerId,
+          businessUnitId: unitTciId,
+          invoiceType: 'UANG_MUKA',
+          activityTitle: `Pelatihan Housekeeping TCI ${runTag}`,
+          rincianLabel: 'Jasa Pelatihan TCI',
+          revenueAccountCode: '420301030200',
+          taxScheme: 'PPN12_PMK131',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_040_UMUM',
+          dueInDays: 14,
+          lines: [{ description: 'DP 50% Pelatihan Housekeeping', quantity: 1, unitPrice: 10000000 }],
+        });
+      expect(umRes.status).toBe(201);
+      const umId = umRes.body.data.id;
+
+      await request(app)
+        .post(`/api/v1/revenue/customer-invoices/${umId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .expect(200);
+
+      const voidRes = await request(app)
+        .post(`/api/v1/revenue/customer-invoices/${umId}/void`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ reason: 'Jadwal pelatihan diundur oleh klien' });
+      expect(voidRes.status).toBe(200);
+      expect(voidRes.body.data.status).toBe('VOID');
+      expect(Number(voidRes.body.data.balanceDue)).toBe(0);
+
+      const reissueRes = await request(app)
+        .post(`/api/v1/revenue/customer-invoices/${umId}/reissue`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({});
+      expect(reissueRes.status).toBe(201);
+      expect(reissueRes.body.data.status).toBe('PENDING_APPROVAL');
+      expect(reissueRes.body.data.approvalStatus).toBe('PENDING_APPROVAL');
+      expect(reissueRes.body.data.docNumber).not.toBe(umRes.body.data.docNumber);
+
+      const appReissue = await request(app)
+        .post(`/api/v1/revenue/customer-invoices/${reissueRes.body.data.id}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(appReissue.status).toBe(200);
+      expect(appReissue.body.data.status).toBe('ISSUED');
+    });
+
+    it('records direct receipts (Wisma PB1 10% + Bulk CSV Import) and updates inline Tampungan & Bukti Potong metadata', async () => {
+      const drRes = await request(app)
+        .post('/api/v1/revenue/direct-receipts')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          businessUnitId: unitMiceId,
+          receiptType: 'TANDA_TERIMA',
+          paymentStage: 'PELUNASAN',
+          method: 'BANK_TRANSFER',
+          payerName: `Tamu Wisma ${runTag}`,
+          activityTitle: `Check-in Kamar Standard Wisma UT ${runTag}`,
+          rincianLabel: 'Kamar Wisma',
+          revenueAccountCode: '420301070400',
+          taxScheme: 'PB1_10',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_040_UMUM',
+          grossAmount: 550000,
+          referenceNo: `WSM-${runTag}`,
+        });
+      expect(drRes.status).toBe(201);
+      directReceiptId = drRes.body.data.id;
+      expect(drRes.body.data.pb1Amount).toBe(50000);
+      expect(drRes.body.data.customerInvoiceId).toBeNull();
+      expect(drRes.body.data.approvalStatus).toBe('PENDING_APPROVAL');
+
+      // Approve direct receipt so it posts to GL & enters BKU/Reconciliation
+      const appDr = await request(app)
+        .post(`/api/v1/revenue/payments/${directReceiptId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(appDr.status).toBe(200);
+      expect(appDr.body.data.approvalStatus).toBe('APPROVED');
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const csvContent = [
+        'Tanggal,Nama,Kegiatan,Rincian,Nominal,COA,SkemaPajak,NoInvEksternal',
+        `${todayStr},Tamu CSV 1,Sewa Kamar Deluxe,Kamar Wisma,660000,420301070400,PB1_10,`,
+        `${todayStr},Pasien Klinik CSV,Rawat Jalan Poliklinik,Klinik Rawat Jalan,250000,420301060100,BEBAS_PAJAK,INV-0038999`,
+      ].join('\n');
+
+      const impRes = await request(app)
+        .post('/api/v1/revenue/direct-receipts/import-csv')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          businessUnitId: unitKlinikId,
+          rawContent: csvContent,
+          defaultTaxScheme: 'BEBAS_PAJAK',
+        });
+      expect(impRes.status).toBe(201);
+      expect(impRes.body.data.importedCount).toBe(2);
+
+      // Approve the 2 CSV imported receipts
+      const csvPays = await prisma.payment.findMany({
+        where: { receiptNumber: { in: impRes.body.data.receipts } },
+        select: { id: true },
+      });
+      for (const cp of csvPays) {
+        await request(app)
+          .post(`/api/v1/revenue/payments/${cp.id}/approve`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .expect(200);
+      }
+
+      const metaRes = await request(app)
+        .patch(`/api/v1/revenue/payments/${directReceiptId}/tax-meta`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ taxAlreadyProcessed: true, withholdingSlipNo: `BP-${runTag}` });
+      expect(metaRes.status).toBe(200);
+      expect(metaRes.body.data.taxAlreadyProcessed).toBe(true);
+      expect(metaRes.body.data.withholdingSlipNo).toBe(`BP-${runTag}`);
+    });
+
+    it('serves unified Buku Harian, Perincian Pajak/Surat Penarikan, Aging Penerimaan, valid .xlsx exports, and preserves balanced GL', async () => {
+      const ym = new Date().toISOString().slice(0, 7);
+      const [bhRes, taxRes, agingRes] = await Promise.all([
+        request(app).get(`/api/v1/revenue/buku-harian?month=${ym}`).set('Authorization', `Bearer ${financeToken}`),
+        request(app).get(`/api/v1/revenue/tax-recap?month=${ym}`).set('Authorization', `Bearer ${financeToken}`),
+        request(app).get('/api/v1/revenue/aging').set('Authorization', `Bearer ${financeToken}`),
+      ]);
+
+      expect(bhRes.status).toBe(200);
+      expect(bhRes.body.data.summary.directReceiptCount).toBeGreaterThanOrEqual(3);
+      expect(bhRes.body.data.summary.invoicedReceiptCount).toBeGreaterThanOrEqual(1);
+
+      expect(taxRes.status).toBe(200);
+      expect(taxRes.body.data.pivotByCoa.length).toBeGreaterThan(0);
+      expect(taxRes.body.data.withdrawal.totalOverpaymentRefund).toBeGreaterThanOrEqual(80000);
+      expect(taxRes.body.data.withdrawal.overpaymentItems.some((o: any) => o.amount === 80000)).toBe(true);
+
+      expect(agingRes.status).toBe(200);
+      expect(agingRes.body.data.buckets.days31to60).toBeGreaterThanOrEqual(681038198);
+      expect(agingRes.body.data.invoices.some((i: any) => i.id === udayanaInvoiceId && i.bucketKey === 'days31to60')).toBe(true);
+      expect(agingRes.body.data.byUnit.length).toBeGreaterThan(0);
+      expect(agingRes.body.data.byCustomer.length).toBeGreaterThan(0);
+
+      // Verify binary Excel exports (PK zip header)
+      const [taxXlsx, agingXlsx] = await Promise.all([
+        request(app)
+          .get(`/api/v1/revenue/tax-recap/export.xlsx?month=${ym}`)
+          .set('Authorization', `Bearer ${financeToken}`)
+          .buffer(true)
+          .parse((res, cb) => {
+            const chunks: Buffer[] = [];
+            res.on('data', (c) => chunks.push(Buffer.from(c)));
+            res.on('end', () => cb(null, Buffer.concat(chunks)));
+          }),
+        request(app)
+          .get('/api/v1/revenue/aging/export.xlsx')
+          .set('Authorization', `Bearer ${financeToken}`)
+          .buffer(true)
+          .parse((res, cb) => {
+            const chunks: Buffer[] = [];
+            res.on('data', (c) => chunks.push(Buffer.from(c)));
+            res.on('end', () => cb(null, Buffer.concat(chunks)));
+          }),
+      ]);
+      expect(taxXlsx.status).toBe(200);
+      expect(taxXlsx.headers['content-type']).toContain('spreadsheetml.sheet');
+      expect((taxXlsx.body as Buffer).subarray(0, 2).toString('utf8')).toBe('PK');
+
+      expect(agingXlsx.status).toBe(200);
+      expect(agingXlsx.headers['content-type']).toContain('spreadsheetml.sheet');
+      expect((agingXlsx.body as Buffer).subarray(0, 2).toString('utf8')).toBe('PK');
+
+      // Confirm Balance Sheet & GL remain strictly balanced across all new journals
+      const finRes = await request(app)
+        .get('/api/v1/reports/financial')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(finRes.status).toBe(200);
+      expect(finRes.body.data.balanceSheet.isBalanced).toBe(true);
+    });
+
+    it('links Bank Mandiri Reconciliation to Buku Harian and filters Pembukuan (Umum & Pajak) & Laporan Penerimaan by reconciledOnly', async () => {
+      const ym = new Date().toISOString().slice(0, 7);
+      const todayStr = new Date().toISOString().slice(0, 10);
+
+      // 1. Direct receipt should appear in unreconciled penerimaan candidates before bank import
+      const candBefore = await request(app)
+        .get(`/api/v1/reconciliation/penerimaan-candidates?month=${ym}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(candBefore.status).toBe(200);
+      expect(candBefore.body.data.unreconciled.some((c: any) => c.id === directReceiptId)).toBe(true);
+
+      // 2. Find Bank Mandiri Penerimaan account and import statement matching our Wisma direct receipt ref
+      const bankRes = await request(app)
+        .get('/api/v1/reconciliation/bank-accounts')
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(bankRes.status).toBe(200);
+      const mandiri = bankRes.body.data.find((b: any) => b.domain === 'PENERIMAAN' || b.glAccountCode === '110102010100');
+      expect(mandiri).toBeDefined();
+
+      const impRes = await request(app)
+        .post('/api/v1/reconciliation/import')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          bankAccountId: mandiri.id,
+          periodLabel: `Periode Uji ${runTag}`,
+          fileName: `mandiri-uji-${runTag}.csv`,
+          rows: [
+            {
+              transactionDate: todayStr,
+              description: `TRANSFER TAMU WISMA ${runTag}`,
+              referenceNo: `WSM-${runTag}`,
+              direction: 'CREDIT',
+              amount: 550000,
+            },
+          ],
+        });
+      expect(impRes.status).toBe(201);
+      expect(impRes.body.data.matchedCount).toBe(1);
+
+      // 3. Pembukuan (includeJournals=true) & Laporan Penerimaan (reconciledOnly=true) reflect reconciled payment + 4-unit breakdown
+      const reconRecap = await request(app)
+        .get(`/api/v1/revenue/tax-recap?month=${ym}&reconciledOnly=true&includeJournals=true`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(reconRecap.status).toBe(200);
+      expect(reconRecap.body.data.reconciledOnly).toBe(true);
+      expect(reconRecap.body.data.summary.reconciledCount).toBeGreaterThanOrEqual(1);
+      expect(reconRecap.body.data.rows.some((r: any) => r.id === directReceiptId && r.isReconciled === true)).toBe(true);
+      expect(reconRecap.body.data.byUnit.length).toBeGreaterThan(0);
+      expect(reconRecap.body.data.journals.length).toBeGreaterThan(0);
+
+      // 4. Auto-generate SKU per Business Unit & prevent duplicate service name in same unit
+      const svcRes = await request(app)
+        .post('/api/v1/revenue/products')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          name: `Layanan Uji Auto SKU ${runTag}`,
+          category: 'rawat jalan',
+          businessUnitId: unitKlinikId,
+          unitPrice: 125000,
+          unit: 'Kunjungan',
+          taxScheme: 'BEBAS_PAJAK',
+          revenueAccountCode: '420301060100',
+        });
+      expect(svcRes.status).toBe(201);
+      expect(svcRes.body.data.sku).toMatch(/^LYN-KLINIK-\d{3,}$/);
+
+      const dupSvcRes = await request(app)
+        .post('/api/v1/revenue/products')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          name: `layanan uji auto sku ${runTag.toLowerCase()}`,
+          category: 'Rawat Jalan',
+          businessUnitId: unitKlinikId,
+          unitPrice: 125000,
+          unit: 'Kunjungan',
+          taxScheme: 'BEBAS_PAJAK',
+          revenueAccountCode: '420301060100',
+        });
+      expect(dupSvcRes.status).toBe(409);
+      expect(dupSvcRes.body.error.code).toBe('DUPLICATE_SERVICE_NAME');
+
+      // Clean up test product so live catalog stays pure
+      await prisma.productService.delete({ where: { id: svcRes.body.data.id } });
+
+      // 5. Upload and retrieve Payment Proof image on Buku Harian payment
+      const tinyPngBase64 =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+      const uploadRes = await request(app)
+        .post(`/api/v1/revenue/payments/${directReceiptId}/proof`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ dataUrl: tinyPngBase64, fileName: `bukti-transfer-${runTag}.png` });
+      expect(uploadRes.status).toBe(201);
+      expect(uploadRes.body.data.mimeType).toBe('image/png');
+
+      const getProofRes = await request(app)
+        .get(`/api/v1/revenue/payments/${directReceiptId}/proof`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c) => chunks.push(Buffer.from(c)));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        });
+      expect(getProofRes.status).toBe(200);
+      expect(getProofRes.headers['content-type']).toContain('image/png');
+      expect((getProofRes.body as Buffer).length).toBeGreaterThan(20);
+
+      const bhWithProof = await request(app)
+        .get(`/api/v1/revenue/buku-harian?month=${ym}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(bhWithProof.status).toBe(200);
+      const matchedBhRow = bhWithProof.body.data.rows.find((r: any) => r.id === directReceiptId);
+      expect(matchedBhRow?.paymentProof?.displayName).toBe(`bukti-transfer-${runTag}.png`);
+    });
+
+    it('supports PPh 23 15%, PPh 21 5%, 2D Qty x Durasi + DP %, Dual Mandiri Final/Kelolaan auto-routing, 4-unit RAB targets & 32-col Excel export', async () => {
+      const ym = new Date().toISOString().slice(0, 7);
+
+      // 1. PPh 23 15% & PPh 21 5% tax calculations
+      const pph15Res = await request(app)
+        .post('/api/v1/revenue/tax-preview')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          subtotal: 11100000,
+          taxScheme: 'PPN12_PPH23_15',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_040_UMUM',
+        });
+      expect(pph15Res.status).toBe(200);
+      expect(pph15Res.body.data.nilaiJual).toBe(10000000);
+      expect(pph15Res.body.data.ppnAmount).toBe(1100000);
+      expect(pph15Res.body.data.pph23Rate15Amount).toBe(1500000);
+
+      const pph21Res = await request(app)
+        .post('/api/v1/revenue/tax-preview')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          subtotal: 10000000,
+          taxScheme: 'PPH21_5',
+          taxInclusive: false,
+          taxCollectorProfile: 'FP_040_UMUM',
+        });
+      expect(pph21Res.status).toBe(200);
+      expect(pph21Res.body.data.pph21Amount).toBe(500000);
+
+      // 2. 2D Vol x Durasi + DP % Invoice
+      const inv2dRes = await request(app)
+        .post('/api/v1/revenue/invoices')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          customerId: testCustomerId,
+          businessUnitId: unitMiceId,
+          invoiceType: 'UANG_MUKA',
+          dpPercent: 50,
+          picName: 'PIC Event UT',
+          subCategory: 'Sewa Ruangan UTCC',
+          activityTitle: `Sewa 2 Ruang x 3 Hari ${runTag}`,
+          rincianLabel: 'Ruang Wisma',
+          revenueAccountCode: '420301070100',
+          taxScheme: 'PPN12_PPH4_2',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_040_UMUM',
+          dueInDays: 7,
+          lines: [
+            {
+              description: 'Ruang Rapat 2 Ruangan x 3 Hari',
+              quantity: 2,
+              duration: 3,
+              durationUnit: 'Hari',
+              unitPrice: 1000000,
+            },
+          ],
+        });
+      expect(inv2dRes.status).toBe(201);
+      expect(Number(inv2dRes.body.data.subtotal)).toBe(6000000);
+      expect(Number(inv2dRes.body.data.dpPercent)).toBe(50);
+      expect(Number(inv2dRes.body.data.lines[0].duration)).toBe(3);
+
+      // 3. Single official Penerimaan bank routing: all 4 units route to Bank Mandiri Penerimaan (BNK-MDR-01)
+      const klRes = await request(app)
+        .post('/api/v1/revenue/direct-receipts')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          businessUnitId: unitKlinikId,
+          receiptType: 'KUITANSI',
+          paymentStage: 'PELUNASAN',
+          method: 'BANK_TRANSFER',
+          payerName: `Pasien BPJS ${runTag}`,
+          activityTitle: `Klaim Kapitasi Klinik ${runTag}`,
+          rincianLabel: 'Klinik Pratama UT',
+          revenueAccountCode: '420301060100',
+          taxScheme: 'BEBAS_PAJAK',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_040_UMUM',
+          grossAmount: 450000,
+          referenceNo: `KLN-${runTag}`,
+          picName: 'dr. PIC Klinik',
+          subCategory: 'BPJS Kapitasi',
+        });
+      expect(klRes.status).toBe(201);
+      const klPayId = klRes.body.data.id;
+
+      // Approve Klinik receipt so it enters BKU & tax-recap cleanly
+      await request(app)
+        .post(`/api/v1/revenue/payments/${klPayId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .expect(200);
+
+      // Verify single Bank Mandiri Penerimaan (BNK-MDR-01) captures Klinik receipt and bank-accounts lists 1 active Penerimaan bank
+      const [singleBankBh, activeBanksRes] = await Promise.all([
+        request(app)
+          .get(`/api/v1/revenue/buku-harian?month=${ym}&bankAccountCode=BNK-MDR-01`)
+          .set('Authorization', `Bearer ${financeToken}`),
+        request(app)
+          .get('/api/v1/reconciliation/bank-accounts')
+          .set('Authorization', `Bearer ${financeToken}`),
+      ]);
+      expect(singleBankBh.status).toBe(200);
+      expect(singleBankBh.body.data.rows.some((r: any) => r.id === klPayId)).toBe(true);
+      expect(activeBanksRes.status).toBe(200);
+      const activePenerimaanBanks = activeBanksRes.body.data.filter((b: any) => b.domain === 'PENERIMAAN');
+      expect(activePenerimaanBanks.length).toBe(1);
+      expect(activePenerimaanBanks[0].code).toBe('BNK-MDR-01');
+
+      // 4. Tax Recap exposes 4-unit RAB Pendapatan targets + BRI remittance bank
+      const recapRes = await request(app)
+        .get(`/api/v1/revenue/tax-recap?month=${ym}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(recapRes.status).toBe(200);
+      expect(recapRes.body.data.byUnit.length).toBeGreaterThanOrEqual(4);
+      const miceUnit = recapRes.body.data.byUnit.find((u: any) => u.unitCode === 'BU-MICE');
+      expect(miceUnit?.targetRabAnnual).toBe(19599150364);
+      expect(miceUnit?.targetRabMonthly).toBeGreaterThan(1600000000);
+      expect(recapRes.body.data.withdrawal.targetTaxAccountNo).toBe('1173.01.000574.30.4');
+
+      // 5. Inspect Excel workbook structure (22-col Buku Harian, 32-col Perincian + Pajak, Surat Penarikan BRI)
+      const xlsxRes = await request(app)
+        .get(`/api/v1/revenue/tax-recap/export.xlsx?month=${ym}`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c) => chunks.push(Buffer.from(c)));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        });
+      expect(xlsxRes.status).toBe(200);
+      const ExcelJS = await import('exceljs');
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(xlsxRes.body);
+      const sBh = wb.getWorksheet('Buku Harian');
+      const sPerincian = wb.getWorksheet('Perincian + Pajak');
+      const sSurat = wb.getWorksheet('Surat Penarikan Pajak');
+      const sBku = wb.getWorksheet('BKU + Pajak');
+      expect(sBh?.columnCount).toBe(22);
+      expect(sPerincian?.columnCount).toBe(32);
+      expect(sBku?.columnCount).toBe(13);
+      let suratAllText = '';
+      sSurat?.eachRow((r) => {
+        r.eachCell((c) => {
+          suratAllText += ` ${String(c.value ?? '')}`;
+        });
+      });
+      expect(suratAllText).toContain('Pengembalian Dana');
+      expect(suratAllText).toContain('1173.01.000574.30.4');
+    });
+
+    it('enforces Manager Finance approval gate (remind, RBAC block, reject/resubmit, approve -> monthly FP journal, void reversal & invoice proof)', async () => {
+      const ym = new Date().toISOString().slice(0, 7);
+      const tinyPngBase64 =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+      // 1. PIC creates a direct Kwitansi -> starts PENDING_APPROVAL with NO journal & excluded from tax-recap
+      const createPay = await request(app)
+        .post('/api/v1/revenue/direct-receipts')
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({
+          businessUnitId: unitTciId,
+          receiptType: 'KUITANSI',
+          paymentStage: 'PELUNASAN',
+          method: 'BANK_TRANSFER',
+          payerName: `Klien Approval Gate ${runTag}`,
+          activityTitle: `Workshop Uji Approval ${runTag}`,
+          rincianLabel: 'Pelatihan TCI',
+          revenueAccountCode: '420301010200',
+          taxScheme: 'PPN12_PPH23',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_040_UMUM',
+          grossAmount: 2220000,
+          referenceNo: `APR-${runTag}`,
+        });
+      expect(createPay.status).toBe(201);
+      const pendingPayId = createPay.body.data.id;
+      expect(createPay.body.data.approvalStatus).toBe('PENDING_APPROVAL');
+      expect(createPay.body.data.journalEntryId).toBeNull();
+
+      // Must NOT appear in tax-recap (Pembukuan/Laporan) while pending
+      const recapBefore = await request(app)
+        .get(`/api/v1/revenue/tax-recap?month=${ym}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(recapBefore.body.data.rows.some((r: any) => r.id === pendingPayId)).toBe(false);
+
+      // 2. Non-approver (CASHIER) is blocked with 403 when trying to approve
+      const forbiddenApp = await request(app)
+        .post(`/api/v1/revenue/payments/${pendingPayId}/approve`)
+        .set('Authorization', `Bearer ${cashierToken}`);
+      expect(forbiddenApp.status).toBe(403);
+
+      // 3. PIC clicks Remind -> succeeds, increments reminderCount=1, second click hits 429 cooldown
+      const rem1 = await request(app)
+        .post(`/api/v1/revenue/payments/${pendingPayId}/remind`)
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({});
+      expect(rem1.status).toBe(200);
+      expect(rem1.body.data.reminderCount).toBe(1);
+
+      const rem2 = await request(app)
+        .post(`/api/v1/revenue/payments/${pendingPayId}/remind`)
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({});
+      expect(rem2.status).toBe(429);
+      expect(rem2.body.error.code).toBe('REMIND_COOLDOWN');
+
+      // 4. Manager Finance rejects with revision note -> PIC resubmits -> Manager Finance approves
+      const rejRes = await request(app)
+        .post(`/api/v1/revenue/payments/${pendingPayId}/reject`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ reason: 'Nominal perlu disesuaikan sesuai bukti transfer' });
+      expect(rejRes.status).toBe(200);
+      expect(rejRes.body.data.approvalStatus).toBe('REJECTED');
+
+      const resubRes = await request(app)
+        .post(`/api/v1/revenue/payments/${pendingPayId}/resubmit`)
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({ grossAmount: 2220000, notes: 'Sudah disesuaikan' });
+      expect(resubRes.status).toBe(200);
+      expect(resubRes.body.data.approvalStatus).toBe('PENDING_APPROVAL');
+
+      const appRes = await request(app)
+        .post(`/api/v1/revenue/payments/${pendingPayId}/approve`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(appRes.status).toBe(200);
+      expect(appRes.body.data.approvalStatus).toBe('APPROVED');
+      expect(appRes.body.data.status).toBe('CONFIRMED');
+      expect(appRes.body.data.journalEntryId).toBeTruthy();
+
+      // Verify journal was posted into monthly FP-* period (NOT FY-2027!)
+      const postedJournal = await prisma.journalEntry.findUnique({
+        where: { id: appRes.body.data.journalEntryId },
+        include: { fiscalPeriod: true },
+      });
+      expect(postedJournal?.fiscalPeriod?.code).not.toBe('FY-2027');
+
+      // Appears in tax-recap after approval
+      const recapAfter = await request(app)
+        .get(`/api/v1/revenue/tax-recap?month=${ym}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(recapAfter.body.data.rows.some((r: any) => r.id === pendingPayId)).toBe(true);
+
+      // 5. Manager Finance voids approved payment -> posts reversal journal & removes from tax-recap
+      const voidPayRes = await request(app)
+        .post(`/api/v1/revenue/payments/${pendingPayId}/void`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ reason: 'Uji pembatalan dokumen disetujui' });
+      expect(voidPayRes.status).toBe(200);
+      expect(voidPayRes.body.data.status).toBe('VOID');
+
+      // 6. Invoice supporting proof upload & retrieval works BEFORE approval
+      const invProofTarget = await request(app)
+        .post('/api/v1/revenue/invoices')
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({
+          customerId: testCustomerId,
+          businessUnitId: unitTciId,
+          invoiceType: 'PELUNASAN',
+          activityTitle: `Uji Bukti Invoice ${runTag}`,
+          rincianLabel: 'Pelatihan TCI',
+          revenueAccountCode: '420301010200',
+          taxScheme: 'PPN12_PPH23',
+          taxInclusive: true,
+          taxCollectorProfile: 'FP_040_UMUM',
+          lines: [{ description: 'Paket Sertifikasi', quantity: 1, unitPrice: 1110000 }],
+        });
+      expect(invProofTarget.status).toBe(201);
+      const pendingInvId = invProofTarget.body.data.id;
+      expect(invProofTarget.body.data.approvalStatus).toBe('PENDING_APPROVAL');
+
+      const invProofUp = await request(app)
+        .post(`/api/v1/revenue/customer-invoices/${pendingInvId}/proof`)
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({ dataUrl: tinyPngBase64, fileName: `po-klien-${runTag}.png` });
+      expect(invProofUp.status).toBe(201);
+
+      const invProofGet = await request(app)
+        .get(`/api/v1/revenue/customer-invoices/${pendingInvId}/proof`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(invProofGet.status).toBe(200);
+      expect(invProofGet.headers['content-type']).toContain('image/png');
+
+      // 7. REVENUE_OPERATOR (Operator Penerimaan) has 4-unit Penerimaan access, NO Pengeluaran access, and NO approve privilege
+      const opLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: 'penerimaan@pmoutama.demo.id', password: 'DemoErp!2026' });
+      expect(opLogin.status).toBe(200);
+      const opToken = opLogin.body.data.token;
+      expect(opLogin.body.data.user.roleCode).toBe('REVENUE_OPERATOR');
+
+      const [opDash, opRecon, opBudgetBlocked, opApproveBlocked] = await Promise.all([
+        request(app).get('/api/v1/reports/dashboard').set('Authorization', `Bearer ${opToken}`),
+        request(app).get('/api/v1/reconciliation/bank-accounts').set('Authorization', `Bearer ${opToken}`),
+        request(app).get('/api/v1/budgets').set('Authorization', `Bearer ${opToken}`),
+        request(app).post(`/api/v1/revenue/customer-invoices/${pendingInvId}/approve`).set('Authorization', `Bearer ${opToken}`),
+      ]);
+      expect(opDash.status).toBe(200);
+      expect(opDash.body.data.roleProfile.allowedWorkspaces).toEqual(['PENERIMAAN']);
+      expect(opRecon.status).toBe(200);
+      expect(opBudgetBlocked.status).toBe(403);
+      expect(opApproveBlocked.status).toBe(403);
+
+      // 8. Reconciliation Excel (.xlsx) template download & upload round-trip parser
+      const tplRes = await request(app)
+        .get('/api/v1/reconciliation/template.xlsx?domain=PENERIMAAN&accountCode=BNK-MDR-01')
+        .set('Authorization', `Bearer ${opToken}`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        });
+      expect(tplRes.status).toBe(200);
+      expect(tplRes.headers['content-type']).toContain('spreadsheetml.sheet');
+      const xlsxBuf = tplRes.body as Buffer;
+      expect(xlsxBuf.length).toBeGreaterThan(1000);
+
+      const parseXlsxRes = await request(app)
+        .post('/api/v1/reconciliation/parse-file')
+        .set('Authorization', `Bearer ${opToken}`)
+        .send({
+          fileName: 'template-mutasi-bnk-mdr-01.xlsx',
+          fileBase64: xlsxBuf.toString('base64'),
+        });
+      expect(parseXlsxRes.status).toBe(200);
+      expect(parseXlsxRes.body.data.totalRows).toBe(2);
+      expect(parseXlsxRes.body.data.totalCredit).toBe(5000000);
+      expect(parseXlsxRes.body.data.totalDebit).toBe(25000);
+      expect(parseXlsxRes.body.data.rows[0].direction).toBe('CREDIT');
+      expect(parseXlsxRes.body.data.rows[1].direction).toBe('DEBIT');
+    });
+
+    afterAll(async () => {
+      // Self-clean Section 28 test data so repeated test runs do not clutter Buku Harian
+      try {
+        const testPays = await prisma.payment.findMany({
+          where: {
+            OR: [
+              { customerId: testCustomerId },
+              { referenceNo: { in: [`WSM-${runTag}`, `KLN-${runTag}`, `APR-${runTag}`] } },
+              { payerName: { in: ['Tamu CSV 1', 'Pasien Klinik CSV'] }, createdAt: { gte: new Date(Date.now() - 120000) } },
+            ],
+          },
+          select: { id: true, journalEntryId: true, receiptNumber: true },
+        });
+        const payIds = testPays.map((p) => p.id);
+        const testInvs = await prisma.customerInvoice.findMany({
+          where: { customerId: testCustomerId },
+          select: { id: true, docNumber: true },
+        });
+        const invIds = testInvs.map((i) => i.id);
+
+        await prisma.fileAttachment.deleteMany({
+          where: {
+            OR: [
+              { module: 'REVENUE_PAYMENT', entityId: { in: payIds } },
+              { module: 'REVENUE_INVOICE', entityId: { in: invIds } },
+            ],
+          },
+        });
+        await prisma.notification.deleteMany({
+          where: { entityId: { in: [...payIds, ...invIds] } },
+        });
+        await prisma.bankStatementImport.deleteMany({ where: { fileName: `mandiri-uji-${runTag}.csv` } });
+        await prisma.payment.deleteMany({ where: { id: { in: payIds } } });
+        await prisma.customerInvoice.deleteMany({ where: { id: { in: invIds } } });
+
+        const jIds = testPays.map((p) => p.journalEntryId).filter(Boolean) as string[];
+        const jWhereOr: any[] = [];
+        if (jIds.length) jWhereOr.push({ id: { in: jIds } });
+        if (payIds.length) jWhereOr.push({ sourceId: { in: payIds } });
+        if (invIds.length) jWhereOr.push({ sourceId: { in: invIds } });
+        if (jWhereOr.length) {
+          await prisma.journalEntry.deleteMany({ where: { OR: jWhereOr } });
+        }
+        if (testCustomerId) {
+          await prisma.customer.delete({ where: { id: testCustomerId } }).catch(() => { });
+        }
+      } catch {
+        // Non-fatal test cleanup guard
       }
     });
   });

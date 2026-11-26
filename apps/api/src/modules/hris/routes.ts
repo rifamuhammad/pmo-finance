@@ -19,8 +19,9 @@ export const SBM_2026 = {
   COA_BEBAN_LEMBUR_NON_PNS: '520101050200', // Beban Lembur Pendukung Kegiatan Operasional - Non PNS
   COA_BEBAN_UANG_MAKAN_NON_PNS: '520101060200', // Beban Uang Makan Tenaga Kependidikan - Non PNS
   COA_UTANG_PPH21: '210201010100', // Utang Pajak PPh Pasal 21
-  COA_UTANG_TITIPAN_BPJS: '210301010100', // Beban Akrual / Yang Masih Harus Dibayar (Titipan BPJS)
-  COA_BANK_BRI: '110101020200', // Bank BRI Penerimaan Komersial PMO
+  COA_UTANG_TITIPAN_BPJS: '210101010200', // Utang Pada Pihak Ketiga (Titipan BPJS - Pertor 310)
+  COA_BANK_BTN: '110102010300', // Rekening Giro Bank Pengeluaran Operasional PMO (Pertor 310)
+  COA_BANK_BRI: '110102010300', // Alias kompatibilitas -> Rekening Giro Bank Pengeluaran PMO
 };
 
 // PPh 21 Tarif Efektif Rata-rata (TER) PMK 168/2023 & PP 58/2023
@@ -1625,7 +1626,8 @@ hrisRouter.post('/payroll/calculate', async (req, res, next) => {
           bebanUangMakanCoa: SBM_2026.COA_BEBAN_UANG_MAKAN_NON_PNS,
           utangPph21Coa: SBM_2026.COA_UTANG_PPH21,
           utangBpjsCoa: SBM_2026.COA_UTANG_TITIPAN_BPJS,
-          bankBriCoa: SBM_2026.COA_BANK_BRI,
+          bankBtnCoa: SBM_2026.COA_BANK_BTN,
+          bankBriCoa: SBM_2026.COA_BANK_BTN,
         },
       },
       meta: { requestId: req.requestId },

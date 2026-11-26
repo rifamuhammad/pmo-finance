@@ -1097,6 +1097,7 @@ function isCoreRole(code: string): boolean {
     'UNIT_MANAGER',
     'ACCOUNTING',
     'PROCUREMENT',
+    'REVENUE_OPERATOR',
     'CASHIER',
     'AUDITOR',
     'TAX_OFFICER',

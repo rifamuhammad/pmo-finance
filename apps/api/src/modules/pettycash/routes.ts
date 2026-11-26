@@ -551,10 +551,10 @@ pettyCashRouter.post('/submissions', async (req, res, next) => {
     const applicantUnit = String(body.proposerUnit || body.applicantUnit || 'Operasional & Kantor Pusat PMO').trim();
     const applicantPhone = String(body.proposerPhone || body.applicantPhone || '-').trim();
     const expenseCategory = String(body.budgetType || body.expenseCategory || 'Anggaran Operasional').trim();
-    const draUkCode = String(body.draCode || body.draUkCode || '5-1200').trim();
-    const draUkName = String(body.draDescription || body.draUkName || 'Alokasi Anggaran Operasional').trim();
-    const coaCode = String(body.coaCode || '5-1200').trim();
-    const coaName = String(body.coaName || 'Beban Operasional Layanan & Proyek').trim();
+    const draUkCode = String(body.draCode || body.draUkCode || '520201010100').trim();
+    const draUkName = String(body.draDescription || body.draUkName || 'Beban Barang Habis Pakai Pendukung Operasional').trim();
+    const coaCode = String(body.coaCode || '520201010100').trim();
+    const coaName = String(body.coaName || 'Beban Barang Habis Pakai Pendukung Operasional').trim();
     const activityDescription = String(body.activityDetail || body.activityDescription || '').trim();
     const vendorName = String(body.vendorName || '').trim();
     const vendorTaxId = String(body.vendorTaxId || '00.000.000.0-000.000').trim();
@@ -1025,7 +1025,7 @@ pettyCashRouter.post('/submissions/:id/disburse', async (req, res, next) => {
 
       // 2. Tentukan akun Kredit Kas/Bank atau UMK
       const isGup = sub.type === 'GUP';
-      let creditAccount = isGup ? '110101020200' : '110501010100';
+      let creditAccount = isGup ? '110102010300' : '110501010100';
       const checkCredit = await tx.chartOfAccount.findUnique({ where: { code: creditAccount } });
       if (!checkCredit) {
         creditAccount = isGup ? '1-1120' : '1-1110';

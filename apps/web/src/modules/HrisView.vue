@@ -566,7 +566,7 @@ onMounted(loadData);
           <span class="erp-badge erp-badge-success">Disbursed</span>
         </div>
         <div class="metric-value text-emerald">Terbayar Lunas</div>
-        <div class="metric-sub">Payroll via Bank BRI Operasional 110101020200</div>
+        <div class="metric-sub">Payroll via Bank Pengeluaran PMO 110102010300</div>
       </div>
     </section>
 
@@ -1085,7 +1085,7 @@ onMounted(loadData);
               <strong>Standar Biaya Masukan &amp; PPh 21 TER Pegawai PUT PK PMO</strong>
             </div>
             <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--text-muted);">
-              Perhitungan gaji pokok, uang makan SBM (Rp 37.000/hari), uang lembur (Rp 20.000/jam), potongan BPJS 4%, dan pemotongan PPh 21 Tarif Efektif Rata-rata (TER). Pembebanan otomatis ke akun Pertor 310: Beban Gaji <code>520101030100</code>, Utang PPh 21 <code>210201010100</code>, dan Bank BRI <code>110101020200</code>.
+              Perhitungan gaji pokok, uang makan SBM (Rp 37.000/hari), uang lembur (Rp 20.000/jam), potongan BPJS 4%, dan pemotongan PPh 21 Tarif Efektif Rata-rata (TER). Pembebanan otomatis ke akun Pertor 310: Beban Gaji <code>520101030100</code>, Utang PPh 21 <code>210201010100</code>, dan Bank Pengeluaran <code>110102010300</code>.
             </p>
           </div>
         </div>
@@ -1234,7 +1234,7 @@ onMounted(loadData);
               <span class="doc-code">Debit Gaji: {{ calcResult.accountingMapping.bebanGajiCoa }}</span>
               <span class="doc-code">Debit Uang Makan: {{ calcResult.accountingMapping.bebanUangMakanCoa }}</span>
               <span class="doc-code">Kredit Utang PPh 21: {{ calcResult.accountingMapping.utangPph21Coa }}</span>
-              <span class="doc-code">Kredit Kas Bank: {{ calcResult.accountingMapping.bankBriCoa }} (Bank BRI)</span>
+              <span class="doc-code">Kredit Kas Bank: {{ calcResult.accountingMapping.bankBtnCoa || calcResult.accountingMapping.bankBriCoa }} (Bank BTN)</span>
             </div>
           </div>
         </div>

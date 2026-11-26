@@ -313,11 +313,11 @@ watch(
 );
 
 const LEGACY_COA_MAP: Record<string, { code: string; name: string }> = {
-  '5-1100': { code: '520101030100', name: 'Belanja Pegawai Tidak Tetap (Gaji PUT PK)' },
-  '5-1200': { code: '520201010100', name: 'Belanja Bahan & Perlengkapan Operasional Unit' },
-  '5-1300': { code: '520101040100', name: 'Belanja Lembur & Honorarium Instruktur' },
-  '5-1400': { code: '520201010200', name: 'Belanja Pemeliharaan Sarana & Utilitas' },
-  '5-1500': { code: '520501010100', name: 'Beban Administrasi Bank & Payment Gateway' },
+  '5-1100': { code: '520101030100', name: 'Beban Gaji Tenaga Kependidikan PUT PK' },
+  '5-1200': { code: '520201010100', name: 'Beban Barang Habis Pakai Pendukung Operasional' },
+  '5-1300': { code: '520401020100', name: 'Beban Jasa Tenaga Ahli' },
+  '5-1400': { code: '520901060100', name: 'Beban Pemeliharaan Unit Usaha' },
+  '5-1500': { code: '590101010300', name: 'Beban Administrasi Rekening' },
 };
 
 function selectBudgetLineById(lineId: string) {
@@ -1469,9 +1469,9 @@ onMounted(loadAllData);
               <span class="journal-pill">Simulasi Jurnal Buku Besar</span>
               <span>
                 <strong>Debet:</strong> {{ formAjuan.coaCode }} ({{ formatCurrency(grossTransactionValue) }}) ·
-                <strong>Kredit:</strong> 1-1100 Kas/Bank UP ({{ formatCurrency(netPayableToVendor) }})
+                <strong>Kredit:</strong> {{ activeModuleTab === 'TUP_NIHIL' ? '110501010100 Uang Muka Kegiatan' : '110102010300 Rekening Giro Bank Pengeluaran' }} ({{ formatCurrency(netPayableToVendor) }})
                 <template v-if="pphValue > 0">
-                  &amp; 2-1200 Utang Pajak PPh ({{ formatCurrency(pphValue) }})
+                  &amp; 210201010300 Utang PPh ({{ formatCurrency(pphValue) }})
                 </template>
               </span>
             </div>
@@ -1634,7 +1634,7 @@ onMounted(loadAllData);
             <div style="font-size: 0.76rem; margin-top: 3px; color: #166534">
               {{ selectedSubmission.type === 'TUP_NIHIL'
                 ? 'Jurnal Penutupan Panjar UMK Pertor 310: Debit Beban 5xxxx vs Kredit 110501010100 (Uang Muka Kegiatan Pegawai UT)'
-                : 'Jurnal Reimbursement GUP Pertor 310: Debit Beban 5xxxx vs Kredit 110101020200 (Bank BRI Kas Operasional)' }}
+                : 'Jurnal Reimbursement GUP Pertor 310: Debit Beban 5xxxx vs Kredit 110102010300 (Rekening Giro Bank Pengeluaran PMO)' }}
             </div>
           </div>
         </div>

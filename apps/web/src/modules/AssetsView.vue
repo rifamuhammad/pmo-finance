@@ -226,8 +226,8 @@ const liveExpenditureEval = computed(() => {
     isCapitalized,
     treatment: isCapitalized ? 'KAPITALISASI KE ASET TETAP' : 'BEBAN PEMELIHARAAN (EXPENSED)',
     badgeClass: isCapitalized ? 'erp-badge-success' : 'erp-badge-warn',
-    debitCoa: isCapitalized ? '120301010100 (Aset Tetap - Peralatan & Mesin)' : '520901060100 (Beban Pemeliharaan Unit Usaha)',
-    creditCoa: '110101020200 (Bank BRI Operasional PMO)',
+    debitCoa: isCapitalized ? '120303010100 (Peralatan dan Mesin)' : '520901060100 (Beban Pemeliharaan Unit Usaha)',
+    creditCoa: '110102010300 (Rekening Giro Bank Pengeluaran PMO)',
     impactDescription: isCapitalized
       ? `Rasio pengeluaran ${ratio}% (>10% dari nilai buku). Memenuhi ISAK 335 & Pertor 310: Nilai buku bertambah dari ${formatCurrency(bookVal)} menjadi ${formatCurrency(bookVal + amount)}.`
       : `Rasio pengeluaran ${ratio}% (<=10% dari nilai buku). Tidak memenuhi batas kapitalisasi: Diakui sebagai beban pemeliharaan operasional berjalan, nilai buku tetap ${formatCurrency(bookVal)}.`,
@@ -537,12 +537,12 @@ onMounted(loadData);
         <div class="compliance-item">
           <span class="compliance-tag tag-blue">Perolehan Baru</span>
           <div class="compliance-val">Min. Rp 1.000.000</div>
-          <p class="compliance-sub">Peralatan, Mesin &amp; TI &ge; Rp 1 Jt dikapitalisasi ke Aset Tetap (120301010100). Di bawah batas dibebankan langsung ke Beban Perlengkapan.</p>
+          <p class="compliance-sub">Peralatan, Mesin &amp; TI &ge; Rp 1 Jt dikapitalisasi ke Aset Tetap (120303010100). Di bawah batas dibebankan langsung ke Beban Perlengkapan.</p>
         </div>
         <div class="compliance-item">
           <span class="compliance-tag tag-emerald">Renovasi &gt; 10% Nilai Buku</span>
           <div class="compliance-val">Kapitalisasi (Aset +)</div>
-          <p class="compliance-sub">Pengeluaran perbaikan &gt; 10% nilai buku bersih menambah nilai aset dan masa manfaat. Debet Aset Tetap, Kredit Kas/Bank BRI.</p>
+          <p class="compliance-sub">Pengeluaran perbaikan &gt; 10% nilai buku bersih menambah nilai aset dan masa manfaat. Debet Aset Tetap, Kredit Kas/Bank BTN.</p>
         </div>
         <div class="compliance-item">
           <span class="compliance-tag tag-amber">Perbaikan &le; 10% Nilai Buku</span>
@@ -1273,7 +1273,7 @@ onMounted(loadData);
           />
           <label for="chkPostJournal" style="cursor: pointer; font-size: 0.9rem;">
             <strong>Posting Jurnal Otomatis ke Buku Besar (General Ledger)</strong>
-            <div class="table-sub">Debet: Beban Penyusutan (520901030100) | Kredit: Akumulasi Penyusutan (120301020100)</div>
+            <div class="table-sub">Debet: Beban Penyusutan (520901030100) | Kredit: Akumulasi Depresiasi (120307020100)</div>
           </label>
         </div>
 

@@ -47,24 +47,27 @@ interface DockItem {
   badge?: string;
   badgeColor?: string;
   permission?: string;
+  domains: Array<'ALL' | 'PENERIMAAN' | 'PENGELUARAN'>;
   isDividerAfter?: boolean;
 }
 
 const dockItems = computed<DockItem[]>(() => [
   {
     id: 'home',
-    name: 'Menu Aplikasi (Launchpad)',
+    name: 'Gerbang Utama (Penerimaan / Pengeluaran)',
     route: '/',
     action: 'home',
     gradient: 'linear-gradient(135deg, #1e293b, #0f172a)',
     icon: 'launchpad',
+    domains: ['ALL', 'PENERIMAAN', 'PENGELUARAN'],
   },
   {
     id: 'dashboard',
-    name: 'Executive Dashboard',
+    name: 'Dashboard Peran Saya',
     route: '/dashboard',
     gradient: 'linear-gradient(135deg, #034693, #022b5c)',
     icon: 'dashboard',
+    domains: ['ALL', 'PENERIMAAN', 'PENGELUARAN'],
   },
   {
     id: 'approvals',
@@ -75,64 +78,82 @@ const dockItems = computed<DockItem[]>(() => [
     icon: 'approvals',
     badge: auth.pendingApprovalsCount > 0 ? String(auth.pendingApprovalsCount) : undefined,
     badgeColor: '#ef4444',
+    domains: ['ALL', 'PENGELUARAN'],
   },
   {
     id: 'budgets',
-    name: 'Perencanaan Anggaran',
+    name: 'Perencanaan & Pagu (e-Budgeting)',
     route: '/budgets',
     permission: 'budget:view',
     gradient: 'linear-gradient(135deg, #059669, #065f46)',
     icon: 'budgets',
+    domains: ['ALL', 'PENGELUARAN'],
   },
   {
     id: 'procurement',
-    name: 'Pengadaan & PO',
+    name: 'Pengadaan & Bayar',
     route: '/procurement',
     permission: 'procurement:view',
     gradient: 'linear-gradient(135deg, #0284c7, #0369a1)',
     icon: 'procurement',
-  },
-  {
-    id: 'expenses',
-    name: 'Klaim Biaya (Expenses)',
-    route: '/procurement?tab=expenses',
-    permission: 'expense:view',
-    gradient: 'linear-gradient(135deg, #e11d48, #9f1239)',
-    icon: 'expenses',
+    domains: ['ALL', 'PENGELUARAN'],
   },
   {
     id: 'revenue',
-    name: 'Penagihan & Faktur',
+    name: 'Buku Harian (Invoice, Kwitansi & Tanda Terima)',
     route: '/revenue',
     permission: 'revenue:view',
-    gradient: 'linear-gradient(135deg, #ea580c, #9a3412)',
+    gradient: 'linear-gradient(135deg, #059669, #047857)',
     icon: 'revenue',
+    domains: ['ALL', 'PENERIMAAN'],
   },
   {
     id: 'reconciliation',
-    name: 'Kas & Rekonsiliasi Bank',
+    name: 'Rekonsiliasi Rekening Bank',
     route: '/reconciliation',
     permission: 'reconciliation:view',
     gradient: 'linear-gradient(135deg, #0d9488, #115e59)',
     icon: 'reconciliation',
+    domains: ['ALL', 'PENERIMAAN', 'PENGELUARAN'],
+  },
+  {
+    id: 'penerimaan-pembukuan',
+    name: 'Pembukuan Penerimaan (Umum & Pajak)',
+    route: '/penerimaan/pembukuan',
+    permission: 'revenue:view',
+    gradient: 'linear-gradient(135deg, #4f46e5, #3730a3)',
+    icon: 'accounting',
+    domains: ['PENERIMAAN'],
+  },
+  {
+    id: 'penerimaan-laporan',
+    name: 'Laporan Penerimaan & Aging',
+    route: '/penerimaan/laporan',
+    permission: 'revenue:view',
+    gradient: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+    icon: 'reports',
+    domains: ['PENERIMAAN'],
+    isDividerAfter: true,
   },
   {
     id: 'accounting',
     name: 'Akuntansi & Buku Besar',
     route: '/accounting',
     permission: 'accounting:view',
-    gradient: 'linear-gradient(135deg, #4f46e5, #3730a3)',
+    gradient: 'linear-gradient(135deg, #1d4ed8, #1e3a8a)',
     icon: 'accounting',
+    domains: ['ALL', 'PENGELUARAN'],
   },
   {
     id: 'petty-cash',
-    name: 'Uang Persediaan & SPJ',
+    name: 'Uang Persediaan & Pajak (e-Tax)',
     route: '/petty-cash',
     permission: 'procurement:view',
-    gradient: 'linear-gradient(135deg, #7c3aed, #5b21b6)',
+    gradient: 'linear-gradient(135deg, #b45309, #78350f)',
     icon: 'petty-cash',
     badge: 'GUP',
-    badgeColor: '#0ea5e9',
+    badgeColor: '#d97706',
+    domains: ['ALL', 'PENGELUARAN'],
   },
   {
     id: 'assets',
@@ -143,46 +164,64 @@ const dockItems = computed<DockItem[]>(() => [
     icon: 'assets',
     badge: 'PBI UT',
     badgeColor: '#f59e0b',
+    domains: ['ALL', 'PENGELUARAN'],
   },
   {
     id: 'hris',
-    name: 'SDM & Payroll PMO',
+    name: 'Honorarium & LS Gaji (HRIS)',
     route: '/hris',
     permission: 'admin:view',
-    gradient: 'linear-gradient(135deg, #059669, #047857)',
+    gradient: 'linear-gradient(135deg, #0f766e, #115e59)',
     icon: 'hris',
+    domains: ['ALL', 'PENGELUARAN'],
   },
   {
     id: 'reports',
-    name: 'Laporan Keuangan',
+    name: 'Laporan Keuangan (ISAK 335)',
     route: '/reports',
     permission: 'report:view',
     gradient: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
     icon: 'reports',
-    isDividerAfter: true, // Pemisah aplikasi operasional vs sistem/AI
+    domains: ['ALL', 'PENGELUARAN'],
+    isDividerAfter: true,
   },
   {
     id: 'admin',
-    name: 'Pengaturan & Audit',
+    name: 'Pengaturan & Audit SPI',
     route: '/admin',
     permission: 'admin:view',
     gradient: 'linear-gradient(135deg, #475569, #1e293b)',
     icon: 'admin',
+    domains: ['ALL'],
   },
   {
     id: 'ai',
     name: 'AI Financial Assistant',
     action: 'ai',
-    gradient: 'linear-gradient(135deg, #7c3aed, #4c1d95)',
+    gradient: 'linear-gradient(135deg, #034693, #022a5b)',
     icon: 'ai',
     badge: 'AI',
-    badgeColor: '#a855f7',
+    badgeColor: '#0284c7',
+    domains: ['ALL', 'PENERIMAAN', 'PENGELUARAN'],
   },
 ]);
 
-// Show all items on the Dock so users can visually recognize what features exist,
-// while unauthorized modules are disabled, badged with 🔒, and prevented from opening.
-const visibleItems = computed(() => dockItems.value);
+// Filter dock cleanly by active workspace (Penerimaan vs Pengeluaran) & RBAC
+const visibleItems = computed(() => {
+  const ws = auth.activeWorkspace;
+  return dockItems.value.filter((item) => {
+    if (item.permission && !auth.hasPermission(item.permission)) {
+      return false;
+    }
+    if (ws === 'PENERIMAAN') {
+      return item.domains.includes('PENERIMAAN');
+    }
+    if (ws === 'PENGELUARAN') {
+      return item.domains.includes('PENGELUARAN');
+    }
+    return true;
+  });
+});
 
 function isItemLocked(item: DockItem): boolean {
   if (!item.permission) return false;
@@ -192,8 +231,6 @@ function isItemLocked(item: DockItem): boolean {
 function isItemActive(item: DockItem): boolean {
   if (item.action === 'home') return false;
   if (!item.route) return false;
-  if (item.id === 'expenses') return route.path === '/procurement' && route.query.tab === 'expenses';
-  if (item.id === 'procurement') return route.path === '/procurement' && route.query.tab !== 'expenses';
   return route.path.startsWith(item.route);
 }
 
@@ -211,7 +248,8 @@ function handleItemClick(item: DockItem) {
   if (item.action === 'ai') {
     emit('open-ai');
   } else if (item.action === 'home') {
-    emit('open-launchpad');
+    auth.resetWorkspace();
+    router.push('/');
   } else if (item.route) {
     router.push(item.route);
   }
@@ -752,10 +790,21 @@ function handleItemClick(item: DockItem) {
 }
 
 @media (max-width: 768px) {
+  .mac-dock-wrapper {
+    max-width: calc(100vw - 16px);
+  }
+
   .mac-dock-glass {
     gap: 5px;
     padding: 6px 10px 4px;
     border-radius: 16px;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .mac-dock-glass::-webkit-scrollbar {
+    display: none;
   }
 
   .dock-squircle {
@@ -765,7 +814,7 @@ function handleItemClick(item: DockItem) {
   }
 
   .dock-item:hover {
-    transform: translateY(-4px) scale(1.15);
+    transform: translateY(-4px) scale(1.12);
   }
 }
 </style>

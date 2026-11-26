@@ -1445,7 +1445,7 @@ procurementRouter.post('/expenses/:id/pay', requirePermission('expense:pay'), as
         debitDescription = `Realisasi beban: ${expense.title}`;
       }
 
-      let creditAccount = expense.paymentMethod === 'PETTY_CASH' ? '110501010100' : '110101020200';
+      let creditAccount = expense.paymentMethod === 'PETTY_CASH' ? '110501010100' : '110102010300';
       const checkCredit = await tx.chartOfAccount.findUnique({ where: { code: creditAccount } });
       if (!checkCredit) {
         creditAccount = expense.paymentMethod === 'PETTY_CASH' ? '1-1110' : '1-1120';

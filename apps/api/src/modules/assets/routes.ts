@@ -16,11 +16,12 @@ export const CAPITALIZATION_RULES = {
   MIN_THRESHOLD_BUILDING: 20_000_000,  // Rp 20.000.000 (Gedung, Bangunan, Renovasi Struktural)
   SUBSEQUENT_EXPENSE_RATIO_PERCENT: 10.0, // Batas 10% dari Nilai Buku Bersih (Net Book Value)
   COA_MAPPING: {
-    ASSET_EQUIPMENT: '120301010100', // Aset Tetap - Peralatan & Mesin Kantor
-    ASSET_BUILDING: '120301010100',  // Aset Tetap
+    ASSET_EQUIPMENT: '120303010100', // Peralatan dan Mesin (Pertor 310)
+    ASSET_BUILDING: '120303010100',  // Aset Tetap
     MAINTENANCE_EXPENSE: '520901060100', // Beban Pemeliharaan Unit Usaha (Pengeluaran <= 10%)
     LOW_VALUE_EXPENSE: '520901020100',   // Beban Barang dan Perlengkapan Unit Usaha (< Ambang Batas)
-    CREDIT_BANK_BRI: '110101020200',     // Bank BRI Operasional PMO
+    CREDIT_BANK_BTN: '110102010300',     // Rekening Giro Bank Pengeluaran Operasional PMO (Pertor 310)
+    CREDIT_BANK_BRI: '110102010300',     // Alias kompatibilitas -> Rekening Giro Bank Pengeluaran PMO
   },
   REGULATORY_REFERENCE: 'ISAK 335 & Peraturan Rektor UT No. 310 Tahun 2024 tentang Tata Kelola Aset Tetap PTN-BH',
 };
@@ -101,7 +102,7 @@ export const DEPRECIATION_RULES = {
   CUTOFF_DAY: 20, // Batas cut-off tanggal 20 perolehan aset
   METHOD: 'STRAIGHT_LINE',
   COA_DEBIT: '520901030100', // Beban Penyusutan Aset Tetap - Peralatan & Mesin
-  COA_CREDIT: '120301020100', // Akumulasi Penyusutan Peralatan & Mesin
+  COA_CREDIT: '120307020100', // Akumulasi Depresiasi Peralatan dan Mesin (Pertor 310)
   STANDARDS_REFERENCE: 'ISAK 335 & Peraturan Rektor UT No. 310 Tahun 2024 tentang Tata Kelola Aset Tetap PTN-BH',
 };
 
@@ -222,11 +223,11 @@ async function ensureAssetSeedData() {
       },
     });
     await prisma.chartOfAccount.upsert({
-      where: { code: '120301020100' },
-      update: { name: 'Akumulasi Penyusutan Peralatan & Mesin', isActive: true },
+      where: { code: '120307020100' },
+      update: { name: 'Akumulasi Depresiasi Peralatan dan Mesin', isActive: true },
       create: {
-        code: '120301020100',
-        name: 'Akumulasi Penyusutan Peralatan & Mesin',
+        code: '120307020100',
+        name: 'Akumulasi Depresiasi Peralatan dan Mesin',
         type: 'ASSET',
         normalBalance: 'CREDIT',
         isControlAccount: false,

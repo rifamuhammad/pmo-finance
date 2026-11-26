@@ -13,7 +13,10 @@ reportsRouter.use(requireAuth);
 // 1. EXECUTIVE & ROLE-AWARE DASHBOARD
 reportsRouter.get('/dashboard', async (req, res, next) => {
   try {
-    const { businessUnitId, fiscalPeriodId } = req.query;
+    const { businessUnitId, fiscalPeriodId, range } = req.query;
+    const requestedRange = typeof range === 'string' && ['weekly', 'monthly', 'quarterly', 'yearly'].includes(range)
+      ? (range as 'weekly' | 'monthly' | 'quarterly' | 'yearly')
+      : 'monthly';
     const unitFilter: Record<string, unknown> = {};
 
     if (req.user!.businessUnitId && ['UNIT_MANAGER', 'CASHIER'].includes(req.user!.roleCode)) {
@@ -44,6 +47,11 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
       salesOrders,
       customers,
       productServices,
+      accounts,
+      postedJournalLines,
+      purchaseRequests,
+      purchaseOrders,
+      pettyCashSubmissions,
     ] = await Promise.all([
       prisma.budget.findMany({
         where: budgetFilter,
@@ -87,6 +95,28 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
       prisma.productService.findMany({
         where: unitFilter,
         include: { businessUnit: true },
+      }),
+      prisma.chartOfAccount.findMany({ orderBy: { code: 'asc' } }),
+      prisma.journalLine.findMany({
+        where: {
+          journalEntry: {
+            status: 'POSTED',
+            ...(unitFilter.businessUnitId ? { businessUnitId: unitFilter.businessUnitId as string } : {}),
+          },
+        },
+        include: { account: true, journalEntry: true },
+      }),
+      prisma.purchaseRequest.findMany({
+        where: unitFilter,
+        select: { id: true, status: true, estimatedTotal: true },
+      }),
+      prisma.purchaseOrder.findMany({
+        where: unitFilter,
+        select: { id: true, status: true, totalAmount: true },
+      }),
+      prisma.pettyCashSubmission.findMany({
+        where: unitFilter.businessUnitId ? { businessUnitId: unitFilter.businessUnitId as string } : {},
+        select: { id: true, status: true, type: true, totalTransaction: true },
       }),
     ]);
 
@@ -366,10 +396,481 @@ reportsRouter.get('/dashboard', async (req, res, next) => {
       },
     };
 
+    // -------------------------------------------------------------
+    // PORTFOLIO PNL (1W / 1M / 1Q / 1Y), BALANCE SHEET (NERACA) & ROLE PROFILES
+    // -------------------------------------------------------------
+    const now = new Date();
+    const accMap = new Map(accounts.map((a) => [a.code, a]));
+
+    // 1. Live Balance Sheet (Neraca ISAK 335) directly from POSTED JournalLines
+    const accBalances = new Map<string, bigint>();
+    for (const jl of postedJournalLines) {
+      const acc = jl.account || accMap.get(jl.accountCode);
+      if (!acc) continue;
+      const dCents = toCents(jl.debit);
+      const cCents = toCents(jl.credit);
+      const isContraAsset = acc.type === 'ASSET' && acc.normalBalance === 'CREDIT';
+      const delta = isContraAsset || acc.normalBalance === 'DEBIT' ? dCents - cCents : cCents - dCents;
+      accBalances.set(acc.code, (accBalances.get(acc.code) || 0n) + delta);
+    }
+
+    let cashAndBankCents = 0n;
+    let receivablesCents = 0n;
+    let fixedAssetsNetCents = 0n;
+    let otherAssetsCents = 0n;
+    let payablesCents = 0n;
+    let taxPayablesCents = 0n;
+    let deferredRevenueCents = 0n;
+    let otherLiabilitiesCents = 0n;
+    let unrestrictedBaseCents = 0n;
+    let restrictedBaseCents = 0n;
+    let totalJournalRevenueCents = 0n;
+    let totalJournalExpenseCents = 0n;
+
+    for (const [code, balCents] of accBalances.entries()) {
+      const acc = accMap.get(code);
+      if (!acc) continue;
+      if (acc.type === 'ASSET') {
+        if (code.startsWith('1101') || code === '110501010100' || code === '1-1110' || code === '1-1120' || code === '1-1130') {
+          cashAndBankCents += balCents;
+        } else if (code.startsWith('1103') || code === '1-1210') {
+          receivablesCents += balCents;
+        } else if (code.startsWith('12') || code === '1-2110') {
+          fixedAssetsNetCents += balCents;
+        } else {
+          otherAssetsCents += balCents;
+        }
+      } else if (acc.type === 'LIABILITY') {
+        if (code.startsWith('2101') || code === '2-1110') {
+          payablesCents += balCents;
+        } else if (code.startsWith('2102') || code === '2-1210' || code === '2-1220') {
+          taxPayablesCents += balCents;
+        } else if (code.startsWith('2104')) {
+          deferredRevenueCents += balCents;
+        } else {
+          otherLiabilitiesCents += balCents;
+        }
+      } else if (acc.type === 'EQUITY') {
+        if (code.startsWith('3201')) {
+          restrictedBaseCents += balCents;
+        } else {
+          unrestrictedBaseCents += balCents;
+        }
+      } else if (acc.type === 'REVENUE') {
+        totalJournalRevenueCents += balCents;
+      } else if (acc.type === 'EXPENSE') {
+        totalJournalExpenseCents += balCents;
+      }
+    }
+
+    const totalAssetsCents = cashAndBankCents + receivablesCents + fixedAssetsNetCents + otherAssetsCents;
+    const totalLiabilitiesCents = payablesCents + taxPayablesCents + deferredRevenueCents + otherLiabilitiesCents;
+    const currentPeriodSurplusCents = totalJournalRevenueCents - totalJournalExpenseCents;
+    const totalNetAssetsCents = unrestrictedBaseCents + restrictedBaseCents + currentPeriodSurplusCents;
+    const balanceDiffCents = totalAssetsCents - (totalLiabilitiesCents + totalNetAssetsCents);
+
+    const toNum = (c: bigint) => Number(fromCents(c));
+    const totalAssets = toNum(totalAssetsCents);
+    const totalLiabilities = toNum(totalLiabilitiesCents);
+    const netAssets = toNum(totalNetAssetsCents);
+    const cashAndBank = toNum(cashAndBankCents);
+    const receivablesGl = toNum(receivablesCents);
+    const fixedAssetsNet = toNum(fixedAssetsNetCents);
+    const otherAssets = toNum(otherAssetsCents);
+    const payablesGl = toNum(payablesCents);
+    const taxPayablesGl = toNum(taxPayablesCents);
+    const deferredRevenueGl = toNum(deferredRevenueCents);
+    const otherLiabilitiesGl = toNum(otherLiabilitiesCents);
+    const unrestrictedNetAssets = toNum(unrestrictedBaseCents + currentPeriodSurplusCents);
+    const restrictedNetAssets = toNum(restrictedBaseCents);
+
+    const positiveAssetBase = Math.max(0, cashAndBank) + Math.max(0, receivablesGl) + Math.max(0, fixedAssetsNet) + Math.max(0, otherAssets);
+    const assetAllocation = [
+      { key: 'cash', label: 'Kas & Bank', amount: cashAndBank, percent: positiveAssetBase > 0 ? Math.round((Math.max(0, cashAndBank) / positiveAssetBase) * 100) : 0, color: '#034693' },
+      { key: 'receivables', label: 'Piutang Usaha', amount: receivablesGl, percent: positiveAssetBase > 0 ? Math.round((Math.max(0, receivablesGl) / positiveAssetBase) * 100) : 0, color: '#059669' },
+      { key: 'fixedAssets', label: 'Aset Tetap Neto', amount: fixedAssetsNet, percent: positiveAssetBase > 0 ? Math.round((Math.max(0, fixedAssetsNet) / positiveAssetBase) * 100) : 0, color: '#D97706' },
+      { key: 'otherAssets', label: 'Aset Lancar Lain', amount: otherAssets, percent: positiveAssetBase > 0 ? Math.round((Math.max(0, otherAssets) / positiveAssetBase) * 100) : 0, color: '#64748B' },
+    ];
+
+    const balanceSheet = {
+      totalAssets,
+      cashAndBank,
+      receivables: receivablesGl,
+      fixedAssetsNet,
+      otherAssets,
+      totalLiabilities,
+      payables: payablesGl,
+      taxPayables: taxPayablesGl,
+      deferredRevenue: deferredRevenueGl,
+      otherLiabilities: otherLiabilitiesGl,
+      netAssets,
+      unrestrictedNetAssets,
+      restrictedNetAssets,
+      currentPeriodSurplus: toNum(currentPeriodSurplusCents),
+      isBalanced: balanceDiffCents >= -100n && balanceDiffCents <= 100n,
+      allocation: assetAllocation,
+    };
+
+    // 2. Multi-Timeframe Portfolio PnL (Weekly 8w, Monthly 12m, Quarterly 4q, Yearly 3y)
+    const pnlEvents: Array<{ date: Date; revenue: number; expense: number }> = [];
+    for (const jl of postedJournalLines) {
+      const acc = jl.account || accMap.get(jl.accountCode);
+      if (!acc) continue;
+      if (acc.type === 'REVENUE') {
+        const rev = toNum(toCents(jl.credit) - toCents(jl.debit));
+        if (rev !== 0) pnlEvents.push({ date: new Date(jl.journalEntry.entryDate), revenue: rev, expense: 0 });
+      } else if (acc.type === 'EXPENSE') {
+        const exp = toNum(toCents(jl.debit) - toCents(jl.credit));
+        if (exp !== 0) pnlEvents.push({ date: new Date(jl.journalEntry.entryDate), revenue: 0, expense: exp });
+      }
+    }
+
+    const cashEvents: Array<{ date: Date; inflow: number; outflow: number }> = [];
+    for (const p of payments) {
+      cashEvents.push({ date: new Date(p.paymentDate), inflow: Number(p.netAmount), outflow: 0 });
+    }
+    for (const exp of expenses) {
+      if (['PAID', 'POSTED'].includes(exp.status)) {
+        cashEvents.push({ date: new Date(exp.transactionDate), inflow: 0, outflow: Number(exp.totalAmount) });
+      }
+    }
+
+    const buildRangeSummary = (
+      series: Array<{
+        key: string;
+        label: string;
+        sublabel: string;
+        revenue: number;
+        expense: number;
+        netPnl: number;
+        cumulativePnl: number;
+        cashInflow: number;
+        cashOutflow: number;
+      }>,
+      periodLabel: string
+    ) => {
+      const revenue = series.reduce((s, x) => s + x.revenue, 0);
+      const expense = series.reduce((s, x) => s + x.expense, 0);
+      const netPnl = revenue - expense;
+      const cashInflow = series.reduce((s, x) => s + x.cashInflow, 0);
+      const cashOutflow = series.reduce((s, x) => s + x.cashOutflow, 0);
+      const activePoints = series.filter((x) => x.revenue !== 0 || x.expense !== 0 || x.cashInflow !== 0 || x.cashOutflow !== 0);
+      const latest = activePoints.length > 0 ? activePoints[activePoints.length - 1] : series[series.length - 1];
+      const prev = activePoints.length > 1 ? activePoints[activePoints.length - 2] : (series.length > 1 ? series[series.length - 2] : null);
+      const previousNetPnl = prev ? prev.netPnl : 0;
+      const latestNetPnl = latest ? latest.netPnl : 0;
+      const deltaAmount = latestNetPnl - previousNetPnl;
+      const deltaPercent = Math.abs(previousNetPnl) > 0
+        ? Number(((deltaAmount / Math.abs(previousNetPnl)) * 100).toFixed(1))
+        : null;
+      const marginPercent = revenue > 0 ? Number(((netPnl / revenue) * 100).toFixed(1)) : 0;
+      return {
+        periodLabel,
+        series,
+        summary: {
+          revenue,
+          expense,
+          netPnl,
+          cashInflow,
+          cashOutflow,
+          previousNetPnl,
+          deltaAmount,
+          deltaPercent,
+          marginPercent,
+          hasActivity: activePoints.length > 0,
+        },
+      };
+    };
+
+    // 2a. Weekly (8 rolling weeks ending on reference date inside targetYear)
+    const refEnd = targetYear === now.getFullYear() ? new Date(now) : new Date(Date.UTC(targetYear, 11, 31, 23, 59, 59));
+    refEnd.setHours(23, 59, 59, 999);
+    const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    const weeklyRaw = [];
+    let weeklyCum = 0;
+    for (let i = 7; i >= 0; i--) {
+      const endD = new Date(refEnd.getTime() - i * 7 * 86400000);
+      const startD = new Date(endD.getTime() - 6 * 86400000);
+      startD.setHours(0, 0, 0, 0);
+      let rev = 0;
+      let exp = 0;
+      let cin = 0;
+      let cout = 0;
+      for (const ev of pnlEvents) {
+        if (ev.date >= startD && ev.date <= endD) {
+          rev += ev.revenue;
+          exp += ev.expense;
+        }
+      }
+      for (const ce of cashEvents) {
+        if (ce.date >= startD && ce.date <= endD) {
+          cin += ce.inflow;
+          cout += ce.outflow;
+        }
+      }
+      const net = rev - exp;
+      weeklyCum += net;
+      weeklyRaw.push({
+        key: `W-${8 - i}`,
+        label: `Mgg ${8 - i}`,
+        sublabel: `${startD.getDate()} ${shortMonths[startD.getMonth()]} - ${endD.getDate()} ${shortMonths[endD.getMonth()]}`,
+        revenue: rev,
+        expense: exp,
+        netPnl: net,
+        cumulativePnl: weeklyCum,
+        cashInflow: cin,
+        cashOutflow: cout,
+      });
+    }
+
+    // 2b. Monthly (12 months of targetYear)
+    const monthlyRaw = [];
+    let monthlyCum = 0;
+    for (let m = 0; m < 12; m++) {
+      let rev = 0;
+      let exp = 0;
+      let cin = 0;
+      let cout = 0;
+      for (const ev of pnlEvents) {
+        if (ev.date.getFullYear() === targetYear && ev.date.getMonth() === m) {
+          rev += ev.revenue;
+          exp += ev.expense;
+        }
+      }
+      for (const ce of cashEvents) {
+        if (ce.date.getFullYear() === targetYear && ce.date.getMonth() === m) {
+          cin += ce.inflow;
+          cout += ce.outflow;
+        }
+      }
+      const net = rev - exp;
+      monthlyCum += net;
+      monthlyRaw.push({
+        key: `M-${m + 1}`,
+        label: monthNames[m],
+        sublabel: `${monthNames[m]} ${targetYear}`,
+        revenue: rev,
+        expense: exp,
+        netPnl: net,
+        cumulativePnl: monthlyCum,
+        cashInflow: cin,
+        cashOutflow: cout,
+      });
+    }
+
+    // 2c. Quarterly (TW I - TW IV of targetYear)
+    const quarterNames = ['TW I', 'TW II', 'TW III', 'TW IV'];
+    const quarterRanges = ['Jan - Mar', 'Apr - Jun', 'Jul - Sep', 'Okt - Des'];
+    const quarterlyRaw = [];
+    let quarterlyCum = 0;
+    for (let q = 0; q < 4; q++) {
+      const mStart = q * 3;
+      const mEnd = mStart + 2;
+      let rev = 0;
+      let exp = 0;
+      let cin = 0;
+      let cout = 0;
+      for (let m = mStart; m <= mEnd; m++) {
+        rev += monthlyRaw[m].revenue;
+        exp += monthlyRaw[m].expense;
+        cin += monthlyRaw[m].cashInflow;
+        cout += monthlyRaw[m].cashOutflow;
+      }
+      const net = rev - exp;
+      quarterlyCum += net;
+      quarterlyRaw.push({
+        key: `Q-${q + 1}`,
+        label: quarterNames[q],
+        sublabel: `${quarterRanges[q]} ${targetYear}`,
+        revenue: rev,
+        expense: exp,
+        netPnl: net,
+        cumulativePnl: quarterlyCum,
+        cashInflow: cin,
+        cashOutflow: cout,
+      });
+    }
+
+    // 2d. Yearly (3-year Annual PnL: targetYear - 2 .. targetYear)
+    const yearlyRaw = [];
+    let yearlyCum = 0;
+    for (const yr of [targetYear - 2, targetYear - 1, targetYear]) {
+      let rev = 0;
+      let exp = 0;
+      let cin = 0;
+      let cout = 0;
+      for (const ev of pnlEvents) {
+        if (ev.date.getFullYear() === yr) {
+          rev += ev.revenue;
+          exp += ev.expense;
+        }
+      }
+      for (const ce of cashEvents) {
+        if (ce.date.getFullYear() === yr) {
+          cin += ce.inflow;
+          cout += ce.outflow;
+        }
+      }
+      const net = rev - exp;
+      yearlyCum += net;
+      yearlyRaw.push({
+        key: `Y-${yr}`,
+        label: `FY-${yr}`,
+        sublabel: `Tahun Buku ${yr}`,
+        revenue: rev,
+        expense: exp,
+        netPnl: net,
+        cumulativePnl: yearlyCum,
+        cashInflow: cin,
+        cashOutflow: cout,
+      });
+    }
+
+    const pnlByRange = {
+      weekly: buildRangeSummary(weeklyRaw, '8 Minggu Terakhir'),
+      monthly: buildRangeSummary(monthlyRaw, `Bulanan FY-${targetYear}`),
+      quarterly: buildRangeSummary(quarterlyRaw, `Triwulanan FY-${targetYear}`),
+      yearly: buildRangeSummary(yearlyRaw, `Tahunan FY-${targetYear - 2} s.d. FY-${targetYear}`),
+    };
+
+    // 3. Aging Penerimaan (AR) & Aging Pembayaran (AP)
+    const calcAging = (items: Array<{ dueDate: Date; outstanding: number }>) => {
+      let current = 0;
+      let days31to60 = 0;
+      let days61to90 = 0;
+      let over90 = 0;
+      let openCount = 0;
+      for (const item of items) {
+        if (item.outstanding <= 0) continue;
+        openCount += 1;
+        const overdueDays = Math.floor((now.getTime() - new Date(item.dueDate).getTime()) / 86400000);
+        if (overdueDays <= 30) current += item.outstanding;
+        else if (overdueDays <= 60) days31to60 += item.outstanding;
+        else if (overdueDays <= 90) days61to90 += item.outstanding;
+        else over90 += item.outstanding;
+      }
+      return {
+        current,
+        days31to60,
+        days61to90,
+        over90,
+        totalOutstanding: current + days31to60 + days61to90 + over90,
+        openCount,
+      };
+    };
+
+    const agingReceivables = calcAging(
+      customerInvoices.map((inv) => ({ dueDate: inv.dueDate, outstanding: Number(inv.balanceDue) }))
+    );
+    const agingPayables = calcAging(
+      vendorInvoices.map((inv) => ({
+        dueDate: inv.dueDate,
+        outstanding: Math.max(0, Number(inv.totalAmount) - Number(inv.paidAmount)),
+      }))
+    );
+
+    // 4. Role Profile & Operational Queues
+    const roleCode = req.user!.roleCode;
+    let profileType: 'EXECUTIVE' | 'UNIT_MANAGER' | 'REVENUE_OPS' | 'PROCUREMENT_OPS' | 'ACCOUNTING_TAX' | 'AUDITOR' = 'EXECUTIVE';
+    let allowedWorkspaces: Array<'PENERIMAAN' | 'PENGELUARAN'> = ['PENERIMAAN', 'PENGELUARAN'];
+    let scopeLabel = 'Konsolidasi Seluruh Unit PMO UTama';
+
+    if (roleCode === 'UNIT_MANAGER') {
+      profileType = 'UNIT_MANAGER';
+      const myUnit = businessUnits.find((u) => u.id === req.user!.businessUnitId);
+      scopeLabel = myUnit ? `Lingkup Unit: ${myUnit.name}` : 'Lingkup Manager Unit';
+    } else if (roleCode === 'REVENUE_OPERATOR' || roleCode === 'CASHIER') {
+      profileType = 'REVENUE_OPS';
+      allowedWorkspaces = ['PENERIMAAN'];
+      scopeLabel =
+        roleCode === 'REVENUE_OPERATOR'
+          ? 'Operasional Modul Penerimaan (4 Unit Bisnis)'
+          : 'Operasional Loket & Buku Harian Penerimaan';
+    } else if (roleCode === 'PROCUREMENT') {
+      profileType = 'PROCUREMENT_OPS';
+      allowedWorkspaces = ['PENGELUARAN'];
+      scopeLabel = 'Operasional Pengadaan Barang/Jasa & Tagihan Vendor';
+    } else if (roleCode === 'ACCOUNTING' || roleCode === 'TAX_OFFICER') {
+      profileType = 'ACCOUNTING_TAX';
+      scopeLabel = roleCode === 'TAX_OFFICER'
+        ? 'Kepatuhan Pajak, Verifikasi SPJ & Pembukuan'
+        : 'Pembukuan Umum, Rekonsiliasi & Laporan Keuangan';
+    } else if (roleCode === 'AUDITOR') {
+      profileType = 'AUDITOR';
+      scopeLabel = 'Pengawasan Independen SPI (Read-Only)';
+    }
+
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const todayCashReceived = payments
+      .filter((p) => new Date(p.paymentDate) >= todayStart)
+      .reduce((acc, p) => acc + Number(p.netAmount), 0);
+
+    const roleProfile = {
+      roleCode,
+      profileType,
+      scopeLabel,
+      allowedWorkspaces,
+      isReadOnly: roleCode === 'AUDITOR',
+    };
+
+    const roleSummary = {
+      agingReceivables,
+      agingPayables,
+      penerimaanSummary: {
+        totalInvoiced: totalInvoicedRevenue,
+        totalCashReceived: totalCashReceivedNet,
+        totalReceivables: totalReceivablesOutstanding,
+        openInvoices: agingReceivables.openCount,
+        unmatchedBankLines: reconSummary.unmatched + reconSummary.needsReview,
+      },
+      pengeluaranSummary: {
+        totalBudgetAllocated,
+        totalCommitted: totalBudgetCommitted,
+        totalExpenseActual,
+        availableBudget,
+        openVendorBills: agingPayables.openCount,
+        pendingPettyCash: pettyCashSubmissions.filter((p) => ['SUBMITTED', 'TAX_VERIFIED', 'APPROVED'].includes(p.status)).length,
+      },
+      procurementQueue: {
+        pendingPrCount: purchaseRequests.filter((p) => ['DRAFT', 'SUBMITTED', 'PENDING_APPROVAL'].includes(p.status)).length,
+        openPoCount: purchaseOrders.filter((p) => ['APPROVED', 'ISSUED', 'PARTIALLY_RECEIVED'].includes(p.status)).length,
+        pendingVendorBillsCount: agingPayables.openCount,
+        pendingExpenseCount: expenses.filter((e) => ['DRAFT', 'SUBMITTED', 'APPROVED'].includes(e.status)).length,
+      },
+      pettyCashTaxQueue: {
+        pendingTaxVerifyCount: pettyCashSubmissions.filter((p) => p.status === 'SUBMITTED').length,
+        pendingApproveCount: pettyCashSubmissions.filter((p) => p.status === 'TAX_VERIFIED').length,
+        readyDisburseCount: pettyCashSubmissions.filter((p) => p.status === 'APPROVED').length,
+        totalTaxPayable: taxPayablesGl,
+      },
+      cashierStatus: {
+        openSessionsCount: openCashierCount,
+        discrepancySessionsCount: discrepancySessions,
+        todayCashReceived,
+      },
+      auditSummary: {
+        recentAuditCount: recentAuditLogs.length,
+        openAlertCount: alerts.length,
+        reconciliationExceptions: reconSummary.needsReview,
+      },
+    };
+
+    const portfolio = {
+      activeRange: requestedRange,
+      heroBalance: netAssets,
+      cashAndBankTotal: cashAndBank,
+      pnlByRange,
+      balanceSheet,
+    };
+
     res.json({
       success: true,
       data: {
         isDemoEnvironment: true,
+        roleProfile,
+        portfolio,
+        roleSummary,
         kpis: {
           totalBudgetAllocated,
           totalBudgetCommitted,
@@ -924,14 +1425,45 @@ reportsRouter.get('/approvals', async (req, res, next) => {
 // 5. NOTIFICATIONS, AUDIT TRAIL & ATTACHMENTS
 reportsRouter.get('/notifications', async (req, res, next) => {
   try {
+    const canApproveFinance =
+      req.user!.permissions.includes('payment:approve') || req.user!.permissions.includes('*');
+    const notifOr: Array<Record<string, unknown>> = [
+      { userId: req.user!.userId },
+      { userId: null, roleCode: req.user!.roleCode },
+      { userId: null, roleCode: null },
+    ];
+    if (canApproveFinance && req.user!.roleCode !== 'FINANCE_MANAGER') {
+      notifOr.push({ userId: null, roleCode: 'FINANCE_MANAGER' });
+    }
+
     const notifications = await prisma.notification.findMany({
-      where: {
-        OR: [{ userId: req.user!.userId }, { roleCode: req.user!.roleCode }, { roleCode: null }],
-      },
+      where: { OR: notifOr },
       orderBy: { createdAt: 'desc' },
-      take: 30,
+      take: 40,
     });
     res.json({ success: true, data: notifications, meta: { requestId: req.requestId } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.patch('/notifications/read-all', async (req, res, next) => {
+  try {
+    const canApproveFinance =
+      req.user!.permissions.includes('payment:approve') || req.user!.permissions.includes('*');
+    const notifOr: Array<Record<string, unknown>> = [
+      { userId: req.user!.userId },
+      { userId: null, roleCode: req.user!.roleCode },
+      { userId: null, roleCode: null },
+    ];
+    if (canApproveFinance && req.user!.roleCode !== 'FINANCE_MANAGER') {
+      notifOr.push({ userId: null, roleCode: 'FINANCE_MANAGER' });
+    }
+    const result = await prisma.notification.updateMany({
+      where: { isRead: false, OR: notifOr },
+      data: { isRead: true },
+    });
+    res.json({ success: true, data: { updatedCount: result.count }, meta: { requestId: req.requestId } });
   } catch (err) {
     next(err);
   }

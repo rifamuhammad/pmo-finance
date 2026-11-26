@@ -144,8 +144,9 @@ const rupiahFormatted = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 14px;
-  font-size: 0.875rem;
+  flex-shrink: 0;
+  padding: 0 12px;
+  font-size: 0.84rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--text-secondary, #475569);
@@ -156,9 +157,11 @@ const rupiahFormatted = computed(() => {
 
 .currency-field {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   min-height: 42px;
-  padding: 8px 14px;
-  font-size: 0.95rem;
+  padding: 8px 12px;
+  font-size: 0.9rem;
   font-family: inherit;
   font-weight: 600;
   color: var(--text-primary, #0f172a);

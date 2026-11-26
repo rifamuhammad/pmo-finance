@@ -19,6 +19,12 @@ const app = createApp(App);
 app.use(createPinia());
 app.use(router);
 app.use(PrimeVue, {
+  zIndex: {
+    modal: 100100,
+    overlay: 100200,
+    menu: 100200,
+    tooltip: 100300,
+  },
   theme: {
     preset: Aura,
     options: {

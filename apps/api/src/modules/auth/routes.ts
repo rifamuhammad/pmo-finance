@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../shared/prisma.js';
 import { verifyPassword, signAccessToken } from '../../shared/security.js';
 import { recordAuditLog } from '../../shared/audit.js';
+import { resolveOpenFiscalPeriodForDate } from '../../shared/accounting-engine.js';
 import { AppError, requireAuth } from '../../middleware/auth.js';
 
 export const authRouter = Router();
@@ -135,12 +136,23 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
       approvalWhere.requestedById = { not: user.id };
     }
 
+    const canApproveFinance =
+      user.role.permissions.includes('payment:approve') || user.role.permissions.includes('*');
+    const notifOr: Array<Record<string, unknown>> = [
+      { userId: user.id },
+      { userId: null, roleCode: user.roleCode },
+      { userId: null, roleCode: null },
+    ];
+    if (canApproveFinance && user.roleCode !== 'FINANCE_MANAGER') {
+      notifOr.push({ userId: null, roleCode: 'FINANCE_MANAGER' });
+    }
+
     const [activePeriod, unreadCount, pendingApprovalsCount, settings] = await Promise.all([
-      prisma.fiscalPeriod.findFirst({ where: { isClosed: false }, orderBy: { startDate: 'desc' } }),
+      resolveOpenFiscalPeriodForDate(prisma, new Date()),
       prisma.notification.count({
         where: {
           isRead: false,
-          OR: [{ userId: user.id }, { roleCode: user.roleCode }],
+          OR: notifOr,
         },
       }),
       prisma.approvalRequest.count({

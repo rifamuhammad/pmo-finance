@@ -1,381 +1,2076 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import Select from 'primevue/select';
 import { useAuthStore } from '../stores/auth';
-import { apiFetch } from '../services/api';
-import { formatRupiah, formatDate, formatDateTime } from '../utils/format';
+import { apiFetch, downloadApiBlob, fetchApiBlob } from '../services/api';
+import { formatRupiah, formatDate } from '../utils/format';
 import StatusBadge from '../components/StatusBadge.vue';
 import StateBanner from '../components/StateBanner.vue';
 import ModalDialog from '../components/ModalDialog.vue';
 import AlertBanner from '../components/AlertBanner.vue';
-import PaginationControl from '../components/PaginationControl.vue';
 import CurrencyInput from '../components/CurrencyInput.vue';
-import { usePagination } from '../composables/usePagination';
+import TablePagination from '../components/TablePagination.vue';
+import PenerimaanPrintModal, { type PrintDocMode } from '../components/PenerimaanPrintModal.vue';
+
+function getLocalTodayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getLocalMonthIso(): string {
+  return getLocalTodayIso().slice(0, 7);
+}
 
 const auth = useAuthStore();
+const router = useRouter();
+const route = useRoute();
 
-const activeTab = ref<'invoices' | 'orders' | 'cashier' | 'catalog'>('invoices');
+type MainTab = 'buku_harian' | 'invoices' | 'layanan';
+
+const activeTab = ref<MainTab>('buku_harian');
 const loading = ref(true);
 const errorMsg = ref('');
 const feedbackMsg = ref('');
 
-const customers = ref<any[]>([]);
-const products = ref<any[]>([]);
-const salesOrders = ref<any[]>([]);
-const customerInvoices = ref<any[]>([]);
+// Global filters
+const selectedUnitId = ref('');
+const selectedMonth = ref(getLocalMonthIso()); // YYYY-MM (local WIB)
+const searchQuery = ref('');
+const stageFilter = ref('');
+const bhDocFilter = ref<'all' | 'KU' | 'TT' | 'DIRECT'>('all');
+const bhApprovalFilter = ref<'' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'VOID'>('');
+const bhReconFilter = ref<'' | 'RECONCILED' | 'UNRECONCILED'>('');
+const bhProofFilter = ref<'' | 'HAS_PROOF' | 'NO_PROOF'>('');
+const bhSortBy = ref<'newest' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('newest');
+const invoiceStatusFilter = ref('');
+const invSortBy = ref<'newest' | 'due_asc' | 'amount_desc' | 'balance_desc'>('newest');
+const activeAgingBucket = ref<'' | 'current' | 'days31to60' | 'days61to90' | 'over90'>('');
 
-const {
-  currentPage: invPage,
-  pageSize: invPageSize,
-  totalItems: totalInvoices,
-  paginatedItems: paginatedInvoices,
-} = usePagination(customerInvoices, 5);
-const payments = ref<any[]>([]);
-const cashierData = ref<any>({ registers: [], sessions: [], deposits: [] });
-const bankAccounts = ref<any[]>([]);
+// Approval / Reminder / Reject / Resubmit / Void Payment Modals
+const approvalBusyId = ref('');
+const rejectModalOpen = ref(false);
+const rejectTargetType = ref<'PAYMENT' | 'INVOICE'>('PAYMENT');
+const rejectTargetRow = ref<any>(null);
+const rejectReason = ref('');
 
-// Modals
-const orderModalOpen = ref(false);
-const paymentModalOpen = ref(false);
-const refundModalOpen = ref(false);
-const closeSessionModalOpen = ref(false);
-const depositModalOpen = ref(false);
-const priceModalOpen = ref(false);
-const printModalOpen = ref(false);
-const openSessionModalOpen = ref(false);
-const receiptModalOpen = ref(false);
-
-const selectedInvoiceForPrint = ref<any>(null);
-const selectedPaymentForReceipt = ref<any>(null);
-
-const activeCashierSession = computed(() =>
-  cashierData.value.sessions?.find((s: any) => s.status === 'OPEN')
-);
-
-const openSessionForm = ref({
-  cashRegisterId: '',
-  openingFloat: 0,
-});
-
-function openNewSessionModal() {
-  const firstReg = cashierData.value.registers?.[0]?.id || '';
-  openSessionForm.value = {
-    cashRegisterId: firstReg,
-    openingFloat: 0,
-  };
-  openSessionModalOpen.value = true;
-}
-
-async function submitOpenSession() {
-  if (!openSessionForm.value.cashRegisterId) {
-    errorMsg.value = 'Silakan pilih loket register kasir.';
-    return;
-  }
-  errorMsg.value = '';
-  feedbackMsg.value = '';
-  try {
-    const res = await apiFetch('/revenue/cashier/sessions/open', {
-      method: 'POST',
-      body: JSON.stringify({
-        cashRegisterId: openSessionForm.value.cashRegisterId,
-        openingFloat: Number(openSessionForm.value.openingFloat) || 0,
-      }),
-    });
-    openSessionModalOpen.value = false;
-    feedbackMsg.value = `Sesi kasir ${res.data.sessionNumber} berhasil dibuka dengan modal awal ${formatRupiah(res.data.openingFloat)}.`;
-    await loadRevenueAndCashier();
-  } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal membuka sesi kasir.';
-  }
-}
-
-function openReceiptModal(payment: any) {
-  selectedPaymentForReceipt.value = payment;
-  receiptModalOpen.value = true;
-}
-
-function openPrintModal(inv: any) {
-  selectedInvoiceForPrint.value = inv;
-  printModalOpen.value = true;
-}
-
-function triggerPrint() {
-  window.print();
-}
-
-const orderForm = ref({
-  customerId: '',
-  businessUnitId: '',
-  productServiceId: '',
-  quantity: 1,
-  discountAmount: 0,
-  serviceChargePercent: 0,
-  taxRatePercent: 11,
-  terms: 'NET 14',
+const resubmitModalOpen = ref(false);
+const resubmitTargetType = ref<'PAYMENT' | 'INVOICE'>('PAYMENT');
+const resubmitTargetRow = ref<any>(null);
+const resubmitForm = ref({
+  payerName: '',
+  activityTitle: '',
+  rincianLabel: '',
+  revenueAccountCode: '',
+  grossAmount: 0,
   notes: '',
 });
 
-const selectedInvoiceForPayment = ref<any>(null);
+const voidPayModalOpen = ref(false);
+const selectedPaymentForVoid = ref<any>(null);
+const voidPayReason = ref('');
+
+// Review Detail Modal (lets Finance Manager inspect full tax/COA/lines/submitter before approving)
+const reviewModalOpen = ref(false);
+const reviewTargetType = ref<'PAYMENT' | 'INVOICE'>('PAYMENT');
+const reviewTargetRow = ref<any>(null);
+
+function openReviewModal(targetType: 'PAYMENT' | 'INVOICE', row: any) {
+  reviewTargetType.value = targetType;
+  reviewTargetRow.value = row;
+  reviewModalOpen.value = true;
+}
+
+function applyRouteQueryFilters() {
+  const qTab = typeof route.query.tab === 'string' ? route.query.tab : '';
+  const qStatus = typeof route.query.status === 'string' ? route.query.status : '';
+  if (qTab === 'invoices') {
+    activeTab.value = 'invoices';
+    if (qStatus) {
+      invoiceStatusFilter.value = qStatus;
+      invPage.value = 1;
+    }
+  } else if (qTab === 'buku_harian' || qTab === 'buku-harian') {
+    activeTab.value = 'buku_harian';
+    if (['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'VOID'].includes(qStatus)) {
+      bhApprovalFilter.value = qStatus as any;
+      bhPage.value = 1;
+    }
+  }
+}
+
+watch(
+  () => [route.query.tab, route.query.status],
+  () => {
+    applyRouteQueryFilters();
+  }
+);
+
+// Pagination state (shared page size, independent page index per table)
+const pageSize = ref(15);
+const bhPage = ref(1);
+const invPage = ref(1);
+const soPage = ref(1);
+const prodPage = ref(1);
+
+// Core Datasets
+const businessUnits = ref<any[]>([]);
+const revenueCoaList = ref<any[]>([]);
+const customers = ref<any[]>([]);
+const products = ref<any[]>([]);
+const bankAccounts = ref<any[]>([]);
+const salesOrders = ref<any[]>([]);
+const customerInvoices = ref<any[]>([]);
+const cashierData = ref<any>({ registers: [], sessions: [], deposits: [] });
+const bukuHarianData = ref<any>(null);
+const agingData = ref<any>(null);
+
+// Print Modal
+const printOpen = ref(false);
+const printMode = ref<PrintDocMode>('INVOICE');
+const printPayload = ref<any>(null);
+
+// Modals
+type BukuHarianEntryMode = 'KWITANSI' | 'TANDA_TERIMA' | 'INVOICE';
+const entryModalOpen = ref(false);
+const entryMode = ref<BukuHarianEntryMode>('KWITANSI');
+const importCsvModalOpen = ref(false);
+const paymentModalOpen = ref(false);
+const voidModalOpen = ref(false);
+const editProdModalOpen = ref(false);
+const addProdModalOpen = ref(false);
+const addCustModalOpen = ref(false);
+const slipModalOpen = ref(false);
+const openSessionModalOpen = ref(false);
+const closeSessionModalOpen = ref(false);
+const depositModalOpen = ref(false);
+
+const TAX_SCHEMES = [
+  { value: 'PB1_10', label: 'PB1 10% (Kamar Wisma)' },
+  { value: 'PPN12_PPH4_2', label: 'PPN 12% + PPh 4(2) 10% (Gedung / UTCC)' },
+  { value: 'PPN12_PMK131', label: 'PPN 12% Nilai Lain (Alat, F&B, Laundry)' },
+  { value: 'PPN12_PPH23', label: 'PPN 12% + PPh 23 2% (Jasa TI / Pelatihan)' },
+  { value: 'PPN12_PPH23_15', label: 'PPN 12% + PPh 23 15% (Khusus / Royalti)' },
+  { value: 'PPH21_5', label: 'PPh Pasal 21 (5%)' },
+  { value: 'BEBAS_PAJAK', label: 'Bebas Pajak (Klinik, BPJS, Inhealth)' },
+];
+
+const COLLECTOR_PROFILES = [
+  { value: 'FP_040_UMUM', label: 'FP 040 - Umum / Pribadi (UT Setor Pajak)' },
+  { value: 'FP_020_INSTANSI', label: 'FP 020 - Instansi Pemerintah / PTN (Klien Potong)' },
+  { value: 'FP_030_BUMN', label: 'FP 030 - BUMN / Pemungut (Klien Potong)' },
+  { value: 'BADAN_POTONG_PPH', label: 'FP 040 - Badan Hukum (Klien Potong PPh)' },
+  { value: 'INTERNAL_UT', label: 'Internal Satker UT / PPK (Non-Faktur Pajak)' },
+];
+
+function formatOrgTypeLabel(orgType?: string): string {
+  if (orgType === 'CORPORATE') return 'Korporasi / Swasta';
+  if (orgType === 'GOVERNMENT') return 'Instansi Pemerintah / PTN';
+  if (orgType === 'SOE_BUMN') return 'BUMN';
+  if (orgType === 'INDIVIDUAL') return 'Perorangan / Umum';
+  if (orgType === 'INTERNAL_UT') return 'Internal Satker UT';
+  return orgType || 'Umum';
+}
+
+function defaultCollectorForOrgType(orgType?: string): string {
+  if (orgType === 'GOVERNMENT') return 'FP_020_INSTANSI';
+  if (orgType === 'SOE_BUMN') return 'FP_030_BUMN';
+  if (orgType === 'CORPORATE') return 'BADAN_POTONG_PPH';
+  if (orgType === 'INTERNAL_UT') return 'INTERNAL_UT';
+  return 'FP_040_UMUM';
+}
+
+const INVOICE_TYPES = [
+  { value: 'PELUNASAN', label: 'Pelunasan' },
+  { value: 'UANG_MUKA', label: 'Uang Muka (DP / UM)' },
+  { value: 'TERMIN', label: 'Termin Proyek / Kontrak' },
+  { value: 'SEWA_TAMBAHAN', label: 'Sewa Tambahan' },
+  { value: 'SERVICE_CHARGE', label: 'Service Charge' },
+  { value: 'BERKALA', label: 'Tagihan Berkala (Sewa/Hosting/Kapitasi)' },
+];
+
+const UNIT_MEASURE_OPTIONS = [
+  { value: 'Paket', label: 'Paket (borongan proyek / acara)' },
+  { value: 'Hari', label: 'Hari (sewa ruang / gedung per hari)' },
+  { value: 'Malam', label: 'Malam (kamar Wisma per malam)' },
+  { value: 'Jam', label: 'Jam (overtime / sewa per jam)' },
+  { value: 'Pax / Peserta', label: 'Pax / Peserta (pelatihan / katering / MCU)' },
+  { value: 'Bulan', label: 'Bulan (kapitasi / tenant / hosting rutin)' },
+  { value: 'Kunjungan', label: 'Kunjungan (layanan klinik rawat jalan)' },
+  { value: 'Tindakan', label: 'Tindakan (medis / lab / gigi)' },
+  { value: 'Unit / Alat', label: 'Unit / Alat (sewa perlengkapan)' },
+  { value: 'Termin', label: 'Termin (pembayaran bertahap kontrak)' },
+];
+
+const UNIT_CATALOG_DEFAULTS: Record<string, { coa: string; taxScheme: string; categories: string[] }> = {
+  'BU-MICE': {
+    coa: '420301070200',
+    taxScheme: 'PPN12_PPH4_2',
+    categories: ['Sewa Gedung & Ruang', 'Kamar Wisma', 'F&B & Katering', 'Laundry', 'Sewa Alat & Fasilitas'],
+  },
+  'BU-KLINIK': {
+    coa: '420301060100',
+    taxScheme: 'BEBAS_PAJAK',
+    categories: ['Rawat Jalan', 'Tindakan & Lab', 'Kapitasi & Asuransi', 'MCU & Vaksinasi'],
+  },
+  'BU-ITS': {
+    coa: '420301040200',
+    taxScheme: 'PPN12_PPH23',
+    categories: ['Pengembangan & Lisensi', 'Hosting & Cloud', 'Maintenance & Support', 'Konsultansi TI'],
+  },
+  'BU-TCI': {
+    coa: '420301010200',
+    taxScheme: 'PPN12_PPH23',
+    categories: ['Pelatihan & Workshop', 'Sertifikasi & Uji Kompetensi', 'Modul & Bahan Ajar'],
+  },
+};
+
+// 10 COA Pendapatan Aktif RAB 2027 per Unit (sesuai COA PMO per Unit v7.xlsx)
+const V7_UNIT_REVENUE_COAS: Record<string, string[]> = {
+  'BU-MICE': ['420301070200', '420301070300', '420301090100'],
+  'BU-KLINIK': ['420301060100', '420301060200', '420301069900'],
+  'BU-ITS': ['420301040200'],
+  'BU-TCI': ['420301010200', '420301030100', '420301030200'],
+};
+
+const PAYMENT_METHODS = [
+  { value: 'BANK_TRANSFER', label: 'Transfer Bank' },
+  { value: 'CASH', label: 'Tunai / Loket' },
+  { value: 'QRIS_SIMULATED', label: 'QRIS' },
+  { value: 'VIRTUAL_ACCOUNT_SIMULATED', label: 'Virtual Account' },
+  { value: 'EDC_CARD', label: 'Kartu EDC' },
+];
+
+const modalErrorMsg = ref('');
+const addCustTargetInvoice = ref(false);
+const directQty = ref(1);
+const directDuration = ref(1);
+const directUnitPrice = ref(0);
+const directDurationUnit = ref('');
+
+const addProdNewCategory = ref('');
+const addProdCustomUnit = ref('');
+const editProdNewCategory = ref('');
+const editProdCustomUnit = ref('');
+
+// Payment Proof Upload & Preview State
+const directProofDataUrl = ref('');
+const directProofFileName = ref('');
+const payProofDataUrl = ref('');
+const payProofFileName = ref('');
+
+const proofModalOpen = ref(false);
+const proofModalTargetType = ref<'PAYMENT' | 'INVOICE'>('PAYMENT');
+const proofModalRow = ref<any>(null);
+const proofPreviewUrl = ref('');
+const proofPreviewMime = ref('');
+const proofPreviewFileName = ref('');
+const proofLoading = ref(false);
+const proofUploading = ref(false);
+const standaloneProofDataUrl = ref('');
+const standaloneProofFileName = ref('');
+
+const UNIT_ORDER = ['BU-MICE', 'BU-KLINIK', 'BU-ITS', 'BU-TCI'];
+
+const operationalUnits = computed(() =>
+  businessUnits.value
+    .filter((u) => UNIT_ORDER.includes(u.code))
+    .sort((a, b) => UNIT_ORDER.indexOf(a.code) - UNIT_ORDER.indexOf(b.code))
+);
+
+function getCoaUnitCode(coaCode: string): string {
+  if (coaCode.startsWith('42030101') || coaCode.startsWith('42030103')) return 'BU-TCI';
+  if (coaCode.startsWith('42030102') || coaCode.startsWith('42030104') || coaCode.startsWith('42030105')) return 'BU-ITS';
+  if (coaCode.startsWith('42030106')) return 'BU-KLINIK';
+  if (coaCode.startsWith('42030107') || coaCode.startsWith('42030109')) return 'BU-MICE';
+  return 'OTHER';
+}
+
+function getGroupedRevenueCoas(unitIdOrCode?: string, currentCode?: string) {
+  const u = businessUnits.value.find((x) => x.id === unitIdOrCode || x.code === unitIdOrCode);
+  const targetCode = u?.code || (unitIdOrCode && V7_UNIT_REVENUE_COAS[unitIdOrCode] ? unitIdOrCode : '');
+  const shortName = targetCode ? targetCode.replace('BU-', '') : 'Semua Unit';
+  const v7Codes = targetCode
+    ? V7_UNIT_REVENUE_COAS[targetCode] || []
+    : Object.values(V7_UNIT_REVENUE_COAS).flat();
+
+  const primary = revenueCoaList.value
+    .filter((c) => v7Codes.includes(String(c.code || '')))
+    .sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
+
+  const primaryCodes = new Set(primary.map((c) => String(c.code || '')));
+  const trimmedCurrent = String(currentCode || '').trim();
+  const others: any[] = [];
+  if (trimmedCurrent && !primaryCodes.has(trimmedCurrent)) {
+    const legacyMatch = revenueCoaList.value.find((c) => String(c.code || '') === trimmedCurrent);
+    others.push(legacyMatch || { code: trimmedCurrent, name: 'COA Eksisting Dokumen' });
+  }
+
+  return {
+    unitGroupLabel: targetCode
+      ? `COA Pendapatan ${shortName} (Aktif TA 2027 · v7)`
+      : 'COA Pendapatan PMO (Aktif TA 2027 · v7)',
+    othersGroupLabel: 'COA Eksisting Dokumen (Non-v7)',
+    primary,
+    others,
+  };
+}
+
+const invoiceGroupedCoas = computed(() => getGroupedRevenueCoas(invoiceForm.value.businessUnitId));
+const directGroupedCoas = computed(() => getGroupedRevenueCoas(directForm.value.businessUnitId));
+const addProdGroupedCoas = computed(() => getGroupedRevenueCoas(addProdForm.value.businessUnitId));
+const editProdGroupedCoas = computed(() =>
+  getGroupedRevenueCoas(selectedProdForEdit.value?.businessUnitId, editProdForm.value.revenueAccountCode)
+);
+const csvGroupedCoas = computed(() => getGroupedRevenueCoas(csvForm.value.businessUnitId));
+const resubmitGroupedCoas = computed(() =>
+  getGroupedRevenueCoas(
+    resubmitTargetRow.value?.businessUnitId || resubmitTargetRow.value?.unitCode || resubmitTargetRow.value?.businessUnit?.code,
+    resubmitForm.value.revenueAccountCode
+  )
+);
+
+function readFileAsProof(file: File, onLoaded: (dataUrl: string, fileName: string) => void) {
+  const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf'];
+  if (!allowed.includes(file.type)) {
+    errorMsg.value = 'Format file tidak didukung. Gunakan gambar JPG, PNG, WebP, atau PDF.';
+    return;
+  }
+  if (file.size > 4 * 1024 * 1024) {
+    errorMsg.value = 'Ukuran file bukti pembayaran maksimal 4 MB.';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result === 'string') {
+      errorMsg.value = '';
+      onLoaded(reader.result, file.name);
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleDirectProofChange(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  readFileAsProof(file, (dataUrl, name) => {
+    directProofDataUrl.value = dataUrl;
+    directProofFileName.value = name;
+  });
+}
+
+function handlePayProofChange(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  readFileAsProof(file, (dataUrl, name) => {
+    payProofDataUrl.value = dataUrl;
+    payProofFileName.value = name;
+  });
+}
+
+function handleStandaloneProofChange(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  readFileAsProof(file, (dataUrl, name) => {
+    standaloneProofDataUrl.value = dataUrl;
+    standaloneProofFileName.value = name;
+  });
+}
+
+function clearProofPreviewUrl() {
+  if (proofPreviewUrl.value) {
+    URL.revokeObjectURL(proofPreviewUrl.value);
+    proofPreviewUrl.value = '';
+  }
+}
+
+async function openProofModal(row: any, targetType: 'PAYMENT' | 'INVOICE' = 'PAYMENT') {
+  clearProofPreviewUrl();
+  proofModalTargetType.value = targetType;
+  proofModalRow.value = row;
+  standaloneProofDataUrl.value = '';
+  standaloneProofFileName.value = '';
+  proofPreviewMime.value = '';
+  proofPreviewFileName.value = '';
+  proofModalOpen.value = true;
+
+  const hasProofObj = targetType === 'INVOICE' ? row?.invoiceProof : row?.paymentProof;
+  if (hasProofObj) {
+    proofLoading.value = true;
+    try {
+      const endpoint =
+        targetType === 'INVOICE'
+          ? `/revenue/customer-invoices/${row.id}/proof`
+          : `/revenue/payments/${row.id}/proof`;
+      const { blob, contentType, fileName } = await fetchApiBlob(endpoint);
+      proofPreviewUrl.value = URL.createObjectURL(blob);
+      proofPreviewMime.value = contentType;
+      proofPreviewFileName.value = fileName;
+    } catch (err: any) {
+      errorMsg.value = err.message || 'Gagal memuat file bukti dokumen.';
+    } finally {
+      proofLoading.value = false;
+    }
+  }
+}
+
+function closeProofModal() {
+  proofModalOpen.value = false;
+  clearProofPreviewUrl();
+}
+
+async function submitStandaloneProofUpload() {
+  if (!proofModalRow.value || !standaloneProofDataUrl.value) return;
+  proofUploading.value = true;
+  errorMsg.value = '';
+  try {
+    const isInv = proofModalTargetType.value === 'INVOICE';
+    const endpoint = isInv
+      ? `/revenue/customer-invoices/${proofModalRow.value.id}/proof`
+      : `/revenue/payments/${proofModalRow.value.id}/proof`;
+    await apiFetch(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        dataUrl: standaloneProofDataUrl.value,
+        fileName: standaloneProofFileName.value,
+      }),
+    });
+    const docCode = isInv ? proofModalRow.value.docNumber : proofModalRow.value.receiptNumber;
+    feedbackMsg.value = `Bukti dokumen untuk ${docCode} berhasil disimpan.`;
+    standaloneProofDataUrl.value = '';
+    standaloneProofFileName.value = '';
+    await loadAll();
+    if (isInv) {
+      const refreshed = customerInvoices.value.find((x: any) => x.id === proofModalRow.value.id);
+      await openProofModal(refreshed || { ...proofModalRow.value, invoiceProof: { id: 'ok' } }, 'INVOICE');
+    } else {
+      const refreshed = (bukuHarianData.value?.rows || []).find((r: any) => r.id === proofModalRow.value.id);
+      await openProofModal(refreshed || { ...proofModalRow.value, paymentProof: { id: 'ok' } }, 'PAYMENT');
+    }
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mengunggah bukti dokumen.';
+  } finally {
+    proofUploading.value = false;
+  }
+}
+
+function downloadActiveProof() {
+  if (!proofPreviewUrl.value) return;
+  const link = document.createElement('a');
+  link.href = proofPreviewUrl.value;
+  link.download = proofPreviewFileName.value || 'bukti-pembayaran';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+const isDirectUnitKlinik = computed(() => {
+  const u = businessUnits.value.find((x) => x.id === directForm.value.businessUnitId);
+  return u?.code === 'BU-KLINIK';
+});
+
+const autoDocNumberHint = computed(() => {
+  const now = new Date();
+  const romawi = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'][now.getMonth()] || 'XI';
+  const yr = now.getFullYear();
+  if (entryMode.value === 'INVOICE') {
+    return { label: 'Nomor Invoice Resmi', sample: `Otomatis oleh sistem (cth: 001/INV/PMO-UT/${romawi}/${yr})` };
+  }
+  if (entryMode.value === 'TANDA_TERIMA') {
+    return { label: 'Nomor Tanda Terima Resmi', sample: `Otomatis oleh sistem (cth: 001/TT/PMO-UT/${romawi}/${yr})` };
+  }
+  const kind = directForm.value.receiptType === 'KUITANSI_UM' ? 'KU-UM' : 'KU';
+  return { label: 'Nomor Kwitansi Resmi', sample: `Otomatis oleh sistem (cth: 001/${kind}/PMO-UT/${romawi}/${yr})` };
+});
+
+const mandiriBankAccount = computed(
+  () =>
+    bankAccounts.value.find(
+      (b) => b.domain === 'PENERIMAAN' || b.glAccountCode === '110102010100' || b.glAccountCode === '110101020100' || String(b.code || '').includes('MDR')
+    ) || bankAccounts.value[0]
+);
+
+const penerimaanBankAccounts = computed(() => {
+  const mandiris = bankAccounts.value.filter(
+    (b) => b.domain === 'PENERIMAAN' || b.glAccountCode === '110102010100' || b.glAccountCode === '110101020100' || String(b.code || '').startsWith('BNK-MDR')
+  );
+  return mandiris.length ? mandiris : bankAccounts.value;
+});
+
+function pickAutoBankAccountId(_unitId: string, _hintText = ''): string {
+  const found = bankAccounts.value.find((b) => b.code === 'BNK-MDR-01');
+  return found?.id || mandiriBankAccount.value?.id || '';
+}
+
+const activePrintBankAccount = computed(() => {
+  const payload = printPayload.value;
+  if (payload?.bankAccountId) {
+    const found = bankAccounts.value.find((b) => b.id === payload.bankAccountId);
+    if (found) return found;
+  }
+  if (payload?.bankAccountCode) {
+    const found = bankAccounts.value.find((b) => b.code === payload.bankAccountCode);
+    if (found) return found;
+  }
+  return mandiriBankAccount.value;
+});
+
+// Collapsible progressive disclosure toggles (keeps main form clean & fast)
+const showDirectExtraDetails = ref(false);
+const showInvoiceExtraDetails = ref(false);
+
+// Local real-time mirror of PTNBH tax engine for instant form preview
+function previewTax(
+  subtotal: number,
+  discountPct: number,
+  taxScheme: string,
+  taxInclusive: boolean,
+  collector: string,
+  dpPercent = 0
+) {
+  const disc = Math.round((Math.max(0, subtotal) * Math.min(100, Math.max(0, discountPct))) / 100);
+  const afterDisc = Math.max(0, Math.round(subtotal) - disc);
+  const base = dpPercent > 0 && dpPercent < 100 ? Math.round((afterDisc * dpPercent) / 100) : afterDisc;
+  let bruto = base;
+  let nilaiJual = base;
+  let dppPb1 = 0;
+  let dppPpn = 0;
+  let ppn = 0;
+  let pph42 = 0;
+  let pph23 = 0;
+  let pph23Rate15 = 0;
+  let pph21 = 0;
+  let pb1 = 0;
+
+  if (taxScheme === 'PPH21_5') {
+    pph21 = Math.round(0.05 * base);
+  } else if (taxScheme === 'PB1_10') {
+    if (taxInclusive) {
+      dppPb1 = Math.round((10 / 11) * base);
+      pb1 = Math.round(0.1 * dppPb1);
+    } else {
+      dppPb1 = base;
+      pb1 = Math.round(0.1 * dppPb1);
+      bruto = dppPb1 + pb1;
+    }
+    nilaiJual = dppPb1;
+  } else if (taxScheme !== 'BEBAS_PAJAK') {
+    if (taxInclusive) {
+      nilaiJual = Math.round((100 / 111) * base);
+      dppPpn = Math.round((11 / 12) * nilaiJual);
+      ppn = Math.round(0.12 * dppPpn);
+    } else {
+      nilaiJual = base;
+      dppPpn = Math.round((11 / 12) * nilaiJual);
+      ppn = Math.round(0.12 * dppPpn);
+      bruto = nilaiJual + ppn;
+    }
+    if (taxScheme === 'PPN12_PPH4_2') pph42 = Math.round(0.1 * nilaiJual);
+    if (taxScheme === 'PPN12_PPH23' && ['FP_020_INSTANSI', 'FP_030_BUMN', 'BADAN_POTONG_PPH'].includes(collector)) {
+      pph23 = Math.round(0.02 * nilaiJual);
+    }
+    if (taxScheme === 'PPN12_PPH23_15') pph23Rate15 = Math.round(0.15 * nilaiJual);
+  }
+
+  const ppnWithheld =
+    taxScheme !== 'BEBAS_PAJAK' && taxScheme !== 'PB1_10' && taxScheme !== 'PPH21_5' && ['FP_020_INSTANSI', 'FP_030_BUMN'].includes(collector);
+  const pphWithheld =
+    taxScheme !== 'BEBAS_PAJAK' &&
+    taxScheme !== 'PB1_10' &&
+    taxScheme !== 'PPH21_5' &&
+    ['FP_020_INSTANSI', 'FP_030_BUMN', 'BADAN_POTONG_PPH'].includes(collector);
+  const netReceivable = Math.max(0, bruto - (ppnWithheld ? ppn : 0) - (pphWithheld ? pph42 + pph23 + pph23Rate15 : 0));
+  return { disc, bruto, nilaiJual, dppPb1, dppPpn, ppn, pph42, pph23, pph23Rate15, pph21, pb1, netReceivable, ppnWithheld, pphWithheld };
+}
+
+// ==================== FORMS ====================
+const invoiceForm = ref({
+  salesOrderId: '',
+  businessUnitId: '',
+  customerId: '',
+  invoiceType: 'PELUNASAN',
+  activityTitle: '',
+  activityDate: '',
+  rincianLabel: '',
+  revenueAccountCode: '',
+  taxScheme: 'PPN12_PPH4_2',
+  taxInclusive: true,
+  taxCollectorProfile: 'FP_040_UMUM',
+  discountPercent: 0,
+  dpPercent: 0,
+  picName: '',
+  subCategory: 'Umum',
+  dueInDays: 14,
+  bankAccountId: '',
+  notes: '',
+  lines: [{ productServiceId: '', description: '', quantity: 1, duration: 1, durationUnit: '', unitPrice: 0 }],
+});
+
+const invoiceTaxPreview = computed(() => {
+  const sub = invoiceForm.value.lines.reduce(
+    (s, l) => s + Number(l.quantity || 0) * Number(l.duration || 1) * Number(l.unitPrice || 0),
+    0
+  );
+  const dpPct = invoiceForm.value.invoiceType === 'UANG_MUKA' ? Number(invoiceForm.value.dpPercent || 0) : 0;
+  return previewTax(
+    sub,
+    Number(invoiceForm.value.discountPercent || 0),
+    invoiceForm.value.taxScheme,
+    invoiceForm.value.taxInclusive,
+    invoiceForm.value.taxCollectorProfile,
+    dpPct
+  );
+});
+
+const directForm = ref({
+  businessUnitId: '',
+  productServiceId: '',
+  bankAccountId: '',
+  receiptType: 'LANGSUNG',
+  paymentStage: 'PELUNASAN',
+  paymentDate: getLocalTodayIso(),
+  depositDate: getLocalTodayIso(),
+  method: 'BANK_TRANSFER',
+  payerName: '',
+  payerTaxId: '',
+  payerAddress: '',
+  picName: '',
+  subCategory: 'Umum',
+  activityTitle: '',
+  activityDate: '',
+  rincianLabel: '',
+  revenueAccountCode: '',
+  externalInvoiceNo: '',
+  taxScheme: 'PB1_10',
+  taxInclusive: true,
+  taxCollectorProfile: 'FP_040_UMUM',
+  grossAmount: 0,
+  feeAmount: 0,
+  overpaymentAmount: 0,
+  refundBankName: '',
+  refundAccountNumber: '',
+  refundAccountHolder: '',
+  taxAlreadyProcessed: false,
+  referenceNo: '',
+  notes: '',
+});
+
+const directTaxPreview = computed(() => {
+  const basis = Math.max(0, Number(directForm.value.grossAmount || 0) - Number(directForm.value.overpaymentAmount || 0));
+  return previewTax(basis, 0, directForm.value.taxScheme, directForm.value.taxInclusive, directForm.value.taxCollectorProfile);
+});
+
+const csvForm = ref({
+  businessUnitId: '',
+  defaultTaxScheme: 'PB1_10',
+  defaultRevenueAccountCode: '420301070200',
+  rawContent: '',
+});
+
+const selectedInvoiceForPay = ref<any>(null);
 const paymentForm = ref({
   method: 'BANK_TRANSFER',
   grossAmount: 0,
   feeAmount: 0,
+  allowOverpayment: false,
+  refundBankName: '',
+  refundAccountNumber: '',
+  refundAccountHolder: '',
+  receiptType: 'KUITANSI',
+  withholdingSlipNo: '',
+  paymentDate: getLocalTodayIso(),
   referenceNo: '',
   idempotencyKey: '',
   bankAccountId: '',
+  taxAlreadyProcessed: false,
   notes: '',
 });
 
-const selectedPaymentForRefund = ref<any>(null);
-const refundForm = ref({
-  amount: 0,
+const selectedInvoiceForVoid = ref<any>(null);
+const voidReason = ref('');
+
+const selectedProdForEdit = ref<any>(null);
+const editProdForm = ref({
+  name: '',
+  category: '',
+  location: '',
+  unit: '',
+  unitPrice: 0,
+  taxScheme: 'PPN12_PMK131',
+  taxInclusive: true,
+  revenueAccountCode: '420301070200',
   reason: '',
 });
 
+const addProdForm = ref({
+  sku: '',
+  name: '',
+  category: '',
+  location: '',
+  businessUnitId: '',
+  unitPrice: 0,
+  unit: 'Paket',
+  taxScheme: 'PPN12_PMK131',
+  taxInclusive: true,
+  revenueAccountCode: '420301070200',
+});
+
+const addCustForm = ref({
+  name: '',
+  organizationType: 'CORPORATE',
+  taxCollectorProfile: 'BADAN_POTONG_PPH',
+  taxIdNpwp: '',
+  contactPerson: '',
+  email: '',
+  phone: '',
+  address: '',
+});
+
+function handleAddCustOrgTypeChange() {
+  addCustForm.value.taxCollectorProfile = defaultCollectorForOrgType(addCustForm.value.organizationType);
+}
+
+const selectedRowForSlip = ref<any>(null);
+const slipForm = ref({
+  withholdingSlipNo: '',
+  taxAlreadyProcessed: false,
+  depositDate: '',
+});
+
+const sessionOpenForm = ref({ cashRegisterId: '', openingFloat: 1000000 });
 const selectedSessionForClose = ref<any>(null);
-const closeSessionForm = ref({
-  actualCountedCash: 0,
-  discrepancyReason: '',
-});
+const sessionCloseForm = ref({ actualCountedCash: 0, discrepancyReason: '' });
+const depositForm = ref({ cashierSessionId: '', bankAccountId: '', amount: 0, referenceNo: '', notes: '' });
 
-const depositForm = ref({
-  cashierSessionId: '',
-  bankAccountId: '',
-  amount: 0,
-  referenceNo: '',
-  notes: '',
-});
-
-const selectedProductForPrice = ref<any>(null);
-const priceForm = ref({
-  newPrice: 0,
-  reason: '',
-});
-
-async function loadRevenueAndCashier() {
+// ==================== DATA LOADERS ====================
+async function loadAll() {
   loading.value = true;
   errorMsg.value = '';
   try {
-    const [cRes, pRes, soRes, invRes, payRes, cshRes, bnkRes] = await Promise.all([
+    const unitQs = selectedUnitId.value ? `&businessUnitId=${encodeURIComponent(selectedUnitId.value)}` : '';
+    const bhQs = `?month=${encodeURIComponent(selectedMonth.value)}${unitQs}${stageFilter.value ? `&paymentStage=${encodeURIComponent(stageFilter.value)}` : ''}`;
+    const agingQs = `?${selectedUnitId.value ? `businessUnitId=${encodeURIComponent(selectedUnitId.value)}` : ''}`;
+
+    const [masterRes, custRes, prodRes, bnkRes, invRes, soRes, cshRes, bhRes, agingRes] = await Promise.all([
+      apiFetch('/master/overview'),
       apiFetch('/revenue/customers'),
       apiFetch('/revenue/products'),
+      auth.hasPermission('reconciliation:view')
+        ? apiFetch('/reconciliation/bank-accounts').catch(() => ({ data: [] }))
+        : Promise.resolve({ data: [] }),
+      apiFetch(`/revenue/customer-invoices${selectedUnitId.value ? `?businessUnitId=${encodeURIComponent(selectedUnitId.value)}` : ''}`),
       apiFetch('/revenue/sales-orders'),
-      apiFetch('/revenue/customer-invoices'),
-      apiFetch('/revenue/payments'),
-      apiFetch('/revenue/cashier/sessions'),
-      apiFetch('/reconciliation/bank-accounts').catch(() => ({ data: [] })),
+      auth.hasPermission('cashier:view')
+        ? apiFetch('/revenue/cashier/sessions').catch(() => ({ data: { registers: [], sessions: [], deposits: [] } }))
+        : Promise.resolve({ data: { registers: [], sessions: [], deposits: [] } }),
+      apiFetch(`/revenue/buku-harian${bhQs}`),
+      apiFetch(`/revenue/aging${agingQs}`),
     ]);
 
-    customers.value = cRes.data || [];
-    products.value = pRes.data || [];
-    salesOrders.value = soRes.data || [];
+    businessUnits.value = masterRes.data.businessUnits || [];
+    revenueCoaList.value = (masterRes.data.chartOfAccounts || []).filter((c: any) => String(c.code || '').startsWith('4'));
+    customers.value = custRes.data || [];
+    products.value = prodRes.data || [];
+    bankAccounts.value = bnkRes.data?.length ? bnkRes.data : (masterRes.data.bankAccounts || []);
     customerInvoices.value = invRes.data || [];
-    payments.value = payRes.data || [];
+    salesOrders.value = soRes.data || [];
     cashierData.value = cshRes.data || { registers: [], sessions: [], deposits: [] };
-    bankAccounts.value = bnkRes.data || [];
+    bukuHarianData.value = bhRes.data;
+    agingData.value = agingRes.data;
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal memuat data pendapatan dan kasir.';
+    errorMsg.value = err.message || 'Gagal memuat data modul Penerimaan.';
   } finally {
     loading.value = false;
   }
 }
 
-function openCreateOrder() {
-  const firstProd = products.value[0];
-  const defaultUnit = firstProd?.businessUnitId || auth.user?.businessUnitId || '';
-  const isMice = products.value.some((p) => p.businessUnit?.code === 'BU-MICE' && p.id === firstProd?.id);
+watch([selectedUnitId, selectedMonth, stageFilter], () => {
+  loadAll();
+});
 
-  orderForm.value = {
-    customerId: customers.value[0]?.id || '',
-    businessUnitId: defaultUnit,
-    productServiceId: firstProd?.id || '',
-    quantity: 1,
-    discountAmount: 0,
-    serviceChargePercent: isMice ? 10 : 0,
-    taxRatePercent: 11,
-    terms: 'NET 14',
+// ==================== COMPUTED FILTERS ====================
+const filteredBukuHarian = computed(() => {
+  const rows = bukuHarianData.value?.rows || [];
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r: any) =>
+    `${r.receiptNumber} ${r.invoiceDocNumber} ${r.payerName} ${r.activityTitle} ${r.rincianLabel} ${r.revenueAccountCode}`
+      .toLowerCase()
+      .includes(q)
+  );
+});
+
+const kwitansiRows = computed(() =>
+  filteredBukuHarian.value.filter((r: any) => r.receiptType === 'KUITANSI' || r.receiptType === 'KUITANSI_UM' || !r.receiptType)
+);
+
+const tandaTerimaRows = computed(() =>
+  filteredBukuHarian.value.filter((r: any) => r.receiptType === 'TANDA_TERIMA')
+);
+
+const cashInRows = computed(() =>
+  filteredBukuHarian.value.map((r: any) => ({
+    uid: `REC-${r.id}`,
+    sortDate: r.paymentDate || '',
+    createdAtMs: new Date(r.createdAt || r.paymentDate || 0).getTime(),
+    dateDisplay: r.paymentDate,
+    primaryDocNo: r.receiptNumber,
+    invoiceDocNo: r.invoiceDocNumber || '',
+    stageLabel: r.paymentStage || 'PELUNASAN',
+    payerName: r.payerName,
+    unitCode: r.businessUnitCode,
+    activityTitle: r.activityTitle,
+    rincianLabel: r.rincianLabel,
+    coaCode: r.revenueAccountCode,
+    amount: Number(r.bankReceivedAmount || 0),
+    overpaymentAmount: Number(r.overpaymentAmount || 0),
+    isReconciled: Boolean(r.isReconciled),
+    reconciledImportNumber: r.reconciledImportNumber,
+    taxScheme: r.taxScheme,
+    receiptType: r.receiptType || 'KUITANSI',
+    customerInvoiceId: r.customerInvoiceId,
+    method: r.method,
+    status: r.status || 'CONFIRMED',
+    approvalStatus: r.approvalStatus || 'APPROVED',
+    approvedByName: r.approvedByName || null,
+    approvedAt: r.approvedAt || null,
+    rejectionReason: r.rejectionReason || null,
+    lastRemindedAt: r.lastRemindedAt || null,
+    reminderCount: Number(r.reminderCount || 0),
+    voidReason: r.voidReason || null,
+    hasProof: Boolean(r.paymentProof),
+    raw: r,
+  }))
+);
+
+const cashInCounts = computed(() => {
+  const all = cashInRows.value.length;
+  const kwitansi = cashInRows.value.filter((e: any) => e.receiptType === 'KUITANSI' || e.receiptType === 'KUITANSI_UM').length;
+  const tandaTerima = cashInRows.value.filter((e: any) => e.receiptType === 'TANDA_TERIMA').length;
+  const langsung = cashInRows.value.filter((e: any) => e.receiptType === 'LANGSUNG').length;
+  const pendingApproval = cashInRows.value.filter((e: any) => e.status !== 'VOID' && e.approvalStatus === 'PENDING_APPROVAL').length;
+  const rejected = cashInRows.value.filter((e: any) => e.status !== 'VOID' && e.approvalStatus === 'REJECTED').length;
+  const approved = cashInRows.value.filter((e: any) => e.status === 'CONFIRMED' && e.approvalStatus === 'APPROVED').length;
+  return { all, kwitansi, tandaTerima, langsung, pendingApproval, rejected, approved };
+});
+
+const invPendingApprovalCount = computed(
+  () => customerInvoices.value.filter((inv) => inv.status !== 'VOID' && inv.approvalStatus === 'PENDING_APPROVAL').length
+);
+const invRejectedCount = computed(
+  () => customerInvoices.value.filter((inv) => inv.status !== 'VOID' && inv.approvalStatus === 'REJECTED').length
+);
+const invOpenCount = computed(
+  () => customerInvoices.value.filter((inv) => ['ISSUED', 'PARTIALLY_PAID'].includes(inv.status)).length
+);
+const invPaidCount = computed(
+  () => customerInvoices.value.filter((inv) => inv.status === 'PAID').length
+);
+const invVoidCount = computed(
+  () => customerInvoices.value.filter((inv) => inv.status === 'VOID').length
+);
+const invApprovedCount = computed(
+  () => customerInvoices.value.filter((inv) => inv.status !== 'VOID' && inv.approvalStatus === 'APPROVED').length
+);
+const totalPendingApprovals = computed(() => cashInCounts.value.pendingApproval + invPendingApprovalCount.value);
+const totalApprovedDocs = computed(() => cashInCounts.value.approved + invApprovedCount.value);
+
+const visibleBukuHarian = computed(() => {
+  let list = cashInRows.value;
+  if (bhDocFilter.value === 'KU') {
+    list = list.filter((e: any) => e.receiptType === 'KUITANSI' || e.receiptType === 'KUITANSI_UM');
+  } else if (bhDocFilter.value === 'TT') {
+    list = list.filter((e: any) => e.receiptType === 'TANDA_TERIMA');
+  } else if (bhDocFilter.value === 'DIRECT') {
+    list = list.filter((e: any) => e.receiptType === 'LANGSUNG');
+  }
+
+  if (bhApprovalFilter.value === 'VOID') {
+    list = list.filter((e: any) => e.status === 'VOID');
+  } else if (bhApprovalFilter.value) {
+    list = list.filter((e: any) => e.status !== 'VOID' && e.approvalStatus === bhApprovalFilter.value);
+  }
+
+  if (bhReconFilter.value === 'RECONCILED') {
+    list = list.filter((e: any) => e.isReconciled);
+  } else if (bhReconFilter.value === 'UNRECONCILED') {
+    list = list.filter((e: any) => !e.isReconciled);
+  }
+
+  if (bhProofFilter.value === 'HAS_PROOF') {
+    list = list.filter((e: any) => e.hasProof);
+  } else if (bhProofFilter.value === 'NO_PROOF') {
+    list = list.filter((e: any) => !e.hasProof);
+  }
+
+  const sorted = [...list];
+  if (bhSortBy.value === 'newest') {
+    sorted.sort((a: any, b: any) => b.createdAtMs - a.createdAtMs || (b.sortDate || '').localeCompare(a.sortDate || ''));
+  } else if (bhSortBy.value === 'date_desc') {
+    sorted.sort((a: any, b: any) => (b.sortDate || '').localeCompare(a.sortDate || '') || b.createdAtMs - a.createdAtMs);
+  } else if (bhSortBy.value === 'date_asc') {
+    sorted.sort((a: any, b: any) => (a.sortDate || '').localeCompare(b.sortDate || '') || a.createdAtMs - b.createdAtMs);
+  } else if (bhSortBy.value === 'amount_desc') {
+    sorted.sort((a: any, b: any) => b.amount - a.amount || b.createdAtMs - a.createdAtMs);
+  } else if (bhSortBy.value === 'amount_asc') {
+    sorted.sort((a: any, b: any) => a.amount - b.amount || b.createdAtMs - a.createdAtMs);
+  }
+  return sorted;
+});
+
+const bhFilteredSummary = computed(() => {
+  let cashIn = 0;
+  for (const e of visibleBukuHarian.value) {
+    if (e.status === 'CONFIRMED' && e.approvalStatus === 'APPROVED') {
+      cashIn += Number(e.amount || 0);
+    }
+  }
+  return { count: visibleBukuHarian.value.length, cashIn };
+});
+
+const hasActiveBhFilters = computed(
+  () =>
+    bhDocFilter.value !== 'all' ||
+    bhApprovalFilter.value !== '' ||
+    bhReconFilter.value !== '' ||
+    bhProofFilter.value !== '' ||
+    stageFilter.value !== '' ||
+    searchQuery.value.trim() !== '' ||
+    bhSortBy.value !== 'newest'
+);
+
+function resetBhFilters() {
+  bhDocFilter.value = 'all';
+  bhApprovalFilter.value = '';
+  bhReconFilter.value = '';
+  bhProofFilter.value = '';
+  stageFilter.value = '';
+  searchQuery.value = '';
+  bhSortBy.value = 'newest';
+  bhPage.value = 1;
+}
+
+const filteredInvoices = computed(() => {
+  const nowMs = Date.now();
+  const q = searchQuery.value.trim().toLowerCase();
+  const list = customerInvoices.value.filter((inv) => {
+    if (invoiceStatusFilter.value === 'PENDING_APPROVAL' && (inv.status === 'VOID' || inv.approvalStatus !== 'PENDING_APPROVAL')) return false;
+    if (invoiceStatusFilter.value === 'REJECTED' && (inv.status === 'VOID' || inv.approvalStatus !== 'REJECTED')) return false;
+    if (invoiceStatusFilter.value === 'OPEN' && !['ISSUED', 'PARTIALLY_PAID'].includes(inv.status)) return false;
+    if (invoiceStatusFilter.value === 'ISSUED' && inv.status !== 'ISSUED') return false;
+    if (invoiceStatusFilter.value === 'PARTIALLY_PAID' && inv.status !== 'PARTIALLY_PAID') return false;
+    if (invoiceStatusFilter.value === 'PAID' && inv.status !== 'PAID') return false;
+    if (invoiceStatusFilter.value === 'VOID' && inv.status !== 'VOID') return false;
+
+    if (activeAgingBucket.value) {
+      if (!['ISSUED', 'PARTIALLY_PAID'].includes(inv.status) || Number(inv.balanceDue) <= 0) return false;
+      const days = Math.floor((nowMs - new Date(inv.dueDate).getTime()) / 86400000);
+      if (activeAgingBucket.value === 'current' && days > 30) return false;
+      if (activeAgingBucket.value === 'days31to60' && (days <= 30 || days > 60)) return false;
+      if (activeAgingBucket.value === 'days61to90' && (days <= 60 || days > 90)) return false;
+      if (activeAgingBucket.value === 'over90' && days <= 90) return false;
+    }
+
+    if (q) {
+      const hay = `${inv.docNumber} ${inv.customer?.name || ''} ${inv.activityTitle || ''} ${inv.rincianLabel || ''} ${inv.businessUnit?.code || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sorted = [...list];
+  if (invSortBy.value === 'newest') {
+    sorted.sort((a, b) => new Date(b.createdAt || b.issueDate || 0).getTime() - new Date(a.createdAt || a.issueDate || 0).getTime());
+  } else if (invSortBy.value === 'due_asc') {
+    sorted.sort((a, b) => new Date(a.dueDate || 0).getTime() - new Date(b.dueDate || 0).getTime());
+  } else if (invSortBy.value === 'amount_desc') {
+    sorted.sort((a, b) => Number(b.totalAmount || 0) - Number(a.totalAmount || 0));
+  } else if (invSortBy.value === 'balance_desc') {
+    sorted.sort((a, b) => Number(b.balanceDue || 0) - Number(a.balanceDue || 0));
+  }
+  return sorted;
+});
+
+const invFilteredSummary = computed(() => {
+  let totalNet = 0;
+  let totalOpen = 0;
+  for (const inv of filteredInvoices.value) {
+    if (inv.status !== 'VOID') {
+      totalNet += Number(inv.totalAmount || 0);
+      if (['ISSUED', 'PARTIALLY_PAID'].includes(inv.status)) {
+        totalOpen += Number(inv.balanceDue || 0);
+      }
+    }
+  }
+  return { count: filteredInvoices.value.length, totalNet, totalOpen };
+});
+
+const hasActiveInvFilters = computed(
+  () =>
+    invoiceStatusFilter.value !== '' ||
+    activeAgingBucket.value !== '' ||
+    searchQuery.value.trim() !== '' ||
+    invSortBy.value !== 'newest'
+);
+
+function resetInvFilters() {
+  invoiceStatusFilter.value = '';
+  activeAgingBucket.value = '';
+  searchQuery.value = '';
+  invSortBy.value = 'newest';
+  invPage.value = 1;
+}
+
+const filteredSalesOrders = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  return salesOrders.value.filter((so) => {
+    if (selectedUnitId.value && so.businessUnitId !== selectedUnitId.value) return false;
+    if (!q) return true;
+    return `${so.docNumber} ${so.customer?.name || ''} ${so.businessUnit?.code || ''}`.toLowerCase().includes(q);
+  });
+});
+
+// Paginated Slices
+const paginatedBukuHarian = computed(() => {
+  const start = (bhPage.value - 1) * pageSize.value;
+  return visibleBukuHarian.value.slice(start, start + pageSize.value);
+});
+
+const paginatedInvoices = computed(() => {
+  const start = (invPage.value - 1) * pageSize.value;
+  return filteredInvoices.value.slice(start, start + pageSize.value);
+});
+
+const paginatedSalesOrders = computed(() => {
+  const start = (soPage.value - 1) * pageSize.value;
+  return filteredSalesOrders.value.slice(start, start + pageSize.value);
+});
+
+const paginatedProducts = computed(() => {
+  const start = (prodPage.value - 1) * pageSize.value;
+  return filteredProducts.value.slice(start, start + pageSize.value);
+});
+
+watch(
+  [selectedUnitId, selectedMonth, searchQuery, stageFilter, bhDocFilter, bhReconFilter, bhProofFilter, bhSortBy, pageSize],
+  () => {
+    bhPage.value = 1;
+    prodPage.value = 1;
+  }
+);
+
+watch([invoiceStatusFilter, invSortBy, activeAgingBucket, searchQuery, selectedUnitId, pageSize], () => {
+  invPage.value = 1;
+  soPage.value = 1;
+});
+
+const filteredProducts = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  return products.value.filter((p) => {
+    if (selectedUnitId.value && p.businessUnitId !== selectedUnitId.value) return false;
+    if (!q) return true;
+    return `${p.sku} ${p.name} ${p.category} ${p.location || ''} ${p.revenueAccountCode}`.toLowerCase().includes(q);
+  });
+});
+
+const invoiceCatalogOptions = computed(() =>
+  products.value
+    .filter((p) => !invoiceForm.value.businessUnitId || p.businessUnitId === invoiceForm.value.businessUnitId)
+    .map((p) => ({
+      ...p,
+      optionLabel: `${p.name} · ${formatRupiah(p.unitPrice)} / ${p.unit}`,
+    }))
+);
+
+const directCatalogOptions = computed(() =>
+  products.value
+    .filter((p) => !directForm.value.businessUnitId || p.businessUnitId === directForm.value.businessUnitId)
+    .map((p) => ({
+      ...p,
+      optionLabel: `${p.name} · ${formatRupiah(p.unitPrice)} / ${p.unit}`,
+    }))
+);
+
+function handleDirectUnitChange() {
+  directForm.value.productServiceId = '';
+  directQty.value = 1;
+  directDuration.value = 1;
+  directUnitPrice.value = 0;
+  directDurationUnit.value = '';
+  const u = businessUnits.value.find((x) => x.id === directForm.value.businessUnitId);
+  const def = UNIT_CATALOG_DEFAULTS[u?.code || ''];
+  if (def) {
+    directForm.value.revenueAccountCode = def.coa;
+    directForm.value.taxScheme =
+      entryMode.value === 'TANDA_TERIMA' && u?.code === 'BU-MICE' ? 'PB1_10' : def.taxScheme;
+  }
+  directForm.value.bankAccountId = pickAutoBankAccountId(directForm.value.businessUnitId, directForm.value.rincianLabel);
+  if (u?.code !== 'BU-KLINIK') {
+    directForm.value.externalInvoiceNo = '';
+  }
+}
+
+function handleInvoiceUnitChange() {
+  const u = businessUnits.value.find((x) => x.id === invoiceForm.value.businessUnitId);
+  const def = UNIT_CATALOG_DEFAULTS[u?.code || ''];
+  if (def) {
+    invoiceForm.value.revenueAccountCode = def.coa;
+    invoiceForm.value.taxScheme = def.taxScheme;
+  }
+  // Clear catalog selections belonging to another unit
+  for (const line of invoiceForm.value.lines) {
+    if (line.productServiceId) {
+      const p = products.value.find((x) => x.id === line.productServiceId);
+      if (p && p.businessUnitId !== invoiceForm.value.businessUnitId) {
+        line.productServiceId = '';
+      }
+    }
+  }
+  invoiceForm.value.bankAccountId = pickAutoBankAccountId(invoiceForm.value.businessUnitId, invoiceForm.value.rincianLabel);
+}
+
+function handleDirectReceiptTypeChange() {
+  if (directForm.value.receiptType === 'KUITANSI_UM') {
+    directForm.value.paymentStage = 'UANG_MUKA';
+  } else if (directForm.value.receiptType === 'KUITANSI' && directForm.value.paymentStage === 'UANG_MUKA') {
+    directForm.value.paymentStage = 'PELUNASAN';
+  }
+}
+
+function applyDirectQtyCalc() {
+  if (Number(directUnitPrice.value) > 0) {
+    const qty = Math.max(0.5, Number(directQty.value) || 1);
+    const dur = Math.max(0.5, Number(directDuration.value) || 1);
+    directForm.value.grossAmount = Math.round(qty * dur * Number(directUnitPrice.value));
+  }
+}
+
+function handleDirectPayerInput() {
+  const q = directForm.value.payerName.trim().toLowerCase();
+  if (!q) return;
+  const matched = customers.value.find((c) => String(c.name || '').trim().toLowerCase() === q);
+  if (matched) {
+    if (!directForm.value.payerTaxId && matched.taxIdNpwp) directForm.value.payerTaxId = matched.taxIdNpwp;
+    if (!directForm.value.payerAddress && matched.address) directForm.value.payerAddress = matched.address;
+    if (matched.taxCollectorProfile && entryMode.value !== 'TANDA_TERIMA') {
+      directForm.value.taxCollectorProfile = matched.taxCollectorProfile;
+      directForm.value.subCategory = matched.taxCollectorProfile === 'INTERNAL_UT' ? 'Internal UT' : 'Umum';
+    }
+  }
+}
+
+function openQuickAddCustomerForInvoice() {
+  addCustTargetInvoice.value = true;
+  addCustModalOpen.value = true;
+}
+
+function getDaysOverdue(inv: any): number {
+  if (!['ISSUED', 'PARTIALLY_PAID'].includes(inv.status) || Number(inv.balanceDue) <= 0) return 0;
+  return Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / 86400000);
+}
+
+// ==================== ACTION HANDLERS ====================
+function resetInvoiceForm(fromOrder?: any) {
+  const defaultUnitId = fromOrder?.businessUnitId || selectedUnitId.value || operationalUnits.value[0]?.id || '';
+  const unitObj = businessUnits.value.find((u) => u.id === defaultUnitId);
+  const unitDef = UNIT_CATALOG_DEFAULTS[unitObj?.code || ''] || UNIT_CATALOG_DEFAULTS['BU-MICE'];
+  const defaultCustId = fromOrder?.customerId || customers.value[0]?.id || '';
+  const cust = customers.value.find((c) => c.id === defaultCustId);
+  showInvoiceExtraDetails.value = false;
+  invoiceForm.value = {
+    salesOrderId: fromOrder?.id || '',
+    businessUnitId: defaultUnitId,
+    customerId: defaultCustId,
+    invoiceType: fromOrder ? 'TERMIN' : 'PELUNASAN',
+    activityTitle: fromOrder?.activityTitle || fromOrder?.notes || '',
+    activityDate: fromOrder?.activityDate || '',
+    rincianLabel: '',
+    revenueAccountCode: unitDef.coa,
+    taxScheme: unitDef.taxScheme,
+    taxInclusive: true,
+    taxCollectorProfile: cust?.taxCollectorProfile || 'FP_040_UMUM',
+    discountPercent: 0,
+    dpPercent: 0,
+    picName: '',
+    subCategory: cust?.taxCollectorProfile === 'INTERNAL_UT' ? 'Internal UT' : 'Umum',
+    dueInDays: 14,
+    bankAccountId: pickAutoBankAccountId(defaultUnitId, fromOrder?.activityTitle || ''),
+    notes: '',
+    lines: [{ productServiceId: '', description: '', quantity: 1, duration: 1, durationUnit: '', unitPrice: 0 }],
+  };
+}
+
+function resetDirectForm(
+  presetType: 'LANGSUNG' | 'KUITANSI' | 'KUITANSI_UM' | 'TANDA_TERIMA' = 'KUITANSI',
+  presetStage: 'PELUNASAN' | 'UANG_MUKA' | 'TERMIN' = 'PELUNASAN'
+) {
+  const defaultUnitId = selectedUnitId.value || operationalUnits.value[0]?.id || '';
+  const unitObj = businessUnits.value.find((u) => u.id === defaultUnitId);
+  const unitDef = UNIT_CATALOG_DEFAULTS[unitObj?.code || ''] || UNIT_CATALOG_DEFAULTS['BU-MICE'];
+  showDirectExtraDetails.value = false;
+  directQty.value = 1;
+  directDuration.value = 1;
+  directUnitPrice.value = 0;
+  directDurationUnit.value = '';
+  directForm.value = {
+    businessUnitId: defaultUnitId,
+    productServiceId: '',
+    bankAccountId: pickAutoBankAccountId(defaultUnitId),
+    receiptType: presetType,
+    paymentStage: presetType === 'KUITANSI_UM' ? 'UANG_MUKA' : presetStage,
+    paymentDate: getLocalTodayIso(),
+    depositDate: getLocalTodayIso(),
+    method: 'BANK_TRANSFER',
+    payerName: '',
+    payerTaxId: '',
+    payerAddress: '',
+    picName: '',
+    subCategory: presetType === 'TANDA_TERIMA' ? 'Internal UT' : 'Umum',
+    activityTitle: '',
+    activityDate: '',
+    rincianLabel: '',
+    revenueAccountCode: unitDef.coa,
+    externalInvoiceNo: '',
+    taxScheme: presetType === 'TANDA_TERIMA' && unitObj?.code === 'BU-MICE' ? 'PB1_10' : unitDef.taxScheme,
+    taxInclusive: true,
+    taxCollectorProfile: presetType === 'TANDA_TERIMA' ? 'INTERNAL_UT' : 'FP_040_UMUM',
+    grossAmount: 0,
+    feeAmount: 0,
+    overpaymentAmount: 0,
+    refundBankName: '',
+    refundAccountNumber: '',
+    refundAccountHolder: '',
+    taxAlreadyProcessed: false,
+    referenceNo: `TRF-${Date.now().toString().slice(-6)}`,
     notes: '',
   };
-  orderModalOpen.value = true;
 }
 
-async function submitOrder() {
-  errorMsg.value = '';
-  feedbackMsg.value = '';
-  try {
-    const prod = products.value.find((p) => p.id === orderForm.value.productServiceId);
-    const res = await apiFetch('/revenue/sales-orders', {
-      method: 'POST',
-      body: JSON.stringify({
-        customerId: orderForm.value.customerId,
-        businessUnitId: prod?.businessUnitId || orderForm.value.businessUnitId,
-        terms: orderForm.value.terms,
-        serviceChargePercent: Number(orderForm.value.serviceChargePercent || 0),
-        notes: orderForm.value.notes,
-        issueInvoiceImmediately: true,
-        lines: [
-          {
-            productServiceId: orderForm.value.productServiceId,
-            quantity: Number(orderForm.value.quantity),
-            discountAmount: Number(orderForm.value.discountAmount),
-            taxRatePercent: Number(orderForm.value.taxRatePercent),
-          },
-        ],
-      }),
-    });
-    orderModalOpen.value = false;
-    feedbackMsg.value = `Pesanan ${res.data.order.docNumber} dan Invoice ${res.data.invoice?.docNumber} berhasil diterbitkan beserta jurnal piutang.`;
-    await loadRevenueAndCashier();
-  } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal membuat pesanan.';
+function openBukuHarianModal(
+  mode: BukuHarianEntryMode = 'KWITANSI',
+  opts?: { fromOrder?: any; receiptType?: 'LANGSUNG' | 'KUITANSI' | 'KUITANSI_UM' | 'TANDA_TERIMA'; stage?: 'PELUNASAN' | 'UANG_MUKA' | 'TERMIN' }
+) {
+  modalErrorMsg.value = '';
+  entryMode.value = mode;
+  resetInvoiceForm(opts?.fromOrder);
+  const recType = opts?.receiptType || (mode === 'TANDA_TERIMA' ? 'TANDA_TERIMA' : 'KUITANSI');
+  resetDirectForm(recType, opts?.stage || (recType === 'KUITANSI_UM' ? 'UANG_MUKA' : 'PELUNASAN'));
+  directProofDataUrl.value = '';
+  directProofFileName.value = '';
+  entryModalOpen.value = true;
+}
+
+function switchEntryMode(mode: BukuHarianEntryMode) {
+  modalErrorMsg.value = '';
+  entryMode.value = mode;
+  const u = businessUnits.value.find((x) => x.id === directForm.value.businessUnitId);
+  const def = UNIT_CATALOG_DEFAULTS[u?.code || ''] || UNIT_CATALOG_DEFAULTS['BU-MICE'];
+  if (mode === 'TANDA_TERIMA') {
+    directForm.value.receiptType = 'TANDA_TERIMA';
+    directForm.value.taxScheme = u?.code === 'BU-MICE' ? 'PB1_10' : def.taxScheme;
+    directForm.value.taxCollectorProfile = 'INTERNAL_UT';
+    directForm.value.subCategory = 'Internal UT';
+    if (!directForm.value.revenueAccountCode) directForm.value.revenueAccountCode = def.coa;
+  } else if (mode === 'KWITANSI') {
+    if (directForm.value.receiptType === 'TANDA_TERIMA') {
+      directForm.value.receiptType = 'KUITANSI';
+    }
+    directForm.value.taxCollectorProfile = 'FP_040_UMUM';
+    directForm.value.subCategory = 'Umum';
+    if (!directForm.value.productServiceId) {
+      directForm.value.taxScheme = def.taxScheme;
+      directForm.value.revenueAccountCode = def.coa;
+    }
   }
 }
 
-async function markOrderDelivered(order: any) {
-  errorMsg.value = '';
-  feedbackMsg.value = '';
-  try {
-    await apiFetch(`/revenue/sales-orders/${order.id}/deliver`, {
-      method: 'POST',
-      body: JSON.stringify({
-        deliveryNotes: `Layanan diserahkan oleh ${auth.user?.fullName}. Status pembayaran invoice tetap independen.`,
-      }),
-    });
-    feedbackMsg.value = `Penyerahan layanan untuk ${order.docNumber} tercatat (Status tagihan tidak berubah otomatis menjadi lunas).`;
-    await loadRevenueAndCashier();
-  } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal mencatat penyerahan layanan.';
+function openCreateInvoice(fromOrder?: any) {
+  openBukuHarianModal('INVOICE', { fromOrder });
+}
+
+function handleInvoiceCustomerChange() {
+  const c = customers.value.find((x) => x.id === invoiceForm.value.customerId);
+  if (c?.taxCollectorProfile) {
+    invoiceForm.value.taxCollectorProfile = c.taxCollectorProfile;
+    invoiceForm.value.subCategory = c.taxCollectorProfile === 'INTERNAL_UT' ? 'Internal UT' : 'Umum';
   }
 }
 
-function openPaymentModal(inv: any) {
-  selectedInvoiceForPayment.value = inv;
+function handleDirectCollectorChange() {
+  directForm.value.subCategory = directForm.value.taxCollectorProfile === 'INTERNAL_UT' ? 'Internal UT' : 'Umum';
+}
+
+function handleInvoiceCollectorChange() {
+  invoiceForm.value.subCategory = invoiceForm.value.taxCollectorProfile === 'INTERNAL_UT' ? 'Internal UT' : 'Umum';
+}
+
+function handleInvoiceLineProductChange(idx: number, selectedId?: string | null) {
+  const line = invoiceForm.value.lines[idx];
+  const targetId = selectedId !== undefined ? selectedId : line.productServiceId;
+  const p = products.value.find((x) => x.id === targetId);
+  if (!p) return;
+  line.description = p.name;
+  line.unitPrice = Number(p.unitPrice);
+  line.durationUnit = p.unit || '';
+  if (idx === 0) {
+    invoiceForm.value.rincianLabel = p.location || p.category;
+    invoiceForm.value.revenueAccountCode = p.revenueAccountCode;
+    invoiceForm.value.taxScheme = p.taxScheme || 'PPN12_PMK131';
+    invoiceForm.value.taxInclusive = p.taxInclusive !== false;
+    invoiceForm.value.bankAccountId = pickAutoBankAccountId(invoiceForm.value.businessUnitId, `${p.name} ${p.category} ${p.location || ''}`);
+    if (!invoiceForm.value.activityTitle) {
+      invoiceForm.value.activityTitle = p.name;
+    }
+  }
+}
+
+function addInvoiceLine() {
+  invoiceForm.value.lines.push({ productServiceId: '', description: '', quantity: 1, duration: 1, durationUnit: '', unitPrice: 0 });
+}
+
+function removeInvoiceLine(idx: number) {
+  if (invoiceForm.value.lines.length > 1) invoiceForm.value.lines.splice(idx, 1);
+}
+
+async function submitCreateInvoice() {
+  modalErrorMsg.value = '';
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const res = await apiFetch('/revenue/invoices', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...invoiceForm.value,
+        dpPercent: invoiceForm.value.invoiceType === 'UANG_MUKA' ? Number(invoiceForm.value.dpPercent || 0) : 0,
+        salesOrderId: invoiceForm.value.salesOrderId || null,
+        bankAccountId: invoiceForm.value.bankAccountId || null,
+        lines: invoiceForm.value.lines.map((l) => ({
+          productServiceId: l.productServiceId || null,
+          description: l.description,
+          quantity: Number(l.quantity),
+          duration: Number(l.duration || 1),
+          durationUnit: l.durationUnit || null,
+          unitPrice: Number(l.unitPrice),
+        })),
+      }),
+    });
+    entryModalOpen.value = false;
+    activeTab.value = 'invoices';
+    invoiceStatusFilter.value = '';
+    activeAgingBucket.value = '';
+    invSortBy.value = 'newest';
+    invPage.value = 1;
+    feedbackMsg.value = `Invoice ${res.data.docNumber} diajukan & notifikasi terkirim ke Manajer Keuangan. Tombol Cetak aktif setelah disetujui.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
+  } catch (err: any) {
+    modalErrorMsg.value = err.message || 'Gagal menerbitkan invoice.';
+  }
+}
+
+function openDirectReceiptModal(
+  presetType: 'LANGSUNG' | 'KUITANSI' | 'KUITANSI_UM' | 'TANDA_TERIMA' = 'KUITANSI',
+  presetStage: 'PELUNASAN' | 'UANG_MUKA' | 'TERMIN' = 'PELUNASAN'
+) {
+  openBukuHarianModal(presetType === 'TANDA_TERIMA' ? 'TANDA_TERIMA' : 'KWITANSI', {
+    receiptType: presetType,
+    stage: presetStage,
+  });
+}
+
+function handleDirectProductChange(selectedId?: string | null) {
+  const targetId = selectedId !== undefined ? selectedId : directForm.value.productServiceId;
+  const p = products.value.find((x) => x.id === targetId);
+  if (!p) {
+    directUnitPrice.value = 0;
+    directDurationUnit.value = '';
+    return;
+  }
+  directForm.value.rincianLabel = p.location || p.category;
+  directForm.value.revenueAccountCode = p.revenueAccountCode;
+  directForm.value.taxScheme = p.taxScheme || 'PPN12_PMK131';
+  directForm.value.taxInclusive = p.taxInclusive !== false;
+  directForm.value.bankAccountId = pickAutoBankAccountId(directForm.value.businessUnitId, `${p.name} ${p.category} ${p.location || ''}`);
+  directQty.value = 1;
+  directDuration.value = 1;
+  directUnitPrice.value = Number(p.unitPrice) || 0;
+  directDurationUnit.value = p.unit || '';
+  if (directUnitPrice.value > 0) {
+    directForm.value.grossAmount = directUnitPrice.value;
+  }
+  directForm.value.activityTitle = p.name;
+}
+
+async function submitDirectReceipt() {
+  modalErrorMsg.value = '';
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const receiptTypeFinal = entryMode.value === 'TANDA_TERIMA' ? 'TANDA_TERIMA' : directForm.value.receiptType;
+    const stageFinal = receiptTypeFinal === 'KUITANSI_UM' ? 'UANG_MUKA' : directForm.value.paymentStage;
+    const res = await apiFetch('/revenue/direct-receipts', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...directForm.value,
+        referenceNo: directForm.value.referenceNo?.trim() || `TRF-${Date.now().toString().slice(-6)}`,
+        receiptType: receiptTypeFinal,
+        paymentStage: stageFinal,
+        bankAccountId: directForm.value.method === 'CASH' ? null : directForm.value.bankAccountId || null,
+        productServiceId: directForm.value.productServiceId || null,
+        grossAmount: Number(directForm.value.grossAmount),
+        feeAmount: Number(directForm.value.feeAmount || 0),
+        overpaymentAmount: Number(directForm.value.overpaymentAmount || 0),
+        proofImageDataUrl: directProofDataUrl.value || null,
+        proofFileName: directProofFileName.value || null,
+      }),
+    });
+    const savedMonth = String(directForm.value.paymentDate || '').slice(0, 7);
+    entryModalOpen.value = false;
+    directProofDataUrl.value = '';
+    directProofFileName.value = '';
+    activeTab.value = 'buku_harian';
+    bhDocFilter.value = 'all';
+    bhReconFilter.value = '';
+    bhProofFilter.value = '';
+    bhSortBy.value = 'newest';
+    bhPage.value = 1;
+    if (savedMonth && /^\d{4}-\d{2}$/.test(savedMonth) && savedMonth !== selectedMonth.value) {
+      selectedMonth.value = savedMonth;
+    }
+    feedbackMsg.value = `Dokumen ${res.data.receiptNumber} diajukan & notifikasi terkirim ke Manajer Keuangan. Tombol Cetak aktif setelah disetujui.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
+  } catch (err: any) {
+    modalErrorMsg.value = err.message || 'Gagal mencatat penerimaan langsung.';
+  }
+}
+
+function handleCsvUnitChange() {
+  const u = businessUnits.value.find((x) => x.id === csvForm.value.businessUnitId);
+  const defs = u ? UNIT_CATALOG_DEFAULTS[u.code] : null;
+  if (defs) {
+    csvForm.value.defaultRevenueAccountCode = defs.coa;
+    csvForm.value.defaultTaxScheme = defs.taxScheme;
+  }
+}
+
+function openImportCsvModal() {
+  const defaultUnitId = selectedUnitId.value || operationalUnits.value[0]?.id || '';
+  const u = businessUnits.value.find((x) => x.id === defaultUnitId);
+  const defs = (u && UNIT_CATALOG_DEFAULTS[u.code]) || UNIT_CATALOG_DEFAULTS['BU-MICE'];
+  csvForm.value = {
+    businessUnitId: defaultUnitId,
+    defaultTaxScheme: defs.taxScheme,
+    defaultRevenueAccountCode: defs.coa,
+    rawContent: '',
+  };
+  importCsvModalOpen.value = true;
+}
+
+function loadSampleDirectCsv() {
+  const today = getLocalTodayIso();
+  const u = businessUnits.value.find((x) => x.id === csvForm.value.businessUnitId);
+  const unitCode = u?.code || 'BU-MICE';
+  const header = 'Tanggal,Nama,Kegiatan,Rincian,Nominal,COA,SkemaPajak,NoInvEksternal';
+  if (unitCode === 'BU-KLINIK') {
+    csvForm.value.rawContent = `${header}
+${today},Pasien Rawat Jalan (Budi Santoso),Pemeriksaan Poli Umum Harian,Poli Umum,150000,420301060100,BEBAS_PAJAK,INV-KL-001
+${today},Mandiri Inhealth,Kapitasi Klinik Inhouse Mandiri Inhealth,Kapitasi Inhealth,22500000,420301069900,BEBAS_PAJAK,`;
+  } else if (unitCode === 'BU-ITS') {
+    csvForm.value.rawContent = `${header}
+${today},PT Mitra Solusi Nusantara,Pemeliharaan Sistem Informasi Bulanan,Maintenance & Support,7500000,420301040200,PPN12_PPH23,`;
+  } else if (unitCode === 'BU-TCI') {
+    csvForm.value.rawContent = `${header}
+${today},BPSDM Daerah,Workshop Pengembangan Kompetensi Batch 1,Pelatihan & Workshop,12000000,420301010200,PPN12_PPH23,
+${today},Peserta Sertifikasi Umum,Uji Kompetensi Nasional,Sertifikasi,2500000,420301030100,PPN12_PPH23,`;
+  } else {
+    csvForm.value.rawContent = `${header}
+${today},Tamu Wisma (Dodi Permadi),Kegiatan Tamu Umum Wisma,Kamar Wisma,550000,420301070200,PB1_10,
+${today},Ibu Della - Rektorat,Kegiatan Green Laundry Umum,Green Laundry,45000,420301090100,PPN12_PMK131,`;
+  }
+}
+
+async function handleCsvFileUpload(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  csvForm.value.rawContent = await file.text();
+}
+
+async function submitImportCsv() {
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const res = await apiFetch('/revenue/direct-receipts/import-csv', {
+      method: 'POST',
+      body: JSON.stringify(csvForm.value),
+    });
+    importCsvModalOpen.value = false;
+    feedbackMsg.value = `${res.data.importedCount} baris penerimaan berhasil diimpor ke Buku Harian.`;
+    await loadAll();
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mengimpor CSV Buku Harian.';
+  }
+}
+
+function openPayModal(inv: any) {
+  selectedInvoiceForPay.value = inv;
+  const inferredReceipt =
+    inv.invoiceType === 'UANG_MUKA'
+      ? 'KUITANSI_UM'
+      : inv.taxCollectorProfile === 'INTERNAL_UT'
+      ? 'TANDA_TERIMA'
+      : 'KUITANSI';
   paymentForm.value = {
     method: 'BANK_TRANSFER',
-    grossAmount: inv.balanceDue,
+    grossAmount: Number(inv.balanceDue),
     feeAmount: 0,
-    referenceNo: `REF-${Date.now().toString().slice(-6)}`,
-    idempotencyKey: `IDEMP-${inv.docNumber}-${Date.now()}`,
-    bankAccountId: bankAccounts.value[0]?.id || '',
+    allowOverpayment: false,
+    refundBankName: '',
+    refundAccountNumber: '',
+    refundAccountHolder: '',
+    receiptType: inferredReceipt,
+    withholdingSlipNo: '',
+    paymentDate: getLocalTodayIso(),
+    referenceNo: `TRF-${Date.now().toString().slice(-6)}`,
+    idempotencyKey: `PAY-${inv.docNumber}-${Date.now()}`,
+    bankAccountId: inv.bankAccountId || pickAutoBankAccountId(inv.businessUnitId, inv.rincianLabel || inv.activityTitle || ''),
+    taxAlreadyProcessed: false,
     notes: '',
   };
+  payProofDataUrl.value = '';
+  payProofFileName.value = '';
   paymentModalOpen.value = true;
 }
 
 async function submitPayment() {
-  if (!selectedInvoiceForPayment.value) return;
+  if (!selectedInvoiceForPay.value) return;
   errorMsg.value = '';
   feedbackMsg.value = '';
   try {
     const res = await apiFetch('/revenue/payments', {
       method: 'POST',
       body: JSON.stringify({
-        customerInvoiceId: selectedInvoiceForPayment.value.id,
-        method: paymentForm.value.method,
+        customerInvoiceId: selectedInvoiceForPay.value.id,
+        ...paymentForm.value,
         grossAmount: Number(paymentForm.value.grossAmount),
-        feeAmount: Number(paymentForm.value.feeAmount),
-        referenceNo: paymentForm.value.referenceNo,
-        idempotencyKey: paymentForm.value.idempotencyKey,
+        feeAmount: Number(paymentForm.value.feeAmount || 0),
         bankAccountId: paymentForm.value.bankAccountId || undefined,
-        notes: paymentForm.value.notes,
+        proofImageDataUrl: payProofDataUrl.value || null,
+        proofFileName: payProofFileName.value || null,
       }),
     });
+    const savedMonth = String(paymentForm.value.paymentDate || '').slice(0, 7);
     paymentModalOpen.value = false;
-    feedbackMsg.value = `Pembayaran ${res.data.payment.receiptNumber} sebesar ${formatRupiah(res.data.payment.grossAmount)} berhasil dikonfirmasi dan jurnal telah diposting.`;
-    await loadRevenueAndCashier();
+    payProofDataUrl.value = '';
+    payProofFileName.value = '';
+    bhPage.value = 1;
+    bhSortBy.value = 'newest';
+    if (savedMonth && /^\d{4}-\d{2}$/.test(savedMonth) && savedMonth !== selectedMonth.value) {
+      selectedMonth.value = savedMonth;
+    }
+    feedbackMsg.value = `Kwitansi pembayaran ${res.data.payment.receiptNumber} diajukan & menunggu persetujuan Manajer Keuangan sebelum dicetak.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal memproses pembayaran.';
+    errorMsg.value = err.message || 'Gagal mencatat pembayaran invoice.';
   }
 }
 
-function openRefundModal(pay: any) {
-  selectedPaymentForRefund.value = pay;
-  refundForm.value = {
-    amount: pay.grossAmount,
-    reason: '',
-  };
-  refundModalOpen.value = true;
+function openVoidModal(inv: any) {
+  selectedInvoiceForVoid.value = inv;
+  voidReason.value = '';
+  voidModalOpen.value = true;
 }
 
-async function submitRefund() {
-  if (!selectedPaymentForRefund.value) return;
+async function submitVoidInvoice() {
+  if (!selectedInvoiceForVoid.value) return;
   errorMsg.value = '';
   feedbackMsg.value = '';
   try {
-    const res = await apiFetch(`/revenue/payments/${selectedPaymentForRefund.value.id}/refund`, {
+    await apiFetch(`/revenue/customer-invoices/${selectedInvoiceForVoid.value.id}/void`, {
       method: 'POST',
-      body: JSON.stringify({
-        amount: Number(refundForm.value.amount),
-        reason: refundForm.value.reason,
-      }),
+      body: JSON.stringify({ reason: voidReason.value }),
     });
-    refundModalOpen.value = false;
-    feedbackMsg.value = `Refund ${res.data.refundNumber} berhasil diproses merujuk ke pembayaran asal ${selectedPaymentForRefund.value.receiptNumber}.`;
-    await loadRevenueAndCashier();
+    voidModalOpen.value = false;
+    feedbackMsg.value = `Invoice ${selectedInvoiceForVoid.value.docNumber} ditandai HANGUS beserta jurnal pembalik.`;
+    await loadAll();
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal memproses refund.';
+    errorMsg.value = err.message || 'Gagal membatalkan invoice.';
   }
 }
 
-function openCloseCashierModal(session: any) {
-  selectedSessionForClose.value = session;
-  closeSessionForm.value = {
-    actualCountedCash: session.theoreticalBalance,
-    discrepancyReason: '',
+async function reissueInvoice(inv: any) {
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const res = await apiFetch(`/revenue/customer-invoices/${inv.id}/reissue`, { method: 'POST' });
+    feedbackMsg.value = `Invoice baru ${res.data.docNumber} diajukan ulang & menunggu persetujuan Manajer Keuangan.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal menerbitkan ulang invoice.';
+  }
+}
+
+// ============================================================================
+// APPROVAL, REMINDER, REJECT, RESUBMIT & VOID HANDLERS (KWITANSI / TT / INVOICE)
+// ============================================================================
+function formatTimeShort(iso?: string | null): string {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function jumpToPendingApprovals() {
+  if (cashInCounts.value.pendingApproval > 0) {
+    activeTab.value = 'buku_harian';
+    bhApprovalFilter.value = 'PENDING_APPROVAL';
+    bhPage.value = 1;
+  } else if (invPendingApprovalCount.value > 0) {
+    activeTab.value = 'invoices';
+    invoiceStatusFilter.value = 'PENDING_APPROVAL';
+    invPage.value = 1;
+  }
+}
+
+async function approveDocument(targetType: 'PAYMENT' | 'INVOICE', row: any) {
+  approvalBusyId.value = row.id;
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const endpoint =
+      targetType === 'INVOICE'
+        ? `/revenue/customer-invoices/${row.id}/approve`
+        : `/revenue/payments/${row.id}/approve`;
+    await apiFetch(endpoint, { method: 'POST' });
+    const docCode = targetType === 'INVOICE' ? row.docNumber : row.receiptNumber;
+    feedbackMsg.value = `${docCode} disetujui Manajer Keuangan. Jurnal telah diposting & tombol Cetak kini aktif.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal menyetujui dokumen.';
+  } finally {
+    approvalBusyId.value = '';
+  }
+}
+
+async function remindManager(targetType: 'PAYMENT' | 'INVOICE', row: any) {
+  approvalBusyId.value = row.id;
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const endpoint =
+      targetType === 'INVOICE'
+        ? `/revenue/customer-invoices/${row.id}/remind`
+        : `/revenue/payments/${row.id}/remind`;
+    const res = await apiFetch(endpoint, { method: 'POST', body: JSON.stringify({}) });
+    const docCode = targetType === 'INVOICE' ? row.docNumber : row.receiptNumber;
+    const cnt = res.data?.reminderCount || 1;
+    feedbackMsg.value = `Pengingat approval ke-${cnt} untuk ${docCode} berhasil dikirim ke notifikasi Manajer Keuangan.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mengirim pengingat approval.';
+  } finally {
+    approvalBusyId.value = '';
+  }
+}
+
+function openRejectModal(targetType: 'PAYMENT' | 'INVOICE', row: any) {
+  rejectTargetType.value = targetType;
+  rejectTargetRow.value = row;
+  rejectReason.value = '';
+  rejectModalOpen.value = true;
+}
+
+async function submitRejectDocument() {
+  if (!rejectTargetRow.value) return;
+  approvalBusyId.value = rejectTargetRow.value.id;
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const endpoint =
+      rejectTargetType.value === 'INVOICE'
+        ? `/revenue/customer-invoices/${rejectTargetRow.value.id}/reject`
+        : `/revenue/payments/${rejectTargetRow.value.id}/reject`;
+    await apiFetch(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ reason: rejectReason.value }),
+    });
+    const docCode = rejectTargetType.value === 'INVOICE' ? rejectTargetRow.value.docNumber : rejectTargetRow.value.receiptNumber;
+    rejectModalOpen.value = false;
+    feedbackMsg.value = `Permintaan revisi untuk ${docCode} telah dikirim ke PIC pembuat.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mengirim permintaan revisi.';
+  } finally {
+    approvalBusyId.value = '';
+  }
+}
+
+function openResubmitModal(targetType: 'PAYMENT' | 'INVOICE', row: any) {
+  resubmitTargetType.value = targetType;
+  resubmitTargetRow.value = row;
+  resubmitForm.value = {
+    payerName: row.payerName || row.customer?.name || '',
+    activityTitle: row.activityTitle || '',
+    rincianLabel: row.rincianLabel || '',
+    revenueAccountCode: row.revenueAccountCode || '',
+    grossAmount: Number(row.bankReceivedAmount || row.grossAmount || row.totalAmount || 0),
+    notes: row.notes || '',
   };
+  resubmitModalOpen.value = true;
+}
+
+async function submitResubmitDocument() {
+  if (!resubmitTargetRow.value) return;
+  approvalBusyId.value = resubmitTargetRow.value.id;
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    const isInv = resubmitTargetType.value === 'INVOICE';
+    const endpoint = isInv
+      ? `/revenue/customer-invoices/${resubmitTargetRow.value.id}/resubmit`
+      : `/revenue/payments/${resubmitTargetRow.value.id}/resubmit`;
+    const payload = isInv
+      ? {
+          activityTitle: resubmitForm.value.activityTitle,
+          rincianLabel: resubmitForm.value.rincianLabel,
+          revenueAccountCode: resubmitForm.value.revenueAccountCode,
+          notes: resubmitForm.value.notes,
+        }
+      : {
+          payerName: resubmitForm.value.payerName,
+          activityTitle: resubmitForm.value.activityTitle,
+          rincianLabel: resubmitForm.value.rincianLabel,
+          revenueAccountCode: resubmitForm.value.revenueAccountCode,
+          grossAmount: Number(resubmitForm.value.grossAmount),
+          notes: resubmitForm.value.notes,
+        };
+    await apiFetch(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+    const docCode = isInv ? resubmitTargetRow.value.docNumber : resubmitTargetRow.value.receiptNumber;
+    resubmitModalOpen.value = false;
+    feedbackMsg.value = `${docCode} berhasil direvisi & diajukan ulang ke Manajer Keuangan.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mengajukan ulang dokumen.';
+  } finally {
+    approvalBusyId.value = '';
+  }
+}
+
+function openVoidPaymentModal(row: any) {
+  selectedPaymentForVoid.value = row;
+  voidPayReason.value = '';
+  voidPayModalOpen.value = true;
+}
+
+async function submitVoidPayment() {
+  if (!selectedPaymentForVoid.value) return;
+  approvalBusyId.value = selectedPaymentForVoid.value.id;
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    await apiFetch(`/revenue/payments/${selectedPaymentForVoid.value.id}/void`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: voidPayReason.value }),
+    });
+    const docCode = selectedPaymentForVoid.value.receiptNumber;
+    voidPayModalOpen.value = false;
+    feedbackMsg.value = `Dokumen ${docCode} berhasil dibatalkan.`;
+    await Promise.all([loadAll(), auth.refreshCounters()]);
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal membatalkan dokumen.';
+  } finally {
+    approvalBusyId.value = '';
+  }
+}
+
+function openSlipModal(row: any) {
+  selectedRowForSlip.value = row;
+  slipForm.value = {
+    withholdingSlipNo: row.withholdingSlipNo || '',
+    taxAlreadyProcessed: Boolean(row.taxAlreadyProcessed),
+    depositDate: row.depositDate || '',
+  };
+  slipModalOpen.value = true;
+}
+
+async function submitSlipUpdate() {
+  if (!selectedRowForSlip.value) return;
+  try {
+    await apiFetch(`/revenue/payments/${selectedRowForSlip.value.id}/tax-meta`, {
+      method: 'PATCH',
+      body: JSON.stringify(slipForm.value),
+    });
+    slipModalOpen.value = false;
+    feedbackMsg.value = `Status pajak / bukti potong ${selectedRowForSlip.value.receiptNumber} diperbarui.`;
+    await loadAll();
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal memperbarui status pajak.';
+  }
+}
+
+async function toggleTampungan(row: any) {
+  try {
+    await apiFetch(`/revenue/payments/${row.id}/tax-meta`, {
+      method: 'PATCH',
+      body: JSON.stringify({ taxAlreadyProcessed: !row.taxAlreadyProcessed }),
+    });
+    await loadAll();
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mengubah penanda tampungan.';
+  }
+}
+
+function getCategoryOptionsForUnit(unitId: string): string[] {
+  const u = businessUnits.value.find((x) => x.id === unitId);
+  const presets = UNIT_CATALOG_DEFAULTS[u?.code || '']?.categories || ['Layanan Umum'];
+  const existing = products.value
+    .filter((p) => !unitId || p.businessUnitId === unitId)
+    .map((p) => String(p.category || '').trim())
+    .filter(Boolean);
+
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const cat of [...existing, ...presets]) {
+    const key = cat.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(cat);
+    }
+  }
+  return merged;
+}
+
+const addProdCategoryOptions = computed(() => getCategoryOptionsForUnit(addProdForm.value.businessUnitId));
+const editProdCategoryOptions = computed(() => getCategoryOptionsForUnit(selectedProdForEdit.value?.businessUnitId || ''));
+
+const addProdSkuPreview = computed(() => {
+  const u = businessUnits.value.find((x) => x.id === addProdForm.value.businessUnitId);
+  const short = (u?.code || 'PMO').replace(/^BU-/i, '').toUpperCase();
+  return `LYN-${short}-XXX (Otomatis)`;
+});
+
+function openEditProductModal(prod: any) {
+  selectedProdForEdit.value = prod;
+  const knownUnits = UNIT_MEASURE_OPTIONS.map((u) => u.value);
+  const isKnownUnit = knownUnits.includes(prod.unit);
+  editProdNewCategory.value = '';
+  editProdCustomUnit.value = isKnownUnit ? '' : prod.unit;
+  editProdForm.value = {
+    name: prod.name,
+    category: prod.category,
+    location: prod.location || '',
+    unit: isKnownUnit ? prod.unit : '__CUSTOM__',
+    unitPrice: Number(prod.unitPrice),
+    taxScheme: prod.taxScheme || 'PPN12_PMK131',
+    taxInclusive: prod.taxInclusive !== false,
+    revenueAccountCode: prod.revenueAccountCode,
+    reason: '',
+  };
+  editProdModalOpen.value = true;
+}
+
+async function submitEditProduct() {
+  if (!selectedProdForEdit.value) return;
+  const finalCategory =
+    editProdForm.value.category === '__NEW__'
+      ? editProdNewCategory.value.trim()
+      : editProdForm.value.category.trim();
+  const finalUnit =
+    editProdForm.value.unit === '__CUSTOM__'
+      ? editProdCustomUnit.value.trim() || 'Paket'
+      : editProdForm.value.unit;
+  if (finalCategory.length < 2) {
+    errorMsg.value = 'Nama kategori layanan wajib diisi minimal 2 karakter.';
+    return;
+  }
+  try {
+    await apiFetch(`/revenue/products/${selectedProdForEdit.value.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...editProdForm.value,
+        category: finalCategory,
+        unit: finalUnit,
+        unitPrice: Number(editProdForm.value.unitPrice),
+      }),
+    });
+    editProdModalOpen.value = false;
+    feedbackMsg.value = `Layanan ${selectedProdForEdit.value.sku} (COA ${editProdForm.value.revenueAccountCode}) diperbarui.`;
+    await loadAll();
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal memperbarui layanan.';
+  }
+}
+
+function applyUnitDefaultsToAddForm(unitId: string) {
+  const u = businessUnits.value.find((x) => x.id === unitId);
+  const def = UNIT_CATALOG_DEFAULTS[u?.code || ''] || UNIT_CATALOG_DEFAULTS['BU-MICE'];
+  const cats = getCategoryOptionsForUnit(unitId);
+  addProdForm.value.revenueAccountCode = def.coa;
+  addProdForm.value.taxScheme = def.taxScheme;
+  addProdForm.value.category = cats[0] || def.categories[0] || 'Layanan Umum';
+  addProdNewCategory.value = '';
+}
+
+function openAddProductModal() {
+  const defaultUnitId = selectedUnitId.value || operationalUnits.value[0]?.id || '';
+  addProdNewCategory.value = '';
+  addProdCustomUnit.value = '';
+  addProdForm.value = {
+    sku: '',
+    name: '',
+    category: '',
+    location: '',
+    businessUnitId: defaultUnitId,
+    unitPrice: 0,
+    unit: 'Paket',
+    taxScheme: 'PPN12_PMK131',
+    taxInclusive: true,
+    revenueAccountCode: '420301070200',
+  };
+  applyUnitDefaultsToAddForm(defaultUnitId);
+  addProdModalOpen.value = true;
+}
+
+async function submitAddProduct() {
+  const finalCategory =
+    addProdForm.value.category === '__NEW__'
+      ? addProdNewCategory.value.trim()
+      : addProdForm.value.category.trim();
+  const finalUnit =
+    addProdForm.value.unit === '__CUSTOM__'
+      ? addProdCustomUnit.value.trim() || 'Paket'
+      : addProdForm.value.unit;
+
+  if (finalCategory.length < 2) {
+    errorMsg.value = 'Kategori layanan wajib dipilih atau diisi minimal 2 karakter.';
+    return;
+  }
+
+  try {
+    const res = await apiFetch('/revenue/products', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: addProdForm.value.name,
+        category: finalCategory,
+        location: addProdForm.value.location || null,
+        businessUnitId: addProdForm.value.businessUnitId,
+        unitPrice: Number(addProdForm.value.unitPrice),
+        unit: finalUnit,
+        taxScheme: addProdForm.value.taxScheme,
+        taxInclusive: addProdForm.value.taxInclusive,
+        revenueAccountCode: addProdForm.value.revenueAccountCode,
+      }),
+    });
+    addProdModalOpen.value = false;
+    feedbackMsg.value = `Layanan ${res.data.name} (${res.data.sku}) berhasil ditambahkan ke katalog.`;
+    await loadAll();
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal menambahkan layanan.';
+  }
+}
+
+async function submitAddCustomer() {
+  try {
+    const res = await apiFetch('/revenue/customers', {
+      method: 'POST',
+      body: JSON.stringify(addCustForm.value),
+    });
+    const createdCust = res.data;
+    const savedName = addCustForm.value.name;
+    const shouldBindInvoice = addCustTargetInvoice.value;
+    addCustTargetInvoice.value = false;
+    addCustModalOpen.value = false;
+    feedbackMsg.value = `Pelanggan ${savedName} berhasil didaftarkan.`;
+    addCustForm.value = {
+      name: '',
+      organizationType: 'CORPORATE',
+      taxCollectorProfile: 'BADAN_POTONG_PPH',
+      taxIdNpwp: '',
+      contactPerson: '',
+      email: '',
+      phone: '',
+      address: '',
+    };
+    await loadAll();
+    if (shouldBindInvoice && createdCust?.id) {
+      invoiceForm.value.customerId = createdCust.id;
+      if (createdCust.taxCollectorProfile) {
+        invoiceForm.value.taxCollectorProfile = createdCust.taxCollectorProfile;
+        invoiceForm.value.subCategory = createdCust.taxCollectorProfile === 'INTERNAL_UT' ? 'Internal UT' : 'Umum';
+      }
+    }
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mendaftarkan pelanggan.';
+  }
+}
+
+// Cashier shift actions
+function openShiftModal() {
+  sessionOpenForm.value = {
+    cashRegisterId: cashierData.value.registers?.[0]?.id || '',
+    openingFloat: 1000000,
+  };
+  openSessionModalOpen.value = true;
+}
+
+async function submitOpenSession() {
+  try {
+    await apiFetch('/revenue/cashier/sessions/open', {
+      method: 'POST',
+      body: JSON.stringify({
+        cashRegisterId: sessionOpenForm.value.cashRegisterId,
+        openingFloat: Number(sessionOpenForm.value.openingFloat),
+      }),
+    });
+    openSessionModalOpen.value = false;
+    feedbackMsg.value = 'Sesi kasir loket berhasil dibuka.';
+    await loadAll();
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal membuka sesi kasir.';
+  }
+}
+
+function openCloseShift(s: any) {
+  selectedSessionForClose.value = s;
+  sessionCloseForm.value = { actualCountedCash: Number(s.theoreticalBalance), discrepancyReason: '' };
   closeSessionModalOpen.value = true;
 }
 
-async function submitCloseCashier() {
+async function submitCloseSession() {
   if (!selectedSessionForClose.value) return;
-  errorMsg.value = '';
-  feedbackMsg.value = '';
   try {
-    const res = await apiFetch(`/revenue/cashier/sessions/${selectedSessionForClose.value.id}/close`, {
+    await apiFetch(`/revenue/cashier/sessions/${selectedSessionForClose.value.id}/close`, {
       method: 'POST',
       body: JSON.stringify({
-        actualCountedCash: Number(closeSessionForm.value.actualCountedCash),
-        discrepancyReason: closeSessionForm.value.discrepancyReason || undefined,
+        actualCountedCash: Number(sessionCloseForm.value.actualCountedCash),
+        discrepancyReason: sessionCloseForm.value.discrepancyReason,
       }),
     });
     closeSessionModalOpen.value = false;
-    feedbackMsg.value = `Penutupan sesi kasir ${res.data.sessionNumber} tercatat dengan status ${res.data.status}.`;
-    await loadRevenueAndCashier();
+    feedbackMsg.value = `Sesi kasir ${selectedSessionForClose.value.sessionNumber} berhasil ditutup.`;
+    await loadAll();
   } catch (err: any) {
     errorMsg.value = err.message || 'Gagal menutup sesi kasir.';
   }
 }
 
-async function approveCashierDiscrepancy(session: any) {
-  errorMsg.value = '';
-  feedbackMsg.value = '';
-  try {
-    await apiFetch(`/revenue/cashier/sessions/${session.id}/approve-close`, {
-      method: 'POST',
-      body: JSON.stringify({ note: 'Selisih kas telah ditinjau dan berita acara disetujui.' }),
-    });
-    feedbackMsg.value = `Berita acara penutupan kasir ${session.sessionNumber} telah disahkan.`;
-    await loadRevenueAndCashier();
-  } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal mengesahkan penutupan kasir.';
-  }
-}
-
-function openDepositModal(session: any) {
+function openDepositModal(s: any) {
   depositForm.value = {
-    cashierSessionId: session.id,
-    bankAccountId: bankAccounts.value[0]?.id || '',
-    amount: session.actualCountedCash || session.theoreticalBalance,
+    cashierSessionId: s.id,
+    bankAccountId: mandiriBankAccount.value?.id || '',
+    amount: Number(s.actualCountedCash || s.theoreticalBalance || 0),
     referenceNo: `STR-${Date.now().toString().slice(-6)}`,
-    notes: `Setoran kas sesi ${session.sessionNumber}`,
+    notes: `Setoran kas sesi ${s.sessionNumber}`,
   };
   depositModalOpen.value = true;
 }
 
 async function submitDeposit() {
-  errorMsg.value = '';
-  feedbackMsg.value = '';
   try {
-    const res = await apiFetch('/revenue/cashier/deposits', {
+    await apiFetch('/revenue/cashier/deposits', {
       method: 'POST',
       body: JSON.stringify({
         ...depositForm.value,
@@ -383,473 +2078,861 @@ async function submitDeposit() {
       }),
     });
     depositModalOpen.value = false;
-    feedbackMsg.value = `Setoran kas ${res.data.depositNumber} ke bank berhasil dicatat beserta jurnal.`;
-    await loadRevenueAndCashier();
+    feedbackMsg.value = 'Setoran kasir ke Bank Mandiri Penerimaan berhasil dicatat.';
+    await loadAll();
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal mencatat setoran kas.';
+    errorMsg.value = err.message || 'Gagal mencatat setoran bank.';
   }
 }
 
-function openPriceChangeModal(prod: any) {
-  selectedProductForPrice.value = prod;
-  priceForm.value = {
-    newPrice: prod.unitPrice,
-    reason: '',
-  };
-  priceModalOpen.value = true;
+// Print & Export helpers (strictly locked until Manager Finance approves)
+function openPrintInvoice(inv: any) {
+  if (inv?.approvalStatus && inv.approvalStatus !== 'APPROVED') {
+    errorMsg.value = `Invoice ${inv.docNumber} belum disetujui Manajer Keuangan dan belum dapat dicetak.`;
+    return;
+  }
+  if (inv?.status === 'VOID') {
+    errorMsg.value = `Invoice ${inv.docNumber} berstatus HANGUS dan tidak dapat dicetak.`;
+    return;
+  }
+  printMode.value = 'INVOICE';
+  printPayload.value = inv;
+  printOpen.value = true;
 }
 
-async function submitPriceChange() {
-  if (!selectedProductForPrice.value) return;
-  errorMsg.value = '';
-  feedbackMsg.value = '';
+function openPrintReceipt(row: any) {
+  if (row?.approvalStatus && row.approvalStatus !== 'APPROVED') {
+    errorMsg.value = `Dokumen ${row.receiptNumber} belum disetujui Manajer Keuangan dan belum dapat dicetak.`;
+    return;
+  }
+  if (row?.status === 'VOID') {
+    errorMsg.value = `Dokumen ${row.receiptNumber} telah dibatalkan dan tidak dapat dicetak.`;
+    return;
+  }
+  printMode.value = row.receiptType === 'TANDA_TERIMA' ? 'TANDA_TERIMA' : 'KUITANSI';
+  printPayload.value = row;
+  printOpen.value = true;
+}
+
+function openPrintInvoiceFromBukuHarian(row: any) {
+  const found = customerInvoices.value.find((x) => x.id === row.customerInvoiceId);
+  if (found) openPrintInvoice(found);
+}
+
+function openPrintSuratPajak() {
+  if (!bukuHarianData.value?.withdrawal) return;
+  printMode.value = 'SURAT_PAJAK';
+  printPayload.value = bukuHarianData.value.withdrawal;
+  printOpen.value = true;
+}
+
+async function exportMonthlyExcel() {
   try {
-    const res = await apiFetch(`/revenue/products/${selectedProductForPrice.value.id}/price`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        newPrice: Number(priceForm.value.newPrice),
-        reason: priceForm.value.reason,
-      }),
-    });
-    priceModalOpen.value = false;
-    feedbackMsg.value = `Harga layanan ${res.data.sku} diperbarui. Histori harga tersimpan dan invoice lama tidak berubah.`;
-    await loadRevenueAndCashier();
+    const unitQs = selectedUnitId.value ? `&businessUnitId=${encodeURIComponent(selectedUnitId.value)}` : '';
+    await downloadApiBlob(
+      `/revenue/tax-recap/export.xlsx?month=${encodeURIComponent(selectedMonth.value)}${unitQs}`,
+      `Penerimaan-BKU-Pajak-${selectedMonth.value}.xlsx`
+    );
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal mengubah harga layanan.';
+    errorMsg.value = err.message || 'Gagal mengekspor Excel Penerimaan.';
   }
 }
 
-onMounted(loadRevenueAndCashier);
+async function exportAgingExcel() {
+  try {
+    const unitQs = selectedUnitId.value ? `?businessUnitId=${encodeURIComponent(selectedUnitId.value)}` : '';
+    await downloadApiBlob(`/revenue/aging/export.xlsx${unitQs}`, `Aging-Penerimaan-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal mengekspor Aging Penerimaan.';
+  }
+}
+
+function toggleAgingFilter(key: 'current' | 'days31to60' | 'days61to90' | 'over90') {
+  activeAgingBucket.value = activeAgingBucket.value === key ? '' : key;
+}
+
+function getTaxSchemeShort(scheme?: string) {
+  if (scheme === 'PB1_10') return 'PB1 10%';
+  if (scheme === 'PPN12_PPH4_2') return 'PPN 12% + PPh 4(2)';
+  if (scheme === 'PPN12_PPH23') return 'PPN 12% + PPh 23 (2%)';
+  if (scheme === 'PPN12_PPH23_15') return 'PPN 12% + PPh 23 (15%)';
+  if (scheme === 'PPH21_5') return 'PPh 21 (5%)';
+  if (scheme === 'BEBAS_PAJAK') return 'Bebas Pajak';
+  return 'PPN 12%';
+}
+
+function formatMethodLabel(method?: string): string {
+  if (method === 'BANK_TRANSFER') return 'Transfer Bank';
+  if (method === 'VIRTUAL_ACCOUNT_SIMULATED') return 'Virtual Account';
+  if (method === 'QRIS_SIMULATED') return 'QRIS';
+  if (method === 'EDC_CARD') return 'Kartu EDC';
+  if (method === 'CASH') return 'Tunai';
+  return method || 'Transfer Bank';
+}
+
+function formatStageLabel(stage?: string): string {
+  if (stage === 'UANG_MUKA') return 'Uang Muka';
+  if (stage === 'TERMIN') return 'Termin';
+  return 'Pelunasan';
+}
+
+function formatReceiptDocLabel(receiptType?: string): string {
+  if (receiptType === 'TANDA_TERIMA') return 'Tanda Terima';
+  if (receiptType === 'KUITANSI_UM') return 'Kwitansi UM';
+  if (receiptType === 'LANGSUNG') return 'Langsung';
+  return 'Kwitansi';
+}
+
+function formatActivitySub(title?: string, rincian?: string): string {
+  const t = String(title || '').trim();
+  const r = String(rincian || '').trim();
+  if (!t) return r || '-';
+  if (!r || t.toLowerCase() === r.toLowerCase()) return t;
+  return `${t} · ${r}`;
+}
+
+function formatInvoiceStatusLabel(status?: string): string {
+  if (status === 'PENDING_APPROVAL') return 'Menunggu Approval';
+  if (status === 'REJECTED') return 'Perlu Revisi';
+  if (status === 'ISSUED') return 'Disetujui · Belum Bayar';
+  if (status === 'PARTIALLY_PAID') return 'Sebagian Bayar';
+  if (status === 'PAID') return 'Lunas';
+  if (status === 'VOID') return 'HANGUS';
+  if (status === 'REFUNDED') return 'Dikembalikan';
+  return status || '-';
+}
+
+onMounted(() => {
+  applyRouteQueryFilters();
+  loadAll();
+});
 </script>
 
 <template>
-  <div class="revenue-cashier-view">
-    <div class="page-header">
+  <div class="poital-penerimaan">
+    <!-- Top Header Bar -->
+    <div class="rev-top-bar">
       <div>
-        <h1 class="page-title">Penagihan Layanan & Faktur Invoice Klien</h1>
-        <p class="page-desc">
-          Penerbitan faktur tagihan resmi PMO ke klien korporat/instansi mitra, pelacakan piutang layanan, dan verifikasi pelunasan rekening Bank PBI UT.
-        </p>
+        <h1 class="rev-title">Buku Harian Penerimaan</h1>
       </div>
-      <div class="btn-row">
-        <button type="button" class="btn btn-sm" @click="loadRevenueAndCashier">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-          Muat Ulang
+
+      <div class="rev-top-actions">
+        <input
+          v-model="selectedMonth"
+          type="month"
+          class="pill-month-input"
+          aria-label="Pilih Bulan Periode"
+        />
+        <button
+          v-if="auth.hasPermission('payment:create')"
+          type="button"
+          class="pill-btn-soft"
+          @click="openImportCsvModal"
+        >
+          Import CSV
         </button>
         <button
-          v-if="auth.hasPermission('revenue:create')"
+          v-if="auth.hasPermission('payment:create') || auth.hasPermission('revenue:create')"
           type="button"
-          class="btn btn-sm btn-primary"
-          @click="openCreateOrder"
+          class="pill-btn-navy"
+          @click="openBukuHarianModal('KWITANSI')"
         >
-          + Buat Pesanan & Invoice Pelanggan
+          + Input Buku Harian
         </button>
       </div>
     </div>
 
-    <AlertBanner
-      v-if="feedbackMsg"
-      variant="success"
-      title="Operasi Berhasil"
-      :message="feedbackMsg"
-      @dismiss="feedbackMsg = ''"
-    />
+    <!-- 4-Unit Pill Filter + Secondary Settings Toggle -->
+    <div class="unit-filter-bar">
+      <div class="unit-filter-row" role="tablist" aria-label="Filter Unit Bisnis">
+        <button
+          type="button"
+          class="unit-pill"
+          :class="{ active: selectedUnitId === '' }"
+          @click="selectedUnitId = ''"
+        >
+          Semua Unit
+        </button>
+        <button
+          v-for="u in operationalUnits"
+          :key="u.id"
+          type="button"
+          class="unit-pill"
+          :class="{ active: selectedUnitId === u.id }"
+          @click="selectedUnitId = u.id"
+        >
+          {{ u.code.replace('BU-', '') }}
+        </button>
+      </div>
 
-    <AlertBanner
-      v-if="errorMsg"
-      variant="danger"
-      title="Peringatan Kontrol Transaksi"
-      :message="errorMsg"
-      @dismiss="errorMsg = ''"
-    />
-
-    <div class="pertor-revenue-banner">
-      <div class="banner-badge">Pertor No. 310/2025</div>
-      <div class="banner-text">
-        <strong>Pengakuan Pendapatan &amp; Kasir POS E-Revenue:</strong> Seluruh penerbitan invoice dan pelunasan kasir otomatis memposting jurnal ke akun Piutang Usaha (<code>110301010100</code>), Pendapatan Usaha 5 Unit Bisnis (<code>4203xxxxxx</code>), PPN Keluaran 11% (<code>210202010100</code>), dan Bank Operasional BRI PMO (<code>110101020200</code>) / Kasir Tunai (<code>110101010100</code>).
+      <div class="unit-quick-links">
+        <button
+          type="button"
+          class="unit-pill"
+          :class="{ active: activeTab === 'layanan' }"
+          @click="activeTab = activeTab === 'layanan' ? 'buku_harian' : 'layanan'"
+        >
+          Layanan ({{ products.length }})
+        </button>
+        <button type="button" class="unit-pill" @click="router.push('/reconciliation')">
+          Rekonsiliasi Bank &rarr;
+        </button>
       </div>
     </div>
 
-    <div class="tab-bar" role="tablist">
-      <button type="button" class="tab-btn" :class="{ active: activeTab === 'invoices' }" @click="activeTab = 'invoices'">
-        Faktur Tagihan & Pembayaran ({{ customerInvoices.length }})
-      </button>
-      <button type="button" class="tab-btn" :class="{ active: activeTab === 'orders' }" @click="activeTab = 'orders'">
-        Pesanan Layanan ({{ salesOrders.length }})
-      </button>
-      <button type="button" class="tab-btn" :class="{ active: activeTab === 'catalog' }" @click="activeTab = 'catalog'">
-        Katalog Layanan & Tarif ({{ products.length }})
-      </button>
-      <button type="button" class="tab-btn" :class="{ active: activeTab === 'cashier' }" @click="activeTab = 'cashier'">
-        Sesi Kasir Loket (Opsional) ({{ cashierData.sessions?.length || 0 }})
-      </button>
+    <AlertBanner v-if="feedbackMsg" variant="success" title="Berhasil" :message="feedbackMsg" @dismiss="feedbackMsg = ''" />
+    <AlertBanner v-if="errorMsg" variant="danger" title="Perhatian" :message="errorMsg" @dismiss="errorMsg = ''" />
+
+    <!-- Signature Poital 4-Card KPI Row -->
+    <section class="kpi-metric-row">
+      <article class="metric-card hero-card">
+        <span class="metric-title">Masuk Rekening ({{ bukuHarianData?.period?.label || selectedMonth }})</span>
+        <strong class="metric-number-val money">{{ formatRupiah(bukuHarianData?.summary?.totalReceived || 0) }}</strong>
+        <span class="trend-text">{{ bukuHarianData?.summary?.totalTransactions || 0 }} transaksi · Bank Mandiri</span>
+      </article>
+      <article class="metric-card blue-card" style="cursor: pointer;" @click="activeTab = 'invoices'">
+        <span class="metric-title">Piutang Terbuka (Invoice)</span>
+        <strong class="metric-number-val money dark-num">{{ formatRupiah(agingData?.buckets?.totalOutstanding || 0) }}</strong>
+        <span class="trend-text">{{ agingData?.buckets?.openCount || 0 }} invoice menunggu pelunasan</span>
+      </article>
+      <article class="metric-card amber-card" style="cursor: pointer;" @click="router.push('/reconciliation')">
+        <span class="metric-title">Rekonsiliasi Bank Mandiri</span>
+        <strong class="metric-number-val dark-num">
+          {{ bukuHarianData?.summary?.reconciledCount || 0 }} / {{ bukuHarianData?.summary?.allScopeCount || 0 }}
+        </strong>
+        <span class="trend-text">
+          {{ (bukuHarianData?.summary?.unreconciledCount || 0) > 0
+            ? `${bukuHarianData.summary.unreconciledCount} transaksi belum cocok · Klik buka`
+            : 'Semua cocok dengan rekening koran' }}
+        </span>
+      </article>
+      <article
+        class="metric-card"
+        :class="totalPendingApprovals > 0 ? 'amber-card' : 'white-card'"
+        :style="totalPendingApprovals > 0 ? 'cursor: pointer;' : ''"
+        @click="totalPendingApprovals > 0 && jumpToPendingApprovals()"
+      >
+        <span class="metric-title">Approval Manajer Keuangan</span>
+        <strong class="metric-number-val dark-num">
+          {{ totalPendingApprovals > 0 ? `${totalPendingApprovals} Menunggu` : `${totalApprovedDocs} Disetujui` }}
+        </strong>
+        <span class="trend-text">
+          {{ totalPendingApprovals > 0
+            ? `${cashInCounts.pendingApproval} Kwitansi/TT · ${invPendingApprovalCount} Invoice · Klik filter`
+            : `${kwitansiRows.length} KU · ${tandaTerimaRows.length} TT · ${customerInvoices.length} Inv` }}
+        </span>
+      </article>
+    </section>
+
+    <!-- 2 Focused Main Tabs: Buku Harian (Uang Masuk) vs Tagihan & Invoice (Piutang) -->
+    <div class="rev-tab-strip">
+      <div class="tab-pills" role="tablist">
+        <button type="button" class="tab-pill" :class="{ active: activeTab === 'buku_harian' }" @click="activeTab = 'buku_harian'">
+          Buku Harian · Uang Masuk ({{ cashInCounts.all }})
+          <span v-if="cashInCounts.pendingApproval > 0" class="tab-pending-dot">{{ cashInCounts.pendingApproval }}</span>
+        </button>
+        <button type="button" class="tab-pill" :class="{ active: activeTab === 'invoices' }" @click="activeTab = 'invoices'">
+          Tagihan &amp; Invoice ({{ customerInvoices.length }})
+          <span v-if="invPendingApprovalCount > 0" class="tab-pending-dot">{{ invPendingApprovalCount }}</span>
+        </button>
+      </div>
+
+      <input
+        v-model="searchQuery"
+        type="search"
+        class="pill-search-input"
+        placeholder="Cari nomor, klien, kegiatan, COA..."
+      />
     </div>
 
-    <StateBanner
-      v-if="loading"
-      state="loading"
-      title="Memuat Data Pendapatan & Kasir"
-      message="Mengambil daftar invoice pelanggan, kuitansi pembayaran, sesi kasir, dan setoran bank..."
-    />
+    <StateBanner v-if="loading" state="loading" title="Memuat Penerimaan" message="Mengambil data Buku Harian Uang Masuk, Tagihan Invoice, dan status Rekonsiliasi Bank..." />
 
-    <!-- TAB 1: CUSTOMER INVOICES & PAYMENTS -->
-    <div v-else-if="activeTab === 'invoices'" style="display: flex; flex-direction: column; gap: 18px">
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2>Daftar Tagihan Pelanggan (Customer Invoices)</h2>
-            <p class="text-muted">Mendukung pembayaran penuh maupun parsial dengan pelacakan sisa saldo tagihan secara presisi.</p>
-          </div>
-        </div>
-
-        <div class="table-wrap">
-          <table class="erp-table">
-            <thead>
-              <tr>
-                <th>No. Invoice</th>
-                <th>Pelanggan & Unit</th>
-                <th class="money-col">Total Tagihan</th>
-                <th class="money-col">Telah Dibayar</th>
-                <th class="money-col">Sisa Tagihan</th>
-                <th>Layanan</th>
-                <th>Status Tagihan</th>
-                <th>Tindakan</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="inv in paginatedInvoices" :key="inv.id">
-                <td>
-                  <span class="doc-code">{{ inv.docNumber }}</span>
-                  <div class="text-muted" style="font-size: 0.76rem">Jatuh Tempo: {{ formatDate(inv.dueDate) }}</div>
-                </td>
-                <td>
-                  <strong>{{ inv.customer?.name }}</strong>
-                  <div class="text-muted" style="font-size: 0.78rem">{{ inv.businessUnit?.code }}</div>
-                </td>
-                <td class="money-col">
-                  {{ formatRupiah(inv.totalAmount) }}
-                  <div v-if="Number(inv.serviceChargeAmount) > 0" style="font-size: 0.72rem; color: #b45309; font-weight: 600">
-                    + SC {{ inv.serviceChargePercent }}% ({{ formatRupiah(inv.serviceChargeAmount) }})
-                  </div>
-                </td>
-                <td class="money-col">{{ formatRupiah(inv.paidAmount) }}</td>
-                <td class="money-col"><strong>{{ formatRupiah(inv.balanceDue) }}</strong></td>
-                <td>
-                  <StatusBadge :status="inv.serviceDelivered ? 'DELIVERED' : 'PENDING'" />
-                </td>
-                <td><StatusBadge :status="inv.status" /></td>
-                <td>
-                  <div style="display: flex; gap: 6px; align-items: center">
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-secondary"
-                      title="Lihat lembar faktur resmi siap cetak / PDF"
-                      @click="openPrintModal(inv)"
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M6 9V2h12v7"></path>
-                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-                        <rect x="6" y="14" width="12" height="8"></rect>
-                      </svg>
-                      Faktur
-                    </button>
-                    <button
-                      v-if="inv.balanceDue > 0 && auth.hasPermission('payment:create')"
-                      type="button"
-                      class="btn btn-sm btn-primary"
-                      @click="openPaymentModal(inv)"
-                    >
-                      Terima Bayar
-                    </button>
-                    <span v-else class="text-muted" style="font-size: 0.8rem; font-weight: 600; color: #059669">Lunas</span>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <PaginationControl
-            v-model:currentPage="invPage"
-            v-model:pageSize="invPageSize"
-            :totalItems="totalInvoices"
-            itemLabel="tagihan invoice"
-          />
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2>Riwayat Kuitansi Pembayaran & Refund Terkontrol</h2>
-            <p class="text-muted">
-              Mencatat nilai bruto, potongan biaya payment gateway (merchant fee), dan penerimaan bersih ke kas/bank.
-            </p>
-          </div>
-        </div>
-
-        <div class="table-wrap">
-          <table class="erp-table">
-            <thead>
-              <tr>
-                <th>No. Kuitansi</th>
-                <th>Invoice & Pelanggan</th>
-                <th>Metode & Referensi</th>
-                <th class="money-col">Bruto (Gross)</th>
-                <th class="money-col">Biaya Fee</th>
-                <th class="money-col">Bersih (Net)</th>
-                <th>Status</th>
-                <th>Tindakan</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="pay in payments" :key="pay.id">
-                <td>
-                  <span class="doc-code">{{ pay.receiptNumber }}</span>
-                  <div class="text-muted" style="font-size: 0.76rem">{{ formatDateTime(pay.paymentDate) }}</div>
-                </td>
-                <td>
-                  <strong>{{ pay.customerInvoice?.docNumber }}</strong>
-                  <div class="text-muted" style="font-size: 0.78rem">{{ pay.customerInvoice?.customer?.name }}</div>
-                </td>
-                <td>
-                  <span class="doc-code">{{ pay.method }}</span>
-                  <div class="text-muted" style="font-size: 0.78rem">Ref: {{ pay.referenceNo }}</div>
-                </td>
-                <td class="money-col">{{ formatRupiah(pay.grossAmount) }}</td>
-                <td class="money-col">{{ formatRupiah(pay.feeAmount) }}</td>
-                <td class="money-col"><strong>{{ formatRupiah(pay.netAmount) }}</strong></td>
-                <td><StatusBadge :status="pay.status" /></td>
-                <td>
-                  <div class="btn-row">
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-secondary"
-                      @click="openReceiptModal(pay)"
-                    >
-                      Kuitansi POS
-                    </button>
-                    <button
-                      v-if="pay.status === 'CONFIRMED' && auth.hasPermission('payment:approve')"
-                      type="button"
-                      class="btn btn-sm btn-danger"
-                      @click="openRefundModal(pay)"
-                    >
-                      Refund
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-
-    <!-- TAB 2: SALES ORDERS & SERVICE DELIVERY -->
-    <div v-else-if="activeTab === 'orders'" class="panel">
-      <div class="panel-header">
+    <!-- ==================== TAB 1: BUKU HARIAN (100% UANG MASUK: KWITANSI / TANDA TERIMA) ==================== -->
+    <section v-else-if="activeTab === 'buku_harian'" class="poital-card">
+      <div class="card-head-row">
         <div>
-          <h2>Daftar Pesanan Pelanggan (Sales Orders) & Status Penyerahan Layanan</h2>
-          <p class="text-muted">
-            Status penyerahan layanan (Service Delivery) dicatat secara terpisah dan tidak otomatis melunasi tagihan.
-          </p>
+          <h2 class="card-title">Buku Harian Penerimaan (Uang Masuk)</h2>
+          <span class="card-sub">
+            {{ bukuHarianData?.period?.label }} · {{ bhFilteredSummary.count }} transaksi masuk ·
+            Total Masuk <strong class="text-pos">{{ formatRupiah(bhFilteredSummary.cashIn) }}</strong>
+          </span>
+        </div>
+        <div class="btn-row">
+          <button v-if="hasActiveBhFilters" type="button" class="pill-btn-soft" @click="resetBhFilters">
+            Reset Filter
+          </button>
+          <button type="button" class="pill-btn-soft" @click="exportMonthlyExcel">
+            Export Excel
+          </button>
+        </div>
+      </div>
+
+      <!-- Structured Cash-In Filter & Sort Toolbar -->
+      <div class="bh-toolbar">
+        <div class="bh-filter-pills" role="group" aria-label="Filter Jenis Bukti Uang Masuk">
+          <button type="button" class="bh-filter-pill" :class="{ active: bhDocFilter === 'all' }" @click="bhDocFilter = 'all'">
+            Semua ({{ cashInCounts.all }})
+          </button>
+          <button type="button" class="bh-filter-pill" :class="{ active: bhDocFilter === 'KU' }" @click="bhDocFilter = 'KU'">
+            Kwitansi ({{ cashInCounts.kwitansi }})
+          </button>
+          <button type="button" class="bh-filter-pill" :class="{ active: bhDocFilter === 'TT' }" @click="bhDocFilter = 'TT'">
+            Tanda Terima ({{ cashInCounts.tandaTerima }})
+          </button>
+          <button
+            v-if="cashInCounts.langsung > 0"
+            type="button"
+            class="bh-filter-pill"
+            :class="{ active: bhDocFilter === 'DIRECT' }"
+            @click="bhDocFilter = 'DIRECT'"
+          >
+            Langsung ({{ cashInCounts.langsung }})
+          </button>
+          <button
+            type="button"
+            class="bh-filter-pill"
+            :class="bhApprovalFilter === 'PENDING_APPROVAL' ? 'active' : (cashInCounts.pendingApproval > 0 ? 'warn-pill' : '')"
+            @click="bhApprovalFilter = bhApprovalFilter === 'PENDING_APPROVAL' ? '' : 'PENDING_APPROVAL'"
+          >
+            Menunggu Approval ({{ cashInCounts.pendingApproval }})
+          </button>
+          <button
+            v-if="cashInCounts.rejected > 0"
+            type="button"
+            class="bh-filter-pill"
+            :class="bhApprovalFilter === 'REJECTED' ? 'active' : 'danger-pill'"
+            @click="bhApprovalFilter = bhApprovalFilter === 'REJECTED' ? '' : 'REJECTED'"
+          >
+            Perlu Revisi ({{ cashInCounts.rejected }})
+          </button>
+        </div>
+
+        <div class="bh-toolbar-selects">
+          <select v-model="bhApprovalFilter" class="pill-select compact" aria-label="Filter Status Approval">
+            <option value="">Approval: Semua</option>
+            <option value="PENDING_APPROVAL">Menunggu Approval</option>
+            <option value="APPROVED">Disetujui</option>
+            <option value="REJECTED">Perlu Revisi</option>
+            <option value="VOID">Dibatalkan</option>
+          </select>
+
+          <select v-model="bhReconFilter" class="pill-select compact" aria-label="Filter Status Rekonsiliasi Bank">
+            <option value="">Rekon Bank: Semua</option>
+            <option value="RECONCILED">Terekonsiliasi Bank</option>
+            <option value="UNRECONCILED">Belum Rekon Bank</option>
+          </select>
+
+          <select v-model="stageFilter" class="pill-select compact" aria-label="Filter Tahap Bayar">
+            <option value="">Tahap: Semua</option>
+            <option value="UANG_MUKA">Uang Muka (DP)</option>
+            <option value="TERMIN">Termin</option>
+            <option value="PELUNASAN">Pelunasan</option>
+          </select>
+
+          <select v-model="bhProofFilter" class="pill-select compact" aria-label="Filter Bukti Pembayaran">
+            <option value="">Bukti: Semua</option>
+            <option value="HAS_PROOF">Sudah Ada Bukti</option>
+            <option value="NO_PROOF">Belum Ada Bukti</option>
+          </select>
+
+          <select v-model="bhSortBy" class="pill-select compact sort-select" aria-label="Urutkan Data Buku Harian">
+            <option value="newest">Urut: Terbaru Diinput</option>
+            <option value="date_desc">Urut: Tanggal Terbaru</option>
+            <option value="date_asc">Urut: Tanggal Terlama</option>
+            <option value="amount_desc">Urut: Nominal Terbesar</option>
+            <option value="amount_asc">Urut: Nominal Terkecil</option>
+          </select>
         </div>
       </div>
 
       <div class="table-wrap">
-        <table class="erp-table">
+        <table class="clean-table">
           <thead>
             <tr>
-              <th>No. Order</th>
-              <th>Pelanggan & Rincian Layanan</th>
-              <th class="money-col">Total Pesanan</th>
-              <th>Status Pembayaran</th>
-              <th>Status Layanan</th>
-              <th>Tindakan Operasional</th>
+              <th style="width: 42px;">#</th>
+              <th>Tanggal &amp; No. Bukti</th>
+              <th>Dokumen &amp; Metode</th>
+              <th>Unit · Pembayar &amp; Uraian</th>
+              <th>COA</th>
+              <th class="col-num">Nominal Masuk</th>
+              <th>Status Approval &amp; Bank</th>
+              <th class="col-num">Bukti, Approval &amp; Cetak</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="so in salesOrders" :key="so.id">
-              <td>
-                <span class="doc-code">{{ so.docNumber }}</span>
-                <div class="text-muted" style="font-size: 0.76rem">{{ formatDate(so.orderDate) }}</div>
+            <tr v-if="paginatedBukuHarian.length === 0">
+              <td colspan="8" class="empty-cell">
+                {{ hasActiveBhFilters ? 'Tidak ada penerimaan yang cocok dengan filter saat ini.' : 'Belum ada uang masuk di Buku Harian pada periode ini. Klik "+ Input Buku Harian" untuk mulai mencatat.' }}
               </td>
+            </tr>
+            <tr v-for="(item, idx) in paginatedBukuHarian" :key="item.uid" :class="{ 'row-void': item.status === 'VOID' }">
+              <td class="row-num-cell">{{ (bhPage - 1) * pageSize + idx + 1 }}</td>
               <td>
-                <strong>{{ so.customer?.name }}</strong>
-                <div v-for="line in so.lines" :key="line.id" class="text-muted" style="font-size: 0.8rem">
-                  {{ line.description }} ({{ line.quantity }} x {{ formatRupiah(line.unitPrice) }})
-                </div>
-                <div v-if="so.deliveryNotes" class="text-muted" style="font-size: 0.78rem; margin-top: 4px">
-                  BAST: {{ so.deliveryNotes }}
-                </div>
-              </td>
-              <td class="money-col"><strong>{{ formatRupiah(so.totalAmount) }}</strong></td>
-              <td><StatusBadge :status="so.status" /></td>
-              <td><StatusBadge :status="so.deliveryStatus" /></td>
-              <td>
-                <button
-                  v-if="so.deliveryStatus !== 'DELIVERED' && auth.hasPermission('revenue:create')"
-                  type="button"
-                  class="btn btn-sm btn-primary"
-                  @click="markOrderDelivered(so)"
-                >
-                  Catat Layanan Selesai
+                <button type="button" class="doc-link-btn mono-code" title="Klik untuk melihat detail lengkap" @click="openReviewModal('PAYMENT', item.raw)">
+                  {{ item.primaryDocNo }}
                 </button>
-                <span v-else class="text-muted">Diserahkan ({{ so.deliveredBy }})</span>
+                <div class="cell-sub nowrap-cell">{{ formatDate(item.dateDisplay) }}</div>
+              </td>
+              <td>
+                <span class="tag-pill" :class="item.receiptType === 'TANDA_TERIMA' ? 'info' : 'ok'">
+                  {{ formatReceiptDocLabel(item.receiptType) }}
+                </span>
+                <div class="cell-sub">{{ formatStageLabel(item.stageLabel) }} · {{ formatMethodLabel(item.method) }}</div>
+                <div v-if="item.invoiceDocNo" class="cell-sub">Ref: {{ item.invoiceDocNo }}</div>
+              </td>
+              <td>
+                <strong>{{ item.payerName }}</strong>
+                <span class="unit-mini-tag">{{ item.unitCode.replace('BU-', '') }}</span>
+                <div class="cell-sub">{{ formatActivitySub(item.activityTitle, item.rincianLabel) }}</div>
+              </td>
+              <td><span class="mono-code">{{ item.coaCode }}</span></td>
+              <td class="col-num">
+                <strong class="money" :class="item.approvalStatus === 'APPROVED' && item.status === 'CONFIRMED' ? 'text-pos' : ''">+ {{ formatRupiah(item.amount) }}</strong>
+                <div v-if="item.overpaymentAmount > 0" class="cell-warn">
+                  Lebih bayar {{ formatRupiah(item.overpaymentAmount) }}
+                </div>
+                <div v-else class="cell-sub">{{ getTaxSchemeShort(item.taxScheme) }}</div>
+              </td>
+              <td>
+                <template v-if="item.status === 'VOID'">
+                  <span class="tag-pill danger">Dibatalkan</span>
+                  <div class="cell-sub">{{ item.voidReason || 'Transaksi dibatalkan' }}</div>
+                </template>
+                <template v-else-if="item.approvalStatus === 'PENDING_APPROVAL'">
+                  <span class="tag-pill warn-soft">Menunggu Approval</span>
+                  <div class="cell-sub">
+                    <template v-if="auth.hasPermission('payment:approve')">
+                      Perlu persetujuan Anda{{ item.reminderCount > 0 ? ` · Diingatkan ${item.reminderCount}x (${formatTimeShort(item.lastRemindedAt)})` : '' }}
+                    </template>
+                    <template v-else>
+                      {{ item.reminderCount > 0 ? `Diingatkan ${item.reminderCount}x (${formatTimeShort(item.lastRemindedAt)})` : 'Menunggu Manajer Keuangan' }}
+                    </template>
+                  </div>
+                </template>
+                <template v-else-if="item.approvalStatus === 'REJECTED'">
+                  <span class="tag-pill danger">Perlu Revisi</span>
+                  <div class="cell-sub">{{ item.rejectionReason || 'Lihat catatan revisi' }}</div>
+                </template>
+                <template v-else>
+                  <span class="tag-pill ok">Disetujui</span>
+                  <div class="cell-sub">
+                    {{ item.isReconciled ? `Rekon ${item.reconciledImportNumber || 'Mandiri'}` : 'Sah · Belum Rekon Bank' }}
+                  </div>
+                </template>
+              </td>
+              <td class="col-num">
+                <div class="inline-actions">
+                  <!-- Button 1: Upload / Lihat Bukti (selalu bisa sebelum maupun sesudah approval) -->
+                  <button
+                    type="button"
+                    class="mini-action-btn"
+                    :class="item.raw.paymentProof ? 'proof-ok' : 'soft'"
+                    @click="openProofModal(item.raw, 'PAYMENT')"
+                  >
+                    {{ item.raw.paymentProof ? 'Lihat Bukti' : '+ Bukti' }}
+                  </button>
+
+                  <!-- Button 2: Ingatkan (khusus Operator/PIC) ATAU Tinjau, Setujui & Revisi (khusus Manajer Keuangan) -->
+                  <template v-if="item.status !== 'VOID' && item.approvalStatus === 'PENDING_APPROVAL'">
+                    <button
+                      v-if="!auth.hasPermission('payment:approve') && (auth.hasPermission('payment:create') || auth.hasPermission('revenue:create'))"
+                      type="button"
+                      class="mini-action-btn warn"
+                      :disabled="approvalBusyId === item.raw.id"
+                      title="Kirim pengingat approval ke Manajer Keuangan"
+                      @click="remindManager('PAYMENT', item.raw)"
+                    >
+                      {{ item.reminderCount > 0 ? `Ingatkan (${item.reminderCount})` : 'Ingatkan' }}
+                    </button>
+                    <template v-if="auth.hasPermission('payment:approve')">
+                      <button
+                        type="button"
+                        class="mini-action-btn soft"
+                        title="Tinjau rincian pajak, COA & pengaju sebelum menyetujui"
+                        @click="openReviewModal('PAYMENT', item.raw)"
+                      >
+                        Tinjau
+                      </button>
+                      <button
+                        type="button"
+                        class="mini-action-btn approve-ok"
+                        :disabled="approvalBusyId === item.raw.id"
+                        title="Setujui dokumen & aktifkan cetak"
+                        @click="approveDocument('PAYMENT', item.raw)"
+                      >
+                        Setujui
+                      </button>
+                      <button
+                        type="button"
+                        class="mini-action-btn revise-warn"
+                        :disabled="approvalBusyId === item.raw.id"
+                        @click="openRejectModal('PAYMENT', item.raw)"
+                      >
+                        Revisi
+                      </button>
+                    </template>
+                  </template>
+                  <template v-else-if="item.status !== 'VOID' && item.approvalStatus === 'REJECTED'">
+                    <button
+                      v-if="auth.hasPermission('payment:create')"
+                      type="button"
+                      class="mini-action-btn warn"
+                      @click="openResubmitModal('PAYMENT', item.raw)"
+                    >
+                      Ajukan Ulang
+                    </button>
+                    <button
+                      v-if="auth.hasPermission('payment:create')"
+                      type="button"
+                      class="mini-action-btn danger"
+                      @click="openVoidPaymentModal(item.raw)"
+                    >
+                      Batalkan
+                    </button>
+                  </template>
+                  <template v-else-if="item.status === 'CONFIRMED' && item.approvalStatus === 'APPROVED'">
+                    <button
+                      v-if="auth.hasPermission('payment:approve') && !item.isReconciled"
+                      type="button"
+                      class="mini-action-btn danger"
+                      title="Batalkan dokumen beserta jurnal pembalik"
+                      @click="openVoidPaymentModal(item.raw)"
+                    >
+                      Batal
+                    </button>
+                  </template>
+
+                  <!-- Button 3: Cetak Kwitansi / TT (TERKUNCI / DISABLED sebelum disetujui Manajer Keuangan) -->
+                  <button
+                    type="button"
+                    class="mini-action-btn"
+                    :class="item.approvalStatus === 'APPROVED' && item.status !== 'VOID' ? 'navy' : 'locked-print'"
+                    :disabled="item.approvalStatus !== 'APPROVED' || item.status === 'VOID'"
+                    :title="
+                      item.status === 'VOID'
+                        ? 'Dokumen dibatalkan'
+                        : item.approvalStatus === 'APPROVED'
+                          ? 'Cetak dokumen resmi'
+                          : 'Terkunci: Menunggu approval Manajer Keuangan sebelum dapat dicetak'
+                    "
+                    @click="openPrintReceipt(item.raw)"
+                  >
+                    {{ item.receiptType === 'TANDA_TERIMA' ? 'Cetak TT' : item.receiptType === 'KUITANSI_UM' ? 'Cetak KU-UM' : 'Cetak Kwitansi' }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-    </div>
+      <TablePagination
+        v-model:page="bhPage"
+        v-model:pageSize="pageSize"
+        :total-items="visibleBukuHarian.length"
+        item-label="penerimaan"
+      />
+    </section>
 
-    <!-- TAB 3: CASHIER SESSIONS, CLOSEOUT & DEPOSITS -->
-    <div v-else-if="activeTab === 'cashier'" style="display: flex; flex-direction: column; gap: 18px">
-      <!-- Active Shift Banner -->
-      <div v-if="activeCashierSession" class="active-session-banner">
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap">
-          <div style="display: flex; align-items: center; gap: 8px">
-            <span class="session-badge">SESI KASIR AKTIF</span>
-            <strong style="font-size: 1rem">{{ activeCashierSession.sessionNumber }}</strong>
-            <span class="text-muted">• {{ activeCashierSession.cashRegister?.name || 'Loket Kasir Unit' }}</span>
+    <!-- ==================== TAB 2: TAGIHAN & INVOICE (100% PIUTANG, AGING & KONTRAK) ==================== -->
+    <div v-else-if="activeTab === 'invoices'" class="rev-stack">
+      <!-- Clickable 4-Bucket Aging Piutang Strip -->
+      <section class="aging-strip-grid" aria-label="Aging Piutang Penerimaan">
+        <button
+          type="button"
+          class="aging-bucket-card"
+          :class="{ active: activeAgingBucket === 'current' }"
+          @click="toggleAgingFilter('current')"
+        >
+          <span>0 - 30 Hari</span>
+          <strong class="money">{{ formatRupiah(agingData?.buckets?.current || 0) }}</strong>
+        </button>
+        <button
+          type="button"
+          class="aging-bucket-card"
+          :class="{ active: activeAgingBucket === 'days31to60' }"
+          @click="toggleAgingFilter('days31to60')"
+        >
+          <span>31 - 60 Hari</span>
+          <strong class="money">{{ formatRupiah(agingData?.buckets?.days31to60 || 0) }}</strong>
+        </button>
+        <button
+          type="button"
+          class="aging-bucket-card warn"
+          :class="{ active: activeAgingBucket === 'days61to90' }"
+          @click="toggleAgingFilter('days61to90')"
+        >
+          <span>61 - 90 Hari</span>
+          <strong class="money">{{ formatRupiah(agingData?.buckets?.days61to90 || 0) }}</strong>
+        </button>
+        <button
+          type="button"
+          class="aging-bucket-card danger"
+          :class="{ active: activeAgingBucket === 'over90' }"
+          @click="toggleAgingFilter('over90')"
+        >
+          <span>&gt; 90 Hari</span>
+          <strong class="money">{{ formatRupiah(agingData?.buckets?.over90 || 0) }}</strong>
+        </button>
+      </section>
+
+      <section class="poital-card">
+        <div class="card-head-row">
+          <div>
+            <h2 class="card-title">Tagihan &amp; Invoice Pelanggan</h2>
+            <span class="card-sub">
+              {{ invFilteredSummary.count }} invoice tampil ·
+              Total Tagihan <strong>{{ formatRupiah(invFilteredSummary.totalNet) }}</strong>
+              <template v-if="invFilteredSummary.totalOpen > 0">
+                · Sisa Piutang <strong>{{ formatRupiah(invFilteredSummary.totalOpen) }}</strong>
+              </template>
+            </span>
           </div>
-          <div class="btn-row" v-if="auth.hasPermission('cashier:operate')">
+          <div class="btn-row">
+            <button v-if="hasActiveInvFilters" type="button" class="pill-btn-soft" @click="resetInvFilters">
+              Reset Filter
+            </button>
+            <button type="button" class="pill-btn-soft" @click="exportAgingExcel">
+              Export Aging .xlsx
+            </button>
             <button
+              v-if="auth.hasPermission('revenue:create')"
               type="button"
-              class="btn btn-sm btn-primary"
-              @click="openCloseCashierModal(activeCashierSession)"
+              class="pill-btn-navy"
+              @click="openCreateInvoice()"
             >
-              Tutup Kasir (Closeout)
+              + Buat Invoice
             </button>
           </div>
         </div>
 
-        <div class="session-stats-grid">
-          <div class="stat-box">
-            <span class="stat-label">Petugas Kasir</span>
-            <strong class="stat-value">{{ activeCashierSession.cashierName }}</strong>
-          </div>
-          <div class="stat-box">
-            <span class="stat-label">Modal Awal Kasir</span>
-            <strong class="stat-value">{{ formatRupiah(activeCashierSession.openingFloat) }}</strong>
-          </div>
-          <div class="stat-box">
-            <span class="stat-label">Tunai Masuk (POS)</span>
-            <strong class="stat-value" style="color: var(--status-success-text)">{{ formatRupiah(activeCashierSession.totalCashIn) }}</strong>
-          </div>
-          <div class="stat-box">
-            <span class="stat-label">Saldo Kasir Fisik Teoritis</span>
-            <strong class="stat-value" style="color: var(--color-primary)">{{ formatRupiah(activeCashierSession.theoreticalBalance) }}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div v-else class="empty-shift-banner">
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap">
-          <div>
-            <strong>Belum ada Sesi Kasir yang aktif saat ini.</strong>
-            <p class="text-muted" style="margin: 4px 0 0; font-size: 0.85rem">
-              Buka sesi kasir baru untuk menetapkan modal kerja fisik awal dan mulai menerima pembayaran tunai loket sesuai Pertor 310.
-            </p>
-          </div>
-          <button
-            v-if="auth.hasPermission('cashier:operate')"
-            type="button"
-            class="btn btn-primary btn-sm"
-            @click="openNewSessionModal"
-          >
-            + Buka Sesi Kasir Baru
-          </button>
-        </div>
-      </div>
-
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2>Sesi Kasir, Perhitungan Fisik Closeout & Persetujuan Selisih</h2>
-            <p class="text-muted">
-              Sesi kasir membandingkan saldo teoritis terhadap hasil hitung fisik; selisih di atas Rp 50.000 wajib disetujui Finance Manager.
-            </p>
-          </div>
-          <div class="btn-row" v-if="auth.hasPermission('cashier:operate')">
+        <div class="bh-toolbar">
+          <div class="bh-filter-pills" role="group" aria-label="Filter Cepat Status Invoice">
+            <button type="button" class="bh-filter-pill" :class="{ active: invoiceStatusFilter === '' }" @click="invoiceStatusFilter = ''">
+              Semua ({{ customerInvoices.length }})
+            </button>
             <button
               type="button"
-              class="btn btn-sm btn-secondary"
-              @click="openNewSessionModal"
+              class="bh-filter-pill"
+              :class="invoiceStatusFilter === 'PENDING_APPROVAL' ? 'active' : (invPendingApprovalCount > 0 ? 'warn-pill' : '')"
+              @click="invoiceStatusFilter = invoiceStatusFilter === 'PENDING_APPROVAL' ? '' : 'PENDING_APPROVAL'"
             >
-              + Buka Sesi Kasir Baru
+              Menunggu Approval ({{ invPendingApprovalCount }})
             </button>
+            <button
+              v-if="invRejectedCount > 0"
+              type="button"
+              class="bh-filter-pill"
+              :class="invoiceStatusFilter === 'REJECTED' ? 'active' : 'danger-pill'"
+              @click="invoiceStatusFilter = invoiceStatusFilter === 'REJECTED' ? '' : 'REJECTED'"
+            >
+              Perlu Revisi ({{ invRejectedCount }})
+            </button>
+            <button type="button" class="bh-filter-pill" :class="{ active: invoiceStatusFilter === 'OPEN' }" @click="invoiceStatusFilter = 'OPEN'">
+              Belum Lunas ({{ invOpenCount }})
+            </button>
+            <button type="button" class="bh-filter-pill" :class="{ active: invoiceStatusFilter === 'PAID' }" @click="invoiceStatusFilter = 'PAID'">
+              Lunas ({{ invPaidCount }})
+            </button>
+            <button type="button" class="bh-filter-pill" :class="{ active: invoiceStatusFilter === 'VOID' }" @click="invoiceStatusFilter = 'VOID'">
+              HANGUS ({{ invVoidCount }})
+            </button>
+          </div>
+
+          <div class="bh-toolbar-selects">
+            <select v-model="invoiceStatusFilter" class="pill-select compact" aria-label="Filter Status Invoice">
+              <option value="">Status: Semua</option>
+              <option value="PENDING_APPROVAL">Menunggu Approval</option>
+              <option value="REJECTED">Perlu Revisi</option>
+              <option value="OPEN">Belum Lunas (Semua)</option>
+              <option value="ISSUED">Disetujui · Belum Bayar</option>
+              <option value="PARTIALLY_PAID">Sebagian Bayar</option>
+              <option value="PAID">Lunas</option>
+              <option value="VOID">HANGUS / Batal</option>
+            </select>
+
+            <select v-model="invSortBy" class="pill-select compact sort-select" aria-label="Urutkan Daftar Invoice">
+              <option value="newest">Urut: Terbaru Dibuat</option>
+              <option value="due_asc">Urut: Jatuh Tempo Terdekat</option>
+              <option value="balance_desc">Urut: Sisa Piutang Terbesar</option>
+              <option value="amount_desc">Urut: Nilai Tagihan Terbesar</option>
+            </select>
           </div>
         </div>
 
         <div class="table-wrap">
-          <table class="erp-table">
+          <table class="clean-table">
             <thead>
               <tr>
-                <th>No. Sesi & Register</th>
-                <th>Petugas Kasir</th>
-                <th class="money-col">Modal Awal</th>
-                <th class="money-col">Tunai Masuk</th>
-                <th class="money-col">Saldo Teoritis</th>
-                <th class="money-col">Hitung Fisik</th>
-                <th class="money-col">Selisih</th>
-                <th>Status</th>
-                <th>Tindakan</th>
+                <th style="width: 42px;">#</th>
+                <th>No. Invoice &amp; Jenis</th>
+                <th>Pelanggan &amp; Kegiatan</th>
+                <th>Jatuh Tempo</th>
+                <th class="col-num">Tagihan Neto</th>
+                <th class="col-num">Sisa Piutang</th>
+                <th>Status &amp; Approval</th>
+                <th class="col-num">Bukti, Approval &amp; Cetak</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in cashierData.sessions" :key="s.id">
+              <tr v-if="paginatedInvoices.length === 0">
+                <td colspan="8" class="empty-cell">Tidak ada invoice yang cocok dengan filter saat ini.</td>
+              </tr>
+              <tr v-for="(inv, idx) in paginatedInvoices" :key="inv.id" :class="{ 'row-void': inv.status === 'VOID' }">
+                <td class="row-num-cell">{{ (invPage - 1) * pageSize + idx + 1 }}</td>
                 <td>
-                  <span class="doc-code">{{ s.sessionNumber }}</span>
-                  <div class="text-muted" style="font-size: 0.78rem">{{ s.cashRegister?.name }}</div>
+                  <button type="button" class="doc-link-btn mono-code" title="Klik untuk meninjau rincian item & pajak Invoice" @click="openReviewModal('INVOICE', inv)">
+                    {{ inv.docNumber }}
+                  </button>
+                  <div class="cell-sub nowrap-cell">{{ formatStageLabel(inv.invoiceType) }} · FP {{ inv.fakturPajakCode || '040' }}</div>
                 </td>
                 <td>
-                  {{ s.cashierName }}
-                  <div v-if="s.discrepancyReason" class="text-muted" style="font-size: 0.76rem">
-                    Catatan: {{ s.discrepancyReason }}
+                  <strong>{{ inv.customer?.name }}</strong>
+                  <span class="unit-mini-tag">{{ inv.businessUnit?.code?.replace('BU-', '') }}</span>
+                  <div class="cell-sub">{{ inv.activityTitle || inv.lines?.[0]?.description }}</div>
+                </td>
+                <td class="nowrap-cell">
+                  <div>{{ formatDate(inv.dueDate) }}</div>
+                  <span v-if="getDaysOverdue(inv) > 0 && inv.approvalStatus === 'APPROVED'" class="overdue-chip">Lewat {{ getDaysOverdue(inv) }} hari</span>
+                </td>
+                <td class="col-num money">{{ formatRupiah(inv.totalAmount) }}</td>
+                <td class="col-num">
+                  <strong class="money" :class="inv.approvalStatus !== 'APPROVED' ? 'muted-money' : ''">{{ formatRupiah(inv.balanceDue) }}</strong>
+                  <div v-if="inv.approvalStatus !== 'APPROVED' && inv.status !== 'VOID'" class="cell-sub">(Belum posting)</div>
+                </td>
+                <td>
+                  <span
+                    class="tag-pill"
+                    :class="
+                      inv.status === 'PAID'
+                        ? 'ok'
+                        : inv.status === 'PARTIALLY_PAID'
+                          ? 'info'
+                          : inv.status === 'ISSUED'
+                            ? 'ok'
+                            : inv.status === 'PENDING_APPROVAL'
+                              ? 'warn-soft'
+                              : 'danger'
+                    "
+                  >
+                    {{ formatInvoiceStatusLabel(inv.status) }}
+                  </span>
+                  <div v-if="inv.status === 'PENDING_APPROVAL'" class="cell-sub">
+                    <template v-if="auth.hasPermission('payment:approve')">
+                      Perlu persetujuan Anda{{ (inv.reminderCount || 0) > 0 ? ` · Diingatkan ${inv.reminderCount}x (${formatTimeShort(inv.lastRemindedAt)})` : '' }}
+                    </template>
+                    <template v-else>
+                      {{ (inv.reminderCount || 0) > 0 ? `Diingatkan ${inv.reminderCount}x (${formatTimeShort(inv.lastRemindedAt)})` : 'Menunggu Manajer Keuangan' }}
+                    </template>
                   </div>
+                  <div v-else-if="inv.status === 'REJECTED'" class="cell-sub">{{ inv.rejectionReason || 'Lihat catatan revisi' }}</div>
+                  <div v-else-if="inv.approvedByName" class="cell-sub">Disetujui {{ inv.approvedByName }}</div>
                 </td>
-                <td class="money-col">{{ formatRupiah(s.openingFloat) }}</td>
-                <td class="money-col">{{ formatRupiah(s.totalCashIn) }}</td>
-                <td class="money-col"><strong>{{ formatRupiah(s.theoreticalBalance) }}</strong></td>
-                <td class="money-col">
-                  {{ s.actualCountedCash !== null ? formatRupiah(s.actualCountedCash) : '-' }}
-                </td>
-                <td class="money-col">
-                  <strong :style="s.discrepancyAmount && s.discrepancyAmount < 0 ? 'color: var(--status-danger-text)' : ''">
-                    {{ s.discrepancyAmount !== null ? formatRupiah(s.discrepancyAmount) : '-' }}
-                  </strong>
-                </td>
-                <td><StatusBadge :status="s.status" /></td>
-                <td>
-                  <div class="btn-row">
+                <td class="col-num">
+                  <div class="inline-actions">
+                    <!-- Button 1: Upload / Lihat Bukti Pendukung Invoice -->
                     <button
-                      v-if="s.status === 'OPEN' && auth.hasPermission('cashier:operate')"
                       type="button"
-                      class="btn btn-sm btn-primary"
-                      @click="openCloseCashierModal(s)"
+                      class="mini-action-btn"
+                      :class="inv.invoiceProof ? 'proof-ok' : 'soft'"
+                      @click="openProofModal(inv, 'INVOICE')"
                     >
-                      Tutup Kasir (Closeout)
+                      {{ inv.invoiceProof ? 'Lihat Bukti' : '+ Bukti' }}
+                    </button>
+
+                    <!-- Button 2: Ingatkan (Operator/PIC) ATAU Tinjau, Setujui & Revisi (Manajer Keuangan) -->
+                    <template v-if="inv.status !== 'VOID' && inv.approvalStatus === 'PENDING_APPROVAL'">
+                      <button
+                        v-if="!auth.hasPermission('payment:approve') && auth.hasPermission('revenue:create')"
+                        type="button"
+                        class="mini-action-btn warn"
+                        :disabled="approvalBusyId === inv.id"
+                        title="Kirim pengingat approval ke Manajer Keuangan"
+                        @click="remindManager('INVOICE', inv)"
+                      >
+                        {{ (inv.reminderCount || 0) > 0 ? `Ingatkan (${inv.reminderCount})` : 'Ingatkan' }}
+                      </button>
+                      <template v-if="auth.hasPermission('payment:approve')">
+                        <button
+                          type="button"
+                          class="mini-action-btn soft"
+                          title="Tinjau rincian item, pajak & pengaju Invoice sebelum menyetujui"
+                          @click="openReviewModal('INVOICE', inv)"
+                        >
+                          Tinjau
+                        </button>
+                        <button
+                          type="button"
+                          class="mini-action-btn approve-ok"
+                          :disabled="approvalBusyId === inv.id"
+                          title="Setujui Invoice & aktifkan cetak"
+                          @click="approveDocument('INVOICE', inv)"
+                        >
+                          Setujui
+                        </button>
+                        <button
+                          type="button"
+                          class="mini-action-btn revise-warn"
+                          :disabled="approvalBusyId === inv.id"
+                          @click="openRejectModal('INVOICE', inv)"
+                        >
+                          Revisi
+                        </button>
+                      </template>
+                    </template>
+                    <template v-else-if="inv.status !== 'VOID' && inv.approvalStatus === 'REJECTED'">
+                      <button
+                        v-if="auth.hasPermission('revenue:create')"
+                        type="button"
+                        class="mini-action-btn warn"
+                        @click="openResubmitModal('INVOICE', inv)"
+                      >
+                        Ajukan Ulang
+                      </button>
+                    </template>
+                    <template v-else-if="['ISSUED', 'PARTIALLY_PAID'].includes(inv.status) && inv.approvalStatus === 'APPROVED'">
+                      <button
+                        v-if="auth.hasPermission('payment:create')"
+                        type="button"
+                        class="mini-action-btn soft"
+                        @click="openPayModal(inv)"
+                      >
+                        Catat Bayar
+                      </button>
+                    </template>
+
+                    <!-- Button 3: Cetak Invoice (TERKUNCI / DISABLED sebelum disetujui Manajer Keuangan) -->
+                    <button
+                      type="button"
+                      class="mini-action-btn"
+                      :class="inv.approvalStatus === 'APPROVED' && inv.status !== 'VOID' ? 'navy' : 'locked-print'"
+                      :disabled="inv.approvalStatus !== 'APPROVED' || inv.status === 'VOID'"
+                      :title="
+                        inv.status === 'VOID'
+                          ? 'Invoice HANGUS'
+                          : inv.approvalStatus === 'APPROVED'
+                            ? 'Cetak Invoice resmi'
+                            : 'Terkunci: Menunggu approval Manajer Keuangan sebelum dapat dicetak'
+                      "
+                      @click="openPrintInvoice(inv)"
+                    >
+                      Cetak Invoice
+                    </button>
+
+                    <button
+                      v-if="['ISSUED', 'REJECTED'].includes(inv.status) && Number(inv.paidAmount) === 0 && auth.hasPermission('revenue:create')"
+                      type="button"
+                      class="mini-action-btn danger"
+                      @click="openVoidModal(inv)"
+                    >
+                      Hangus
                     </button>
                     <button
-                      v-if="s.status === 'CLOSING_SUBMITTED' && auth.hasPermission('payment:approve')"
+                      v-if="inv.status === 'VOID' && auth.hasPermission('revenue:create')"
                       type="button"
-                      class="btn btn-sm btn-success"
-                      @click="approveCashierDiscrepancy(s)"
+                      class="mini-action-btn"
+                      @click="reissueInvoice(inv)"
                     >
-                      Sahkan Selisih
-                    </button>
-                    <button
-                      v-if="['CLOSING_SUBMITTED', 'CLOSED'].includes(s.status) && auth.hasPermission('cashier:operate')"
-                      type="button"
-                      class="btn btn-sm"
-                      @click="openDepositModal(s)"
-                    >
-                      Catat Setoran Bank
+                      Terbit Ulang
                     </button>
                   </div>
                 </td>
@@ -857,121 +2940,170 @@ onMounted(loadRevenueAndCashier);
             </tbody>
           </table>
         </div>
+        <TablePagination
+          v-model:page="invPage"
+          v-model:pageSize="pageSize"
+          :total-items="filteredInvoices.length"
+          item-label="invoice"
+        />
       </section>
 
-      <section class="panel">
-        <div class="panel-header">
-          <h2>Riwayat Setoran Kas Kasir ke Rekening Bank (Cash Deposits)</h2>
-        </div>
-
-        <div class="table-wrap">
-          <table class="erp-table">
-            <thead>
-              <tr>
-                <th>No. Setoran</th>
-                <th>Sesi Kasir Asal</th>
-                <th>Rekening Bank Tujuan</th>
-                <th>Referensi Slip Setoran</th>
-                <th class="money-col">Nominal Setoran</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="dep in cashierData.deposits" :key="dep.id">
-                <td><span class="doc-code">{{ dep.depositNumber }}</span></td>
-                <td><span class="doc-code">{{ dep.cashierSession?.sessionNumber }}</span></td>
-                <td>{{ dep.bankAccount?.bankName }} ({{ dep.bankAccount?.accountNumberMasked }})</td>
-                <td>{{ dep.referenceNo }}</td>
-                <td class="money-col"><strong>{{ formatRupiah(dep.amount) }}</strong></td>
-                <td><StatusBadge :status="dep.status" /></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-
-    <!-- TAB 4: CUSTOMERS & PRODUCT/SERVICE CATALOG WITH PRICE HISTORY -->
-    <div v-else-if="activeTab === 'catalog'" class="split-workspace">
-      <section class="panel">
-        <div class="panel-header">
+      <!-- Multi-Invoice Contracts / Sales Orders -->
+      <section v-if="filteredSalesOrders.length > 0" class="poital-card">
+        <div class="card-head-row">
           <div>
-            <h2>Katalog Produk/Layanan & Histori Perubahan Harga</h2>
-            <p class="text-muted">Perubahan harga katalog tidak mengubah nominal pada pesanan atau invoice yang telah diterbitkan.</p>
+            <h2 class="card-title">Kontrak &amp; Kegiatan Multi-Invoice</h2>
+            <span class="card-sub">Terbitkan invoice DP / Termin / Pelunasan / Sewa Tambahan dari induk kegiatan yang sama</span>
           </div>
         </div>
-
         <div class="table-wrap">
-          <table class="erp-table">
+          <table class="clean-table">
             <thead>
               <tr>
-                <th>SKU & Unit</th>
-                <th>Nama Produk / Layanan</th>
-                <th class="money-col">Harga Saat Ini</th>
-                <th>Histori Harga</th>
-                <th>Aksi</th>
+                <th style="width: 42px;">#</th>
+                <th>No. Kontrak</th>
+                <th>Pelanggan &amp; Unit</th>
+                <th class="col-num">Nilai Kontrak</th>
+                <th class="col-num">Invoice Terbit</th>
+                <th class="col-num">Aksi</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="prod in products" :key="prod.id">
+              <tr v-for="(so, idx) in paginatedSalesOrders" :key="so.id">
+                <td class="row-num-cell">{{ (soPage - 1) * pageSize + idx + 1 }}</td>
+                <td class="mono-code">{{ so.docNumber }}</td>
                 <td>
-                  <span class="doc-code">{{ prod.sku }}</span>
-                  <div class="text-muted" style="font-size: 0.76rem">Akun: {{ prod.revenueAccountCode }}</div>
+                  <strong>{{ so.customer?.name }}</strong>
+                  <span class="unit-mini-tag">{{ so.businessUnit?.code?.replace('BU-', '') }}</span>
                 </td>
-                <td>
-                  <strong>{{ prod.name }}</strong>
-                  <div class="text-muted" style="font-size: 0.78rem">Pajak: {{ prod.taxCode }}</div>
-                </td>
-                <td class="money-col"><strong>{{ formatRupiah(prod.unitPrice) }}</strong></td>
-                <td>
-                  <div v-for="h in prod.priceHistories" :key="h.id" class="text-muted" style="font-size: 0.76rem">
-                    {{ formatRupiah(h.oldPrice) }} -> {{ formatRupiah(h.newPrice) }} ({{ h.reason }})
-                  </div>
-                  <span v-if="!prod.priceHistories?.length" class="text-muted">Harga awal</span>
-                </td>
-                <td>
+                <td class="col-num money">{{ formatRupiah(so.totalAmount) }}</td>
+                <td class="col-num">{{ so.customerInvoices?.length || 0 }} faktur</td>
+                <td class="col-num">
                   <button
                     v-if="auth.hasPermission('revenue:create')"
                     type="button"
-                    class="btn btn-sm"
-                    @click="openPriceChangeModal(prod)"
+                    class="mini-action-btn"
+                    @click="openCreateInvoice(so)"
                   >
-                    Ubah Harga
+                    + Invoice Termin / Tambahan
                   </button>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
+        <TablePagination
+          v-model:page="soPage"
+          v-model:pageSize="pageSize"
+          :total-items="filteredSalesOrders.length"
+          item-label="kontrak"
+        />
       </section>
+    </div>
 
-      <section class="panel">
-        <div class="panel-header">
-          <h2>Master Pelanggan ({{ customers.length }})</h2>
+    <!-- ==================== TAB 5: KATALOG LAYANAN 4 UNIT & PELANGGAN ==================== -->
+    <div v-else class="rev-stack">
+      <section class="poital-card">
+        <div class="card-head-row">
+          <div>
+            <h2 class="card-title">Katalog Layanan &amp; Mapping COA (4 Unit)</h2>
+            <span class="card-sub">Kode layanan dibuat otomatis oleh sistem; tarif, kategori, COA Pertor 310, dan pajak dapat diperbarui kapan saja</span>
+          </div>
+          <div class="btn-row">
+            <button v-if="auth.hasPermission('revenue:create')" type="button" class="pill-btn-soft" @click="addCustModalOpen = true">
+              + Pelanggan Baru
+            </button>
+            <button v-if="auth.hasPermission('revenue:create')" type="button" class="pill-btn-navy" @click="openAddProductModal">
+              + Tambah Layanan
+            </button>
+          </div>
         </div>
 
         <div class="table-wrap">
-          <table class="erp-table">
+          <table class="clean-table">
             <thead>
               <tr>
-                <th>Kode</th>
-                <th>Nama Organisasi / Pelanggan</th>
-                <th>Kontak</th>
-                <th class="money-col">Batas Kredit</th>
+                <th>Kode &amp; Unit</th>
+                <th>Nama Layanan &amp; Kategori</th>
+                <th>Kode COA</th>
+                <th>Skema Pajak</th>
+                <th class="col-num">Tarif Satuan</th>
+                <th class="col-num">Aksi</th>
               </tr>
             </thead>
             <tbody>
+              <tr v-for="p in paginatedProducts" :key="p.id">
+                <td>
+                  <div class="mono-code">{{ p.sku }}</div>
+                  <span class="unit-mini-tag">{{ p.businessUnit?.code?.replace('BU-', '') }}</span>
+                </td>
+                <td>
+                  <strong>{{ p.name }}</strong>
+                  <div class="cell-sub">{{ p.category }}{{ p.location ? ` · ${p.location}` : '' }} · per {{ p.unit }}</div>
+                </td>
+                <td class="mono-code">{{ p.revenueAccountCode }}</td>
+                <td>
+                  <span class="tag-pill ok">{{ getTaxSchemeShort(p.taxScheme) }}</span>
+                  <div class="cell-sub">{{ p.taxInclusive !== false ? 'Include Pajak' : 'Exclude Pajak' }}</div>
+                </td>
+                <td class="col-num"><strong class="money">{{ formatRupiah(p.unitPrice) }}</strong></td>
+                <td class="col-num">
+                  <button v-if="auth.hasPermission('revenue:create')" type="button" class="mini-action-btn soft" @click="openEditProductModal(p)">
+                    Edit Layanan
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <TablePagination
+          v-model:page="prodPage"
+          v-model:pageSize="pageSize"
+          :total-items="filteredProducts.length"
+          item-label="layanan"
+        />
+      </section>
+
+      <!-- Master Pelanggan & Instansi -->
+      <section class="poital-card">
+        <div class="card-head-row">
+          <div>
+            <h2 class="card-title">Daftar Pelanggan &amp; Instansi ({{ customers.length }})</h2>
+            <span class="card-sub">Profil pemungut pajak (FP 040 / FP 020 / FP 030 / Internal UT) otomatis diterapkan saat menerbitkan tagihan</span>
+          </div>
+          <button v-if="auth.hasPermission('revenue:create')" type="button" class="pill-btn-soft" @click="addCustModalOpen = true">
+            + Pelanggan Baru
+          </button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="clean-table">
+            <thead>
+              <tr>
+                <th>Kode</th>
+                <th>Nama Pelanggan / Instansi</th>
+                <th>Tipe &amp; Profil Pajak</th>
+                <th>PIC &amp; Kontak</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="customers.length === 0">
+                <td colspan="4" class="empty-cell">Belum ada data pelanggan terdaftar.</td>
+              </tr>
               <tr v-for="c in customers" :key="c.id">
-                <td><span class="doc-code">{{ c.code }}</span></td>
+                <td class="mono-code">{{ c.code }}</td>
                 <td>
                   <strong>{{ c.name }}</strong>
-                  <div class="text-muted" style="font-size: 0.76rem">NPWP: {{ c.taxIdNpwp || '-' }}</div>
+                  <div class="cell-sub">{{ c.address }}</div>
                 </td>
                 <td>
-                  {{ c.contactPerson }}
-                  <div class="text-muted" style="font-size: 0.76rem">{{ c.email }}</div>
+                  <span class="tag-pill info">{{ formatOrgTypeLabel(c.organizationType) }}</span>
+                  <div class="cell-sub">{{ c.taxCollectorProfile || 'FP_040_UMUM' }}</div>
                 </td>
-                <td class="money-col">{{ formatRupiah(c.creditLimit) }}</td>
+                <td>
+                  <div>{{ c.contactPerson }}</div>
+                  <div class="cell-sub">{{ c.phone }} · {{ c.email }}</div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -979,1058 +3111,1996 @@ onMounted(loadRevenueAndCashier);
       </section>
     </div>
 
-    <!-- Modal: Create Sales Order -->
-    <ModalDialog :open="orderModalOpen" title="Buat Pesanan Pelanggan & Terbitkan Invoice" @close="orderModalOpen = false">
-      <form @submit.prevent="submitOrder" style="display: flex; flex-direction: column; gap: 12px">
-        <div class="form-field">
-          <label for="so-cust" class="form-label">Pilih Pelanggan</label>
-          <select id="so-cust" v-model="orderForm.customerId" class="select" required>
-            <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.code }} - {{ c.name }}</option>
-          </select>
-        </div>
+    <!-- ==================== MODAL 1: UNIFIED INPUT BUKU HARIAN (KWITANSI / TANDA TERIMA / INVOICE) ==================== -->
+    <ModalDialog :open="entryModalOpen" title="Input Buku Harian Penerimaan" maxWidth="1120px" @close="!addCustModalOpen && (entryModalOpen = false)">
+      <AlertBanner
+        v-if="modalErrorMsg"
+        variant="danger"
+        title="Gagal Menyimpan"
+        :message="modalErrorMsg"
+        style="margin-bottom: 12px;"
+        @dismiss="modalErrorMsg = ''"
+      />
 
-        <div class="form-field">
-          <label for="so-prod" class="form-label">Pilih Produk / Layanan</label>
-          <select id="so-prod" v-model="orderForm.productServiceId" class="select" required>
-            <option v-for="p in products" :key="p.id" :value="p.id">
-              {{ p.sku }} - {{ p.name }} ({{ formatRupiah(p.unitPrice) }})
-            </option>
-          </select>
-          <div v-if="orderForm.productServiceId" class="coa-revenue-tag" style="margin-top: 4px; font-size: 0.76rem; color: #64748b;">
-            Akun Pendapatan COA: <code style="color: #0284c7; font-weight: 600;">{{ products.find(p => p.id === orderForm.productServiceId)?.revenueAccountCode || '4203xxxxxx' }}</code>
-          </div>
-        </div>
-
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="so-qty" class="form-label">Kuantitas</label>
-            <input id="so-qty" v-model.number="orderForm.quantity" type="number" min="1" class="input" required />
-          </div>
-          <div class="form-field">
-            <label for="so-disc" class="form-label">Diskon Nominal (IDR)</label>
-            <CurrencyInput
-              id="so-disc"
-              v-model="orderForm.discountAmount"
-              :min="0"
-              placeholder="0"
-              required
-            />
-          </div>
-          <div class="form-field">
-            <label for="so-service" class="form-label">Service Charge MICE (%)</label>
-            <select id="so-service" v-model.number="orderForm.serviceChargePercent" class="select">
-              <option :value="0">0% (Tanpa Service Charge)</option>
-              <option :value="5">5% (Event Standar / Ruang Rapat)</option>
-              <option :value="10">10% (Banquet / Catering / VIP MICE)</option>
-            </select>
-          </div>
-          <div class="form-field">
-            <label for="so-tax" class="form-label">Tarif PPN (%)</label>
-            <input id="so-tax" v-model.number="orderForm.taxRatePercent" type="number" min="0" max="100" class="input" required />
-          </div>
-        </div>
-
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="orderModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Simpan Pesanan & Terbitkan Invoice</button>
-        </div>
-      </form>
-    </ModalDialog>
-
-    <!-- Modal: Record Payment -->
-    <ModalDialog :open="paymentModalOpen" title="Terima Pembayaran Tagihan Pelanggan" @close="paymentModalOpen = false">
-      <form v-if="selectedInvoiceForPayment" @submit.prevent="submitPayment" style="display: flex; flex-direction: column; gap: 12px">
-        <p>
-          Invoice: <strong>{{ selectedInvoiceForPayment.docNumber }}</strong> |
-          Sisa Tagihan: <strong class="money">{{ formatRupiah(selectedInvoiceForPayment.balanceDue) }}</strong>
-        </p>
-
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="pay-method" class="form-label">Metode Pembayaran</label>
-            <select id="pay-method" v-model="paymentForm.method" class="select">
-              <option value="BANK_TRANSFER">BANK_TRANSFER</option>
-              <option value="CASH">CASH (Masuk Sesi Kasir Aktif)</option>
-              <option value="VIRTUAL_ACCOUNT_SIMULATED">VIRTUAL_ACCOUNT_SIMULATED (Mode Demo)</option>
-              <option value="QRIS_SIMULATED">QRIS_SIMULATED (Mode Demo)</option>
-            </select>
-          </div>
-
-          <div class="form-field">
-            <label for="pay-gross" class="form-label">Nominal Pembayaran Bruto (IDR)</label>
-            <CurrencyInput
-              id="pay-gross"
-              v-model="paymentForm.grossAmount"
-              :min="1000"
-              :max="selectedInvoiceForPayment.balanceDue"
-              placeholder="0"
-              required
-            />
-          </div>
-
-          <div class="form-field">
-            <label for="pay-fee" class="form-label">Potongan Biaya Provider / Merchant Fee (IDR)</label>
-            <CurrencyInput
-              id="pay-fee"
-              v-model="paymentForm.feeAmount"
-              :min="0"
-              placeholder="0"
-              required
-            />
-          </div>
-
-          <div class="form-field">
-            <label for="pay-ref" class="form-label">Nomor Referensi Transaksi</label>
-            <input id="pay-ref" v-model="paymentForm.referenceNo" type="text" class="input" required />
-          </div>
-        </div>
-
-        <div class="form-field">
-          <label for="pay-idemp" class="form-label">Idempotency Key (Mencegah Pembayaran Ganda Saat Retry)</label>
-          <input id="pay-idemp" v-model="paymentForm.idempotencyKey" type="text" class="input" required />
-        </div>
-
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="paymentModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Konfirmasi Pembayaran & Posting Jurnal</button>
-        </div>
-      </form>
-    </ModalDialog>
-
-    <!-- Modal: Refund -->
-    <ModalDialog :open="refundModalOpen" title="Proses Pengembalian Dana (Refund)" @close="refundModalOpen = false">
-      <form v-if="selectedPaymentForRefund" @submit.prevent="submitRefund" style="display: flex; flex-direction: column; gap: 12px">
-        <p>
-          Merujuk ke Kuitansi Asal: <strong>{{ selectedPaymentForRefund.receiptNumber }}</strong>
-          ({{ formatRupiah(selectedPaymentForRefund.grossAmount) }})
-        </p>
-        <div class="form-field">
-          <label for="rfd-amt" class="form-label">Nominal Refund (IDR)</label>
-          <CurrencyInput
-            id="rfd-amt"
-            v-model="refundForm.amount"
-            :min="1000"
-            :max="selectedPaymentForRefund.grossAmount"
-            placeholder="0"
-            required
-          />
-        </div>
-        <div class="form-field">
-          <label for="rfd-reason" class="form-label">Alasan Pengembalian Dana (Wajib)</label>
-          <textarea id="rfd-reason" v-model="refundForm.reason" class="textarea" placeholder="Contoh: Pembatalan keikutsertaan 1 peserta sesuai surat resmi pelanggan." required></textarea>
-        </div>
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="refundModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-danger">Proses Refund & Jurnal Koreksi</button>
-        </div>
-      </form>
-    </ModalDialog>
-
-    <!-- Modal: Buka Sesi Kasir Baru -->
-    <ModalDialog :open="openSessionModalOpen" title="Buka Sesi Kasir Baru (Shift Loket POS)" @close="openSessionModalOpen = false">
-      <form @submit.prevent="submitOpenSession" style="display: flex; flex-direction: column; gap: 14px">
-        <div class="form-field">
-          <label for="csh-reg" class="form-label">Pilih Loket Register Kasir</label>
-          <select id="csh-reg" v-model="openSessionForm.cashRegisterId" class="select" required>
-            <option v-for="r in cashierData.registers" :key="r.id" :value="r.id">
-              {{ r.code }} - {{ r.name }} ({{ r.businessUnit?.name || 'Unit Bisnis' }})
-            </option>
-          </select>
-        </div>
-
-        <div class="form-field">
-          <label for="csh-float" class="form-label">Modal Awal Kasir / Opening Float (IDR)</label>
-          <CurrencyInput
-            id="csh-float"
-            v-model="openSessionForm.openingFloat"
-            :min="0"
-            placeholder="0"
-            required
-          />
-          <small class="text-muted">Uang pecahan modal kerja fisik yang ada di laci kasir saat loket mulai beroperasi.</small>
-        </div>
-
-        <div class="pertor-revenue-banner" style="margin: 0">
-          <span class="banner-badge">PERTOR 310</span>
-          <span>Sesi kasir akan otomatis terhubung ke akun kas operasional <code>110101010100</code> dan mencatat mutasi tunai transaksi loket.</span>
-        </div>
-
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="openSessionModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Buka Sesi & Mulai Shift Loket</button>
-        </div>
-      </form>
-    </ModalDialog>
-
-    <!-- Modal: Close Cashier Session -->
-    <ModalDialog :open="closeSessionModalOpen" title="Penutupan Sesi Kasir (Closeout & Hitung Fisik)" @close="closeSessionModalOpen = false">
-      <form v-if="selectedSessionForClose" @submit.prevent="submitCloseCashier" style="display: flex; flex-direction: column; gap: 12px">
-        <p>
-          Sesi: <strong>{{ selectedSessionForClose.sessionNumber }}</strong> |
-          Saldo Teoritis Sistem: <strong class="money">{{ formatRupiah(selectedSessionForClose.theoreticalBalance) }}</strong>
-        </p>
-        <div class="form-field">
-          <label for="csh-actual" class="form-label">Hasil Hitung Fisik Uang Tunai di Laci (IDR)</label>
-          <CurrencyInput
-            id="csh-actual"
-            v-model="closeSessionForm.actualCountedCash"
-            :min="0"
-            placeholder="0"
-            required
-          />
-        </div>
-        <div class="form-field">
-          <label for="csh-reason" class="form-label">Penjelasan Berita Acara / Alasan Selisih (Wajib bila ada selisih)</label>
-          <textarea id="csh-reason" v-model="closeSessionForm.discrepancyReason" class="textarea" placeholder="Isi penjelasan apabila jumlah fisik berbeda dari saldo teoritis."></textarea>
-        </div>
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="closeSessionModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Simpan Penutupan Kasir</button>
-        </div>
-      </form>
-    </ModalDialog>
-
-    <!-- Modal: Cash Deposit -->
-    <ModalDialog :open="depositModalOpen" title="Catat Setoran Tunai Kasir ke Bank" @close="depositModalOpen = false">
-      <form @submit.prevent="submitDeposit" style="display: flex; flex-direction: column; gap: 12px">
-        <div class="form-field">
-          <label for="dep-bank" class="form-label">Rekening Bank Tujuan</label>
-          <select id="dep-bank" v-model="depositForm.bankAccountId" class="select" required>
-            <option v-for="b in bankAccounts" :key="b.id" :value="b.id">
-              {{ b.bankName }} ({{ b.accountNumberMasked }})
-            </option>
-          </select>
-        </div>
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="dep-amt" class="form-label">Nominal Setoran (IDR)</label>
-            <CurrencyInput
-              id="dep-amt"
-              v-model="depositForm.amount"
-              :min="1000"
-              placeholder="0"
-              required
-            />
-          </div>
-          <div class="form-field">
-            <label for="dep-ref" class="form-label">Nomor Slip Setoran Bank</label>
-            <input id="dep-ref" v-model="depositForm.referenceNo" type="text" class="input" required />
-          </div>
-        </div>
-        <div class="pertor-revenue-banner" style="margin: 0">
-          <span class="banner-badge">JURNAL PERTOR 310</span>
-          <span>Setoran akan mendebit <code>110101020200</code> (Bank BRI Penerimaan Komersial) dan mengkredit <code>110101010100</code> (Kas Operasional Loket).</span>
-        </div>
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="depositModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Simpan Setoran & Posting Jurnal</button>
-        </div>
-      </form>
-    </ModalDialog>
-
-    <!-- Modal: Bukti Penerimaan Kas & Kuitansi POS Resmi -->
-    <ModalDialog :open="receiptModalOpen" title="Bukti Penerimaan Kas & Kuitansi POS Resmi" @close="receiptModalOpen = false">
-      <div v-if="selectedPaymentForReceipt" class="pos-receipt-container">
-        <div class="pos-receipt-card">
-          <div class="pos-receipt-header">
-            <div class="pos-receipt-logo">UT</div>
-            <h3>UNIVERSITAS TERBUKA</h3>
-            <p class="pos-sub">PMO UTama - Direktorat Keuangan & Komersial</p>
-            <p class="pos-legal">Peraturan Rektor UT No. 310 Tahun 2025</p>
-            <div class="receipt-divider"></div>
-            <div class="receipt-title-tag">BUKTI KUITANSI KASIR (POS RECEIPT)</div>
-          </div>
-
-          <div class="receipt-meta-grid">
-            <div class="receipt-row">
-              <span class="lbl">No. Kuitansi:</span>
-              <strong class="val doc-code">{{ selectedPaymentForReceipt.receiptNumber }}</strong>
-            </div>
-            <div class="receipt-row">
-              <span class="lbl">Tanggal Transaksi:</span>
-              <span class="val">{{ formatDateTime(selectedPaymentForReceipt.paymentDate) }}</span>
-            </div>
-            <div class="receipt-row">
-              <span class="lbl">No. Tagihan (Invoice):</span>
-              <span class="val doc-code">{{ selectedPaymentForReceipt.customerInvoice?.docNumber }}</span>
-            </div>
-            <div class="receipt-row">
-              <span class="lbl">Pelanggan:</span>
-              <span class="val">{{ selectedPaymentForReceipt.customerInvoice?.customer?.name || 'Pelanggan Umum' }}</span>
-            </div>
-            <div class="receipt-row">
-              <span class="lbl">Metode Bayar:</span>
-              <span class="val"><strong>{{ selectedPaymentForReceipt.method }}</strong></span>
-            </div>
-            <div class="receipt-row">
-              <span class="lbl">Referensi Transaksi:</span>
-              <span class="val">{{ selectedPaymentForReceipt.referenceNo }}</span>
-            </div>
-          </div>
-
-          <div class="receipt-divider"></div>
-
-          <div class="receipt-total-box">
-            <div class="receipt-row" style="font-size: 0.95rem">
-              <span>Nominal Diterima:</span>
-              <strong>{{ formatRupiah(selectedPaymentForReceipt.grossAmount) }}</strong>
-            </div>
-            <div v-if="selectedPaymentForReceipt.feeAmount > 0" class="receipt-row text-muted" style="font-size: 0.8rem">
-              <span>Potongan Biaya Admin:</span>
-              <span>{{ formatRupiah(selectedPaymentForReceipt.feeAmount) }}</span>
-            </div>
-            <div class="receipt-row" style="font-size: 1.05rem; border-top: 1px dashed #cbd5e1; padding-top: 8px; margin-top: 4px">
-              <strong>Total Penerimaan Bersih:</strong>
-              <strong style="color: var(--status-success-text)">{{ formatRupiah(selectedPaymentForReceipt.netAmount) }}</strong>
-            </div>
-          </div>
-
-          <div class="receipt-divider"></div>
-
-          <div class="receipt-pertor-box">
-            <div class="pertor-title">Informasi Akun Jurnal (Pertor 310):</div>
-            <div class="pertor-coa-list">
-              <div>• Akun Kas Penerima: <code>110101010100</code> (Kas Operasional & Kasir Unit)</div>
-              <div>• Akun Piutang Dilunasi: <code>110301010100</code> (Piutang Usaha Layanan)</div>
-              <div>• Akun Pendapatan Komersial: <code>4203xxxxxx</code> | PPN Keluaran 11%: <code>210202010100</code></div>
-            </div>
-          </div>
-
-          <div class="receipt-footer">
-            <p>Terima kasih atas pembayaran Anda.</p>
-            <p class="receipt-stamp">STATUS: LUNAS & DIVERIFIKASI SISTEM</p>
-          </div>
-        </div>
-
-        <div class="btn-row no-print" style="justify-content: flex-end; margin-top: 14px">
-          <button type="button" class="btn btn-sm" @click="receiptModalOpen = false">Tutup</button>
-          <button type="button" class="btn btn-sm btn-primary" @click="triggerPrint">
-            Cetak Struk Kuitansi
-          </button>
-        </div>
+      <div class="entry-mode-grid" role="tablist" aria-label="Pilih Jenis Pencatatan Buku Harian">
+        <button
+          v-if="auth.hasPermission('payment:create')"
+          type="button"
+          class="entry-mode-card"
+          :class="{ active: entryMode === 'KWITANSI' }"
+          @click="switchEntryMode('KWITANSI')"
+        >
+          <strong>Uang Masuk &rarr; Kwitansi</strong>
+          <span>Dana sudah masuk tanpa invoice (KU / KU-UM)</span>
+        </button>
+        <button
+          v-if="auth.hasPermission('payment:create')"
+          type="button"
+          class="entry-mode-card"
+          :class="{ active: entryMode === 'TANDA_TERIMA' }"
+          @click="switchEntryMode('TANDA_TERIMA')"
+        >
+          <strong>Serah Terima &rarr; Tanda Terima</strong>
+          <span>Kamar Wisma / unit internal UT (TT)</span>
+        </button>
+        <button
+          v-if="auth.hasPermission('revenue:create')"
+          type="button"
+          class="entry-mode-card"
+          :class="{ active: entryMode === 'INVOICE' }"
+          @click="switchEntryMode('INVOICE')"
+        >
+          <strong>Tagihan Baru &rarr; Invoice</strong>
+          <span>Klien belum bayar, masuk Aging Piutang</span>
+        </button>
       </div>
-    </ModalDialog>
 
-    <!-- Modal: Update Product Price -->
-    <ModalDialog :open="priceModalOpen" title="Perbarui Harga Katalog Layanan (Dengan Jejak Histori)" @close="priceModalOpen = false">
-      <form v-if="selectedProductForPrice" @submit.prevent="submitPriceChange" style="display: flex; flex-direction: column; gap: 12px">
-        <p>
-          Layanan: <strong>{{ selectedProductForPrice.sku }} - {{ selectedProductForPrice.name }}</strong>
-        </p>
-        <div class="form-field">
-          <label for="prc-new" class="form-label">Harga Satuan Baru (IDR)</label>
-          <CurrencyInput
-            id="prc-new"
-            v-model="priceForm.newPrice"
-            :min="1000"
-            placeholder="0"
-            required
-          />
+      <div class="auto-sku-strip" style="margin-bottom: 14px;">
+        <span>{{ autoDocNumberHint.label }}:</span>
+        <strong class="mono-code">{{ autoDocNumberHint.sample }}</strong>
+      </div>
+
+      <!-- MODE A: TAGIHAN BARU -> TERBITKAN INVOICE -->
+      <form v-if="entryMode === 'INVOICE'" class="clean-form" @submit.prevent="submitCreateInvoice">
+        <div class="form-2col">
+          <div class="field">
+            <label>Unit Bisnis</label>
+            <select v-model="invoiceForm.businessUnitId" class="input" required @change="handleInvoiceUnitChange">
+              <option v-for="u in operationalUnits" :key="u.id" :value="u.id">{{ u.code }} - {{ u.name }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-head-row">
+              <label>Pelanggan / Instansi</label>
+              <button type="button" class="inline-link-btn" @click="openQuickAddCustomerForInvoice">+ Pelanggan Baru</button>
+            </div>
+            <select v-model="invoiceForm.customerId" class="input" required @change="handleInvoiceCustomerChange">
+              <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.name }} ({{ formatOrgTypeLabel(c.organizationType) }})</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Jenis Tagihan</label>
+            <select v-model="invoiceForm.invoiceType" class="input">
+              <option v-for="t in INVOICE_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Profil Pemungut Pajak / FP</label>
+            <select v-model="invoiceForm.taxCollectorProfile" class="input" @change="handleInvoiceCollectorChange">
+              <option v-for="p in COLLECTOR_PROFILES" :key="p.value" :value="p.value">{{ p.label }}</option>
+            </select>
+          </div>
         </div>
-        <div class="form-field">
-          <label for="prc-reason" class="form-label">Alasan Penyesuaian Harga (Wajib)</label>
-          <input id="prc-reason" v-model="priceForm.reason" type="text" class="input" placeholder="Contoh: Penyesuaian tarif kurikulum baru" required />
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Nama Kegiatan / Kontrak</label>
+            <input v-model="invoiceForm.activityTitle" type="text" class="input" placeholder="Contoh: Pernikahan UTCC / Promise Termin 2 / Batch Tutor UT" required />
+          </div>
+          <div class="field">
+            <label>Tanggal Kegiatan (Opsional)</label>
+            <input v-model="invoiceForm.activityDate" type="text" class="input" placeholder="Contoh: 10 Oktober 2026" />
+          </div>
         </div>
-        <div class="btn-row" style="justify-content: flex-end">
-          <button type="button" class="btn btn-sm" @click="priceModalOpen = false">Batal</button>
-          <button type="submit" class="btn btn-sm btn-primary">Simpan Perubahan Harga</button>
+
+        <!-- Line Items (Clean 2-row card per item: zero clipping for Vol x Durasi x Harga) -->
+        <div class="lines-box">
+          <div class="lines-head">
+            <strong>Rincian Item Tagihan (Vol &times; Durasi &times; Harga)</strong>
+            <button type="button" class="pill-btn-outline" @click="addInvoiceLine">+ Tambah Baris</button>
+          </div>
+          <div v-for="(line, idx) in invoiceForm.lines" :key="idx" class="line-item-card">
+            <div class="line-card-top" :class="{ 'has-del': invoiceForm.lines.length > 1 }">
+              <div class="field">
+                <label>Layanan Katalog</label>
+                <Select
+                  v-model="line.productServiceId"
+                  :options="invoiceCatalogOptions"
+                  optionLabel="optionLabel"
+                  optionValue="id"
+                  filter
+                  :showClear="Boolean(line.productServiceId)"
+                  filterPlaceholder="Ketik nama layanan..."
+                  emptyFilterMessage="Layanan tidak ditemukan"
+                  emptyMessage="Belum ada layanan untuk unit ini"
+                  placeholder="Cari dari Katalog..."
+                  class="poital-pv-select"
+                  @update:model-value="(val) => handleInvoiceLineProductChange(idx, val)"
+                />
+              </div>
+              <div class="field">
+                <label>Uraian Item</label>
+                <input v-model="line.description" type="text" class="input" placeholder="Uraian tagihan pada dokumen" required />
+              </div>
+              <button
+                v-if="invoiceForm.lines.length > 1"
+                type="button"
+                class="mini-action-btn danger line-del-btn"
+                title="Hapus baris"
+                @click="removeInvoiceLine(idx)"
+              >
+                &times;
+              </button>
+            </div>
+            <div class="line-card-bottom">
+              <div class="field">
+                <label>Volume</label>
+                <input v-model.number="line.quantity" type="number" step="0.5" min="0.5" class="input" placeholder="1" required />
+              </div>
+              <div class="field">
+                <label>Durasi</label>
+                <input v-model.number="line.duration" type="number" step="0.5" min="0.5" class="input" placeholder="1" required />
+              </div>
+              <div class="field">
+                <label>Harga Satuan (IDR)</label>
+                <CurrencyInput v-model="line.unitPrice" :min="0" placeholder="0" required />
+              </div>
+              <div class="field line-sub-col">
+                <label>Subtotal Baris</label>
+                <div class="line-sub-val money">
+                  {{ formatRupiah(Math.round(Number(line.quantity || 0) * Number(line.duration || 1) * Number(line.unitPrice || 0))) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Kode COA Pendapatan (Per Unit · v7)</label>
+            <select v-model="invoiceForm.revenueAccountCode" class="input" required>
+              <optgroup :label="invoiceGroupedCoas.unitGroupLabel">
+                <option v-for="c in invoiceGroupedCoas.primary" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+              </optgroup>
+              <optgroup v-if="invoiceGroupedCoas.others.length" :label="invoiceGroupedCoas.othersGroupLabel">
+                <option v-for="c in invoiceGroupedCoas.others" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="field">
+            <label>Skema Pajak PTNBH</label>
+            <select v-model="invoiceForm.taxScheme" class="input">
+              <option v-for="ts in TAX_SCHEMES" :key="ts.value" :value="ts.value">{{ ts.label }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div :class="invoiceForm.invoiceType === 'UANG_MUKA' ? 'form-3col' : 'form-2col'">
+          <div v-if="invoiceForm.invoiceType === 'UANG_MUKA'" class="field">
+            <label>DP (%)</label>
+            <input
+              v-model.number="invoiceForm.dpPercent"
+              type="number"
+              min="0"
+              max="100"
+              class="input"
+              placeholder="20"
+              title="Persentase Uang Muka (mis. 20 untuk 20%, 0 untuk nominal penuh)"
+            />
+          </div>
+          <div class="field">
+            <label>Diskon (%)</label>
+            <input v-model.number="invoiceForm.discountPercent" type="number" min="0" max="100" class="input" placeholder="0" />
+          </div>
+          <div class="field">
+            <label>Jatuh Tempo (Hari)</label>
+            <input v-model.number="invoiceForm.dueInDays" type="number" min="0" max="365" class="input" placeholder="14" />
+          </div>
+        </div>
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Rekening Tujuan Transfer</label>
+            <select v-model="invoiceForm.bankAccountId" class="input">
+              <option v-for="b in penerimaanBankAccounts" :key="b.id" :value="b.id">
+                {{ b.code === 'BNK-MDR-01' ? 'Bank Mandiri Penerimaan (164-00-2022-999-5)' : `${b.bankName} (${b.accountNumberMasked})` }}
+              </option>
+            </select>
+          </div>
+          <div class="field check-align">
+            <label class="check-label">
+              <input v-model="invoiceForm.taxInclusive" type="checkbox" />
+              <span>Harga sudah termasuk pajak (Inclusive)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Collapsible Extra Metadata (PIC / SUB / Catatan) -->
+        <button type="button" class="extra-accordion-btn" @click="showInvoiceExtraDetails = !showInvoiceExtraDetails">
+          <span>{{ showInvoiceExtraDetails ? 'Sembunyikan' : '+ Detail Tambahan (PIC Kegiatan, SUB & Catatan Khusus)' }}</span>
+          <span>{{ showInvoiceExtraDetails ? '▲' : '▼' }}</span>
+        </button>
+        <div v-if="showInvoiceExtraDetails" class="extra-accordion-panel">
+          <div class="form-2col">
+            <div class="field">
+              <label>Nama PIC Kegiatan (Opsional)</label>
+              <input v-model="invoiceForm.picName" type="text" class="input" placeholder="Contoh: Rina / Tim MICE" />
+            </div>
+            <div class="field">
+              <label>Klasifikasi SUB</label>
+              <select v-model="invoiceForm.subCategory" class="input">
+                <option value="Umum">Umum / Eksternal</option>
+                <option value="Internal UT">Internal UT</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Catatan Klausul Khusus (Kosongkan untuk klausul pajak PTNBH otomatis)</label>
+            <input v-model="invoiceForm.notes" type="text" class="input" placeholder="Otomatis terisi klausul pajak sesuai profil klien..." />
+          </div>
+        </div>
+
+        <!-- Live PTNBH Preview -->
+        <div class="live-tax-preview">
+          <div><span>Bruto Dokumen</span><strong class="money">{{ formatRupiah(invoiceTaxPreview.bruto) }}</strong></div>
+          <div><span>Nilai Jual / DPP</span><strong class="money">{{ formatRupiah(invoiceTaxPreview.dppPb1 > 0 ? invoiceTaxPreview.dppPb1 : invoiceTaxPreview.nilaiJual) }}</strong></div>
+          <div><span>PPN 12%</span><strong class="money">{{ formatRupiah(invoiceTaxPreview.ppn) }}</strong></div>
+          <div><span>PPh / PB1</span><strong class="money">{{ formatRupiah(invoiceTaxPreview.pph42 + invoiceTaxPreview.pph23 + invoiceTaxPreview.pph23Rate15 + invoiceTaxPreview.pph21 + invoiceTaxPreview.pb1) }}</strong></div>
+          <div class="highlight"><span>Tagihan Neto Klien</span><strong class="money">{{ formatRupiah(invoiceTaxPreview.netReceivable) }}</strong></div>
+        </div>
+
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="entryModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy">Terbitkan Invoice ke Daftar Tagihan</button>
         </div>
       </form>
-    </ModalDialog>
 
-    <!-- Modal: Pratinjau & Cetak Lembar Invoice Resmi -->
-    <ModalDialog :open="printModalOpen" title="Faktur Tagihan Resmi (Customer Invoice)" @close="printModalOpen = false">
-      <div v-if="selectedInvoiceForPrint" class="invoice-printable-card">
-        <!-- Header Dokumen -->
-        <div class="inv-header">
-          <div class="inv-brand">
-            <div class="inv-logo-badge">UT</div>
+      <!-- MODE B & C: UANG MASUK -> KWITANSI / TANDA TERIMA -->
+      <form v-else class="clean-form" @submit.prevent="submitDirectReceipt">
+        <div class="form-2col">
+          <div class="field">
+            <label>Unit Bisnis</label>
+            <select v-model="directForm.businessUnitId" class="input" required @change="handleDirectUnitChange">
+              <option v-for="u in operationalUnits" :key="u.id" :value="u.id">{{ u.code }} - {{ u.name }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Pilih Layanan dari Katalog (Opsional)</label>
+            <Select
+              v-model="directForm.productServiceId"
+              :options="directCatalogOptions"
+              optionLabel="optionLabel"
+              optionValue="id"
+              filter
+              :showClear="Boolean(directForm.productServiceId)"
+              filterPlaceholder="Ketik nama layanan..."
+              emptyFilterMessage="Layanan tidak ditemukan"
+              emptyMessage="Belum ada layanan untuk unit ini"
+              placeholder="Isi manual atau cari layanan..."
+              class="poital-pv-select"
+              @update:model-value="handleDirectProductChange"
+            />
+          </div>
+          <div class="field">
+            <label>{{ entryMode === 'TANDA_TERIMA' ? 'Sudah Terima Dari (Unit / PPK UT)' : 'Sudah Terima Dari (Nama Pembayar / Instansi)' }}</label>
+            <input
+              v-model="directForm.payerName"
+              type="text"
+              list="payer-customer-list"
+              class="input"
+              :placeholder="entryMode === 'TANDA_TERIMA' ? 'Contoh: PPK FST / DSDM / LPPM - Satker UT' : 'Ketik bebas atau pilih pelanggan terdaftar...'"
+              required
+              @change="handleDirectPayerInput"
+            />
+            <datalist id="payer-customer-list">
+              <option v-for="c in customers" :key="c.id" :value="c.name" />
+            </datalist>
+          </div>
+          <div class="field">
+            <label>Rincian Layanan / Objek</label>
+            <input
+              v-model="directForm.rincianLabel"
+              type="text"
+              class="input"
+              :placeholder="entryMode === 'TANDA_TERIMA' ? 'Contoh: Kamar Wisma / Ruang Sidang / Konsumsi UT' : 'Contoh: Kamar / Green Laundry / Kapitasi BPJS'"
+              required
+            />
+          </div>
+        </div>
+
+        <div :class="isDirectUnitKlinik ? 'form-2col' : ''">
+          <div class="field">
+            <label>Untuk Pembayaran / Uraian Kegiatan</label>
+            <input
+              v-model="directForm.activityTitle"
+              type="text"
+              class="input"
+              :placeholder="entryMode === 'TANDA_TERIMA' ? 'Contoh: Kegiatan Workshop / Pra Purnabakti Unit UT' : 'Contoh: Kegiatan Tamu Umum Wisma / Rawat Jalan / Pelatihan'"
+              required
+            />
+          </div>
+          <div v-if="isDirectUnitKlinik" class="field">
+            <label>No. Nota Aplikasi Poliklinik (Opsional)</label>
+            <input v-model="directForm.externalInvoiceNo" type="text" class="input" placeholder="Contoh: INV-0038868 (dari sistem klinik)" />
+          </div>
+        </div>
+
+        <!-- Quick Vol x Durasi calculator when a catalog item is selected (matches BKU: 1 kmr x 2 mlm x Rp 550.000) -->
+        <div v-if="directUnitPrice > 0" class="direct-calc-strip">
+          <div class="direct-calc-field">
+            <label>Vol</label>
+            <input v-model.number="directQty" type="number" step="0.5" min="0.5" class="input" @input="applyDirectQtyCalc" />
+          </div>
+          <span class="direct-calc-op">&times;</span>
+          <div class="direct-calc-field">
+            <label>Durasi{{ directDurationUnit ? ` (${directDurationUnit})` : '' }}</label>
+            <input v-model.number="directDuration" type="number" step="0.5" min="0.5" class="input" @input="applyDirectQtyCalc" />
+          </div>
+          <span class="direct-calc-op">&times;</span>
+          <div class="direct-calc-rate">
+            <span>Tarif Katalog</span>
+            <strong class="money">{{ formatRupiah(directUnitPrice) }}</strong>
+          </div>
+          <span class="direct-calc-op">=</span>
+          <div class="direct-calc-rate">
+            <span>Otomatis Terisi</span>
+            <strong class="money text-pos">{{ formatRupiah(Math.round(Number(directQty || 1) * Number(directDuration || 1) * Number(directUnitPrice || 0))) }}</strong>
+          </div>
+        </div>
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Nominal Masuk Rekening (IDR)</label>
+            <CurrencyInput v-model="directForm.grossAmount" :min="1" required />
+          </div>
+          <div class="field">
+            <label>Tanggal Masuk / Terima</label>
+            <input v-model="directForm.paymentDate" type="date" class="input" required />
+          </div>
+        </div>
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Kode COA Pendapatan (Per Unit · v7)</label>
+            <select v-model="directForm.revenueAccountCode" class="input" required>
+              <optgroup :label="directGroupedCoas.unitGroupLabel">
+                <option v-for="c in directGroupedCoas.primary" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+              </optgroup>
+              <optgroup v-if="directGroupedCoas.others.length" :label="directGroupedCoas.othersGroupLabel">
+                <option v-for="c in directGroupedCoas.others" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="field">
+            <label>Skema Pajak PTNBH</label>
+            <select v-model="directForm.taxScheme" class="input">
+              <option v-for="ts in TAX_SCHEMES" :key="ts.value" :value="ts.value">{{ ts.label }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Profil Pemungut Pajak / FP</label>
+            <select v-model="directForm.taxCollectorProfile" class="input" @change="handleDirectCollectorChange">
+              <option v-for="p in COLLECTOR_PROFILES" :key="p.value" :value="p.value">{{ p.label }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>{{ directForm.method === 'CASH' ? 'Kas Penerima' : 'Rekening Bank Penerima' }}</label>
+            <input v-if="directForm.method === 'CASH'" type="text" class="input" value="Kas Tunai Loket (110101010100)" disabled />
+            <select v-else v-model="directForm.bankAccountId" class="input">
+              <option v-for="b in penerimaanBankAccounts" :key="b.id" :value="b.id">
+                {{ b.code === 'BNK-MDR-01' ? 'Bank Mandiri Penerimaan (164-00-2022-999-5)' : b.bankName }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-3col">
+          <div class="field">
+            <label>Metode Pembayaran</label>
+            <select v-model="directForm.method" class="input">
+              <option v-for="m in PAYMENT_METHODS" :key="m.value" :value="m.value">{{ m.label }}</option>
+            </select>
+          </div>
+          <div v-if="entryMode === 'KWITANSI'" class="field">
+            <label>Jenis Kwitansi</label>
+            <select v-model="directForm.receiptType" class="input" @change="handleDirectReceiptTypeChange">
+              <option value="KUITANSI">Kwitansi Pelunasan (KU-001)</option>
+              <option value="KUITANSI_UM">Kwitansi Uang Muka (KU-UM)</option>
+              <option value="LANGSUNG">Catat Buku Harian Saja</option>
+            </select>
+          </div>
+          <div v-else class="field">
+            <label>Tahap Pembayaran (Tanda Terima)</label>
+            <select v-model="directForm.paymentStage" class="input">
+              <option value="PELUNASAN">Pelunasan</option>
+              <option value="UANG_MUKA">Uang Muka (DP)</option>
+              <option value="TERMIN">Termin</option>
+            </select>
+          </div>
+          <div class="field check-align">
+            <label class="check-label">
+              <input v-model="directForm.taxInclusive" type="checkbox" />
+              <span>Nominal sudah termasuk pajak (Inclusive)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Collapsible Detail Tambahan (NPWP/KTP, Alamat, Tgl Kegiatan, Tgl Setor, PIC/SUB, Refund) -->
+        <button type="button" class="extra-accordion-btn" @click="showDirectExtraDetails = !showDirectExtraDetails">
+          <span>
+            {{
+              showDirectExtraDetails
+                ? 'Sembunyikan Detail Tambahan'
+                : entryMode === 'TANDA_TERIMA'
+                  ? '+ Detail Kegiatan, Tanggal Setor Bank, PIC & Lebih Bayar / Refund'
+                  : '+ Detail Faktur Pajak (NPWP/KTP, Alamat), Tgl Kegiatan, Tgl Setor, PIC & Refund'
+            }}
+          </span>
+          <span>{{ showDirectExtraDetails ? '▲' : '▼' }}</span>
+        </button>
+        <div v-if="showDirectExtraDetails" class="extra-accordion-panel">
+          <div class="form-3col">
+            <div class="field">
+              <label>No. KTP / NPWP Pembayar</label>
+              <input v-model="directForm.payerTaxId" type="text" class="input" placeholder="Opsional untuk Faktur Pajak" />
+            </div>
+            <div class="field">
+              <label>Tanggal Kegiatan</label>
+              <input v-model="directForm.activityDate" type="text" class="input" placeholder="Contoh: 01-03 Nov 2026" />
+            </div>
+            <div class="field">
+              <label>Tanggal Setor Bank</label>
+              <input v-model="directForm.depositDate" type="date" class="input" />
+            </div>
+          </div>
+          <div class="form-3col">
+            <div class="field">
+              <label>Alamat Pembayar</label>
+              <input v-model="directForm.payerAddress" type="text" class="input" placeholder="Untuk cetak Kwitansi & Perincian Pajak" />
+            </div>
+            <div class="field">
+              <label>PIC Kegiatan</label>
+              <input v-model="directForm.picName" type="text" class="input" placeholder="Nama PIC penanggung jawab" />
+            </div>
+            <div class="field">
+              <label>No. Referensi Bank</label>
+              <input v-model="directForm.referenceNo" type="text" class="input" placeholder="Otomatis TRF-xxxxxx" />
+            </div>
+          </div>
+          <div :class="Number(directForm.overpaymentAmount) > 0 ? 'form-3col' : 'form-2col'">
+            <div class="field">
+              <label>Lebih Bayar / Refund (IDR)</label>
+              <CurrencyInput v-model="directForm.overpaymentAmount" :min="0" />
+            </div>
+            <div v-if="Number(directForm.overpaymentAmount) <= 0" class="field">
+              <label>Klasifikasi SUB (Sinkron Profil Pajak)</label>
+              <select v-model="directForm.subCategory" class="input">
+                <option value="Umum">Umum / Eksternal</option>
+                <option value="Internal UT">Internal UT</option>
+              </select>
+            </div>
+            <div v-if="Number(directForm.overpaymentAmount) > 0" class="field">
+              <label>Bank &amp; No. Rek Penerima Refund</label>
+              <div class="inline-2">
+                <input v-model="directForm.refundBankName" type="text" class="input" placeholder="Bank BRI/BCA" />
+                <input v-model="directForm.refundAccountNumber" type="text" class="input" placeholder="No. Rekening" />
+              </div>
+            </div>
+            <div v-if="Number(directForm.overpaymentAmount) > 0" class="field">
+              <label>Atas Nama Rekening Refund</label>
+              <input v-model="directForm.refundAccountHolder" type="text" class="input" placeholder="a.n. Penerima pengembalian" />
+            </div>
+          </div>
+        </div>
+
+        <div class="proof-upload-box">
+          <div class="proof-upload-head">
             <div>
-              <h3 class="inv-inst-name">UNIVERSITAS TERBUKA</h3>
-              <div class="inv-inst-sub">Pusat Bisnis dan Investasi (PBI UT) · PMO UTama</div>
-              <div class="inv-inst-addr">Jl. Cabe Raya, Pondok Cabe, Pamulang, Tangerang Selatan 15418</div>
+              <strong>Bukti Pembayaran / Transfer (Opsional)</strong>
+              <div class="cell-sub">Unggah foto struk / tangkapan layar m-banking (JPG, PNG, WebP, atau PDF · maks 4 MB)</div>
             </div>
+            <label class="pill-btn-outline" style="cursor: pointer;">
+              {{ directProofDataUrl ? 'Ganti File' : 'Pilih Gambar / PDF' }}
+              <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" style="display: none;" @change="handleDirectProofChange" />
+            </label>
           </div>
-          <div class="inv-title-box">
-            <div class="inv-badge-type">OFFICIAL INVOICE</div>
-            <div class="inv-number">{{ selectedInvoiceForPrint.docNumber }}</div>
-            <div class="inv-status-pill" :class="selectedInvoiceForPrint.status.toLowerCase()">
-              {{ selectedInvoiceForPrint.status === 'PAID' ? 'LUNAS / PAID' : (selectedInvoiceForPrint.status === 'PARTIALLY_PAID' ? 'SEBAGIAN / PARTIAL' : 'BELUM LUNAS / UNPAID') }}
-            </div>
-          </div>
-        </div>
-
-        <!-- Meta Klien & Tagihan -->
-        <div class="inv-meta-grid">
-          <div class="inv-meta-col">
-            <span class="meta-label">DITUJUKAN KEPADA (KLIEN):</span>
-            <div class="meta-val-primary">{{ selectedInvoiceForPrint.customer?.name }}</div>
-            <div class="meta-val-sub">NPWP: {{ selectedInvoiceForPrint.customer?.taxId || '00.000.000.0-000.000' }}</div>
-            <div class="meta-val-sub">{{ selectedInvoiceForPrint.customer?.address || 'Jakarta, Indonesia' }}</div>
-            <div class="meta-val-sub">Kontak: {{ selectedInvoiceForPrint.customer?.phone || selectedInvoiceForPrint.customer?.email || '-' }}</div>
-          </div>
-          <div class="inv-meta-col inv-meta-right">
-            <div class="meta-row">
-              <span class="meta-label">Unit Pengelola:</span>
-              <span class="meta-val"><strong>{{ selectedInvoiceForPrint.businessUnit?.name }}</strong> ({{ selectedInvoiceForPrint.businessUnit?.code }})</span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">Tanggal Terbit:</span>
-              <span class="meta-val">{{ formatDate(selectedInvoiceForPrint.issueDate) }}</span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">Jatuh Tempo:</span>
-              <span class="meta-val" style="color: #dc2626; font-weight: 600">{{ formatDate(selectedInvoiceForPrint.dueDate) }}</span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">Ref. Pesanan:</span>
-              <span class="meta-val">{{ selectedInvoiceForPrint.salesOrder?.docNumber || '-' }}</span>
-            </div>
+          <div v-if="directProofDataUrl" class="proof-thumb-row">
+            <img v-if="directProofDataUrl.startsWith('data:image/')" :src="directProofDataUrl" alt="Pratinjau bukti bayar" class="proof-thumb" />
+            <span v-else class="tag-pill info">PDF</span>
+            <span class="proof-file-name">{{ directProofFileName }}</span>
+            <button type="button" class="mini-action-btn danger" @click="directProofDataUrl = ''; directProofFileName = ''">Hapus</button>
           </div>
         </div>
 
-        <!-- Tabel Rincian Layanan -->
-        <table class="inv-items-table">
-          <thead>
-            <tr>
-              <th style="width: 36px">No</th>
-              <th>Deskripsi Layanan / Pekerjaan</th>
-              <th class="money-col" style="width: 60px">Qty</th>
-              <th class="money-col">Tarif Satuan</th>
-              <th class="money-col">Diskon</th>
-              <th class="money-col">Jumlah Netto</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="selectedInvoiceForPrint.lines && selectedInvoiceForPrint.lines.length > 0" v-for="(line, idx) in selectedInvoiceForPrint.lines" :key="line.id">
-              <td>{{ idx + 1 }}</td>
-              <td><strong>{{ line.description }}</strong></td>
-              <td class="money-col">{{ line.quantity }}</td>
-              <td class="money-col">{{ formatRupiah(line.unitPrice) }}</td>
-              <td class="money-col">{{ formatRupiah(line.discountAmount) }}</td>
-              <td class="money-col"><strong>{{ formatRupiah(line.lineTotal) }}</strong></td>
-            </tr>
-            <tr v-else>
-              <td>1</td>
-              <td><strong>{{ selectedInvoiceForPrint.salesOrder?.docNumber || 'Penyediaan Jasa & Operasional Unit' }}</strong></td>
-              <td class="money-col">1</td>
-              <td class="money-col">{{ formatRupiah(selectedInvoiceForPrint.subtotal) }}</td>
-              <td class="money-col">Rp 0</td>
-              <td class="money-col"><strong>{{ formatRupiah(selectedInvoiceForPrint.subtotal) }}</strong></td>
-            </tr>
-          </tbody>
-        </table>
-
-        <!-- Ringkasan & Instruksi Pembayaran -->
-        <div class="inv-summary-wrapper">
-          <div class="inv-payment-instruction">
-            <h4 class="pay-title">INSTRUKSI PEMBAYARAN:</h4>
-            <p class="pay-desc">Seluruh pembayaran sah wajib ditransfer melalui rekening penampung resmi:</p>
-            <div class="bank-box">
-              <div>Bank Mitra: <strong>Bank Rakyat Indonesia (BRI)</strong></div>
-              <div>Nomor Rekening: <strong>0382-01-000456-30-8</strong></div>
-              <div>Atas Nama: <strong>PBI UNIVERSITAS TERBUKA - PMO</strong></div>
-              <div style="font-size: 0.76rem; color: #64748b; margin-top: 4px;">Berita Transfer: <em>{{ selectedInvoiceForPrint.docNumber }}</em></div>
-            </div>
-          </div>
-
-          <div class="inv-totals-box">
-            <div class="total-row">
-              <span>Subtotal Layanan:</span>
-              <span>{{ formatRupiah(selectedInvoiceForPrint.subtotal) }}</span>
-            </div>
-            <div v-if="Number(selectedInvoiceForPrint.discountAmount) > 0" class="total-row">
-              <span>Potongan Diskon:</span>
-              <span>-{{ formatRupiah(selectedInvoiceForPrint.discountAmount) }}</span>
-            </div>
-            <div v-if="Number(selectedInvoiceForPrint.serviceChargeAmount) > 0" class="total-row">
-              <span>Service Charge ({{ selectedInvoiceForPrint.serviceChargePercent }}%):</span>
-              <span>{{ formatRupiah(selectedInvoiceForPrint.serviceChargeAmount) }}</span>
-            </div>
-            <div class="total-row">
-              <span>PPN (11%):</span>
-              <span>{{ formatRupiah(selectedInvoiceForPrint.taxAmount) }}</span>
-            </div>
-            <div class="total-row grand-total">
-              <span>TOTAL FAKTUR:</span>
-              <span class="grand-total-val">{{ formatRupiah(selectedInvoiceForPrint.totalAmount) }}</span>
-            </div>
-            <div class="total-row">
-              <span>Telah Dibayar:</span>
-              <span style="color: #059669; font-weight: 600">{{ formatRupiah(selectedInvoiceForPrint.paidAmount) }}</span>
-            </div>
-            <div class="total-row sisa-total">
-              <span>SISA PIUTANG:</span>
-              <span style="color: #dc2626; font-weight: 700">{{ formatRupiah(selectedInvoiceForPrint.balanceDue) }}</span>
-            </div>
+        <div class="live-tax-preview">
+          <div><span>Bruto</span><strong class="money">{{ formatRupiah(directTaxPreview.bruto) }}</strong></div>
+          <div><span>DPP / Nilai Jual</span><strong class="money">{{ formatRupiah(directTaxPreview.dppPb1 > 0 ? directTaxPreview.dppPb1 : directTaxPreview.nilaiJual) }}</strong></div>
+          <div><span>PPN 12%</span><strong class="money">{{ formatRupiah(directTaxPreview.ppn) }}</strong></div>
+          <div><span>PB1 / PPh</span><strong class="money">{{ formatRupiah(directTaxPreview.pb1 + directTaxPreview.pph42 + directTaxPreview.pph23 + directTaxPreview.pph23Rate15 + directTaxPreview.pph21) }}</strong></div>
+          <div class="highlight">
+            <span>Bersih PMO</span>
+            <strong class="money">
+              {{
+                formatRupiah(
+                  Math.max(
+                    0,
+                    directTaxPreview.netReceivable -
+                      (directTaxPreview.ppnWithheld ? 0 : directTaxPreview.ppn) -
+                      directTaxPreview.pb1 -
+                      (directTaxPreview.pphWithheld ? 0 : directTaxPreview.pph42 + directTaxPreview.pph23Rate15) -
+                      directTaxPreview.pph21
+                  )
+                )
+              }}
+            </strong>
           </div>
         </div>
 
-        <!-- Tanda Tangan & Pengesahan -->
-        <div class="inv-signatures">
-          <div class="sig-box">
-            <div class="sig-title">Diterima & Disetujui Klien,</div>
-            <div class="sig-space"></div>
-            <div class="sig-name">{{ selectedInvoiceForPrint.customer?.name }}</div>
-            <div class="sig-role">Tanda Tangan & Cap Perusahaan</div>
-          </div>
-          <div class="sig-box">
-            <div class="sig-title">Pusat Bisnis dan Investasi - PMO UTama,</div>
-            <div class="sig-space">
-              <span class="sig-stamp">TERVERIFIKASI SISTEM ERP</span>
-            </div>
-            <div class="sig-name">Finance Manager / GM PMO</div>
-            <div class="sig-role">Pengelola Keuangan & Penatausahaan</div>
-          </div>
-        </div>
-
-        <!-- Tombol Tindakan -->
-        <div class="btn-row no-print" style="justify-content: flex-end; margin-top: 18px">
-          <button type="button" class="btn btn-sm" @click="printModalOpen = false">Tutup</button>
-          <button type="button" class="btn btn-sm btn-primary" @click="triggerPrint">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M6 9V2h12v7"></path>
-              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-              <rect x="6" y="14" width="12" height="8"></rect>
-            </svg>
-            Cetak Faktur (Print / Simpan PDF)
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="entryModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy">
+            {{ entryMode === 'TANDA_TERIMA' ? 'Simpan & Terbitkan Tanda Terima' : 'Simpan & Terbitkan Kwitansi' }}
           </button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 3: IMPORT CSV BUKU HARIAN ==================== -->
+    <ModalDialog :open="importCsvModalOpen" title="Import Rekap Harian (CSV)" maxWidth="780px" @close="importCsvModalOpen = false">
+      <form class="clean-form" @submit.prevent="submitImportCsv">
+        <div class="form-2col">
+          <div class="field">
+            <label>Unit Bisnis</label>
+            <select v-model="csvForm.businessUnitId" class="input" required @change="handleCsvUnitChange">
+              <option v-for="u in operationalUnits" :key="u.id" :value="u.id">{{ u.code }} - {{ u.name }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Skema Pajak Default</label>
+            <select v-model="csvForm.defaultTaxScheme" class="input">
+              <option v-for="ts in TAX_SCHEMES" :key="ts.value" :value="ts.value">{{ ts.label }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Kode COA Default (Per Unit · v7)</label>
+          <select v-model="csvForm.defaultRevenueAccountCode" class="input" required>
+            <optgroup :label="csvGroupedCoas.unitGroupLabel">
+              <option v-for="c in csvGroupedCoas.primary" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+            </optgroup>
+            <optgroup v-if="csvGroupedCoas.others.length" :label="csvGroupedCoas.othersGroupLabel">
+              <option v-for="c in csvGroupedCoas.others" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <div class="btn-row">
+          <input type="file" accept=".csv,.txt" @change="handleCsvFileUpload" />
+          <button type="button" class="mini-action-btn soft" @click="loadSampleDirectCsv">Muat Contoh CSV (Sesuai Unit)</button>
+        </div>
+
+        <div class="field">
+          <label>Isi CSV (Kolom: Tanggal,Nama,Kegiatan,Rincian,Nominal,COA,SkemaPajak,NoInvEksternal)</label>
+          <textarea v-model="csvForm.rawContent" rows="7" class="input" required></textarea>
+        </div>
+
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="importCsvModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy">Impor ke Buku Harian</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 4: CATAT PEMBAYARAN INVOICE ==================== -->
+    <ModalDialog :open="paymentModalOpen" title="Catat Pembayaran & Terbitkan Kuitansi" maxWidth="720px" @close="paymentModalOpen = false">
+      <form v-if="selectedInvoiceForPay" class="clean-form" @submit.prevent="submitPayment">
+        <div class="pay-banner">
+          <div>
+            <strong>{{ selectedInvoiceForPay.docNumber }}</strong>
+            <div class="cell-sub">{{ selectedInvoiceForPay.customer?.name }} · {{ selectedInvoiceForPay.activityTitle }}</div>
+          </div>
+          <div class="col-num">
+            <span class="cell-sub">Sisa Tagihan</span>
+            <strong class="money">{{ formatRupiah(selectedInvoiceForPay.balanceDue) }}</strong>
+          </div>
+        </div>
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Nominal Masuk Rekening (IDR)</label>
+            <CurrencyInput v-model="paymentForm.grossAmount" :min="1" required />
+          </div>
+          <div class="field">
+            <label>Tanggal Masuk Bank</label>
+            <input v-model="paymentForm.paymentDate" type="date" class="input" required />
+          </div>
+          <div class="field">
+            <label>Metode Pembayaran</label>
+            <select v-model="paymentForm.method" class="input">
+              <option value="BANK_TRANSFER">Transfer Bank Mandiri</option>
+              <option value="VIRTUAL_ACCOUNT_SIMULATED">Virtual Account</option>
+              <option value="QRIS_SIMULATED">QRIS</option>
+              <option value="CASH">Tunai</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Jenis Bukti Bayar</label>
+            <select v-model="paymentForm.receiptType" class="input">
+              <option value="KUITANSI">Kuitansi Pelunasan (KU)</option>
+              <option value="KUITANSI_UM">Kuitansi Uang Muka (KU-UM)</option>
+              <option value="TANDA_TERIMA">Tanda Terima Internal UT</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>No. Referensi Transfer</label>
+            <input v-model="paymentForm.referenceNo" type="text" class="input" required />
+          </div>
+          <div class="field">
+            <label>No. Bukti Potong PPh / PPN (Jika Ada)</label>
+            <input v-model="paymentForm.withholdingSlipNo" type="text" class="input" placeholder="Opsional (FP 020/030/PPh)" />
+          </div>
+        </div>
+
+        <div class="proof-upload-box">
+          <div class="proof-upload-head">
+            <div>
+              <strong>Bukti Transfer / Pembayaran (Opsional)</strong>
+              <div class="cell-sub">JPG, PNG, WebP, atau PDF (maks 4 MB)</div>
+            </div>
+            <label class="mini-action-btn soft" style="cursor: pointer;">
+              {{ payProofDataUrl ? 'Ganti File' : 'Pilih Gambar / PDF' }}
+              <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" style="display: none;" @change="handlePayProofChange" />
+            </label>
+          </div>
+          <div v-if="payProofDataUrl" class="proof-thumb-row">
+            <img v-if="payProofDataUrl.startsWith('data:image/')" :src="payProofDataUrl" alt="Pratinjau bukti transfer" class="proof-thumb" />
+            <span v-else class="tag-pill info">PDF</span>
+            <span class="proof-file-name">{{ payProofFileName }}</span>
+            <button type="button" class="mini-action-btn danger" @click="payProofDataUrl = ''; payProofFileName = ''">Hapus</button>
+          </div>
+        </div>
+
+        <label class="check-label">
+          <input v-model="paymentForm.allowOverpayment" type="checkbox" />
+          <span>Izinkan Lebih Bayar (selisih otomatis dicatat sebagai Pengembalian Dana di Surat Pajak)</span>
+        </label>
+
+        <div v-if="paymentForm.allowOverpayment" class="extra-accordion-panel">
+          <div class="form-3col">
+            <div class="field">
+              <label>Bank Penerima Pengembalian</label>
+              <input v-model="paymentForm.refundBankName" type="text" class="input" placeholder="Contoh: Bank BRI" />
+            </div>
+            <div class="field">
+              <label>No. Rekening Pengembalian</label>
+              <input v-model="paymentForm.refundAccountNumber" type="text" class="input" placeholder="Contoh: 1173-01-..." />
+            </div>
+            <div class="field">
+              <label>Atas Nama Rekening</label>
+              <input v-model="paymentForm.refundAccountHolder" type="text" class="input" placeholder="a.n. Klien / Yayasan" />
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="paymentModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy">Simpan &amp; Terbitkan Bukti</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 5: HANGUS (VOID) INVOICE ==================== -->
+    <ModalDialog :open="voidModalOpen" title="Batalkan (HANGUS) Invoice" maxWidth="480px" @close="voidModalOpen = false">
+      <form v-if="selectedInvoiceForVoid" class="clean-form" @submit.prevent="submitVoidInvoice">
+        <p class="cell-sub">
+          Invoice <strong>{{ selectedInvoiceForVoid.docNumber }}</strong> akan ditandai <strong>HANGUS</strong> dan jurnal piutangnya otomatis dibalik.
+        </p>
+        <div class="field">
+          <label>Alasan Pembatalan</label>
+          <input v-model="voidReason" type="text" class="input" placeholder="Contoh: Revisi nominal/jadwal kegiatan klien" required />
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="voidModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-danger">Tandai HANGUS</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 6: EDIT LAYANAN & COA ==================== -->
+    <ModalDialog :open="editProdModalOpen" title="Edit Layanan, Tarif & Mapping COA" maxWidth="780px" @close="editProdModalOpen = false">
+      <form v-if="selectedProdForEdit" class="clean-form" @submit.prevent="submitEditProduct">
+        <div class="auto-sku-strip">
+          <span>Kode Layanan (Sistem):</span>
+          <strong class="mono-code">{{ selectedProdForEdit.sku }}</strong>
+        </div>
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Nama Layanan</label>
+            <input v-model="editProdForm.name" type="text" class="input" required />
+          </div>
+          <div class="field">
+            <label>Kategori Layanan</label>
+            <select v-model="editProdForm.category" class="input" required>
+              <option v-for="cat in editProdCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
+              <option value="__NEW__">+ Tambah Kategori Baru...</option>
+            </select>
+            <input
+              v-if="editProdForm.category === '__NEW__'"
+              v-model="editProdNewCategory"
+              type="text"
+              class="input"
+              style="margin-top: 6px;"
+              placeholder="Ketik nama kategori baru..."
+              required
+            />
+          </div>
+          <div class="field">
+            <label>Lokasi / Rincian (Opsional)</label>
+            <input v-model="editProdForm.location" type="text" class="input" placeholder="Contoh: Gedung UTCC / Poli Umum" />
+          </div>
+          <div class="field">
+            <label>Satuan Hitung (per ...)</label>
+            <select v-model="editProdForm.unit" class="input" required>
+              <option v-for="u in UNIT_MEASURE_OPTIONS" :key="u.value" :value="u.value">{{ u.label }}</option>
+              <option value="__CUSTOM__">+ Satuan Lain...</option>
+            </select>
+            <input
+              v-if="editProdForm.unit === '__CUSTOM__'"
+              v-model="editProdCustomUnit"
+              type="text"
+              class="input"
+              style="margin-top: 6px;"
+              placeholder="Contoh: Sesi / Lembar / Kg"
+              required
+            />
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Tarif Satuan (IDR)</label>
+          <CurrencyInput v-model="editProdForm.unitPrice" :min="0" required />
+        </div>
+
+        <div class="field">
+          <label>Kode COA Pendapatan (Per Unit · v7)</label>
+          <select v-model="editProdForm.revenueAccountCode" class="input" required>
+            <optgroup :label="editProdGroupedCoas.unitGroupLabel">
+              <option v-for="c in editProdGroupedCoas.primary" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+            </optgroup>
+            <optgroup v-if="editProdGroupedCoas.others.length" :label="editProdGroupedCoas.othersGroupLabel">
+              <option v-for="c in editProdGroupedCoas.others" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="field">
+          <label>Skema Pajak Default</label>
+          <select v-model="editProdForm.taxScheme" class="input">
+            <option v-for="ts in TAX_SCHEMES" :key="ts.value" :value="ts.value">{{ ts.label }}</option>
+          </select>
+        </div>
+        <label class="check-label">
+          <input v-model="editProdForm.taxInclusive" type="checkbox" />
+          <span>Tarif sudah termasuk pajak (Inclusive)</span>
+        </label>
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="editProdModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy">Simpan Perubahan</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 7: TAMBAH LAYANAN BARU ==================== -->
+    <ModalDialog :open="addProdModalOpen" title="Tambah Layanan Baru" maxWidth="780px" @close="addProdModalOpen = false">
+      <form class="clean-form" @submit.prevent="submitAddProduct">
+        <div class="auto-sku-strip">
+          <span>Kode Layanan:</span>
+          <strong class="mono-code">{{ addProdSkuPreview }}</strong>
+        </div>
+
+        <div class="form-2col">
+          <div class="field">
+            <label>Unit Bisnis</label>
+            <select
+              v-model="addProdForm.businessUnitId"
+              class="input"
+              required
+              @change="applyUnitDefaultsToAddForm(addProdForm.businessUnitId)"
+            >
+              <option v-for="u in operationalUnits" :key="u.id" :value="u.id">{{ u.code }} - {{ u.name }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Kategori Layanan</label>
+            <select v-model="addProdForm.category" class="input" required>
+              <option v-for="cat in addProdCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
+              <option value="__NEW__">+ Tambah Kategori Baru...</option>
+            </select>
+            <input
+              v-if="addProdForm.category === '__NEW__'"
+              v-model="addProdNewCategory"
+              type="text"
+              class="input"
+              style="margin-top: 6px;"
+              placeholder="Ketik kategori baru (sistem cek duplikat otomatis)"
+              required
+            />
+          </div>
+          <div class="field">
+            <label>Nama Layanan</label>
+            <input v-model="addProdForm.name" type="text" class="input" placeholder="Contoh: Pemeriksaan Poli Gigi / Sewa Aula" required />
+          </div>
+          <div class="field">
+            <label>Lokasi / Keterangan Singkat (Opsional)</label>
+            <input v-model="addProdForm.location" type="text" class="input" placeholder="Contoh: Klinik Pratama / UTCC" />
+          </div>
+          <div class="field">
+            <label>Tarif Satuan (IDR)</label>
+            <CurrencyInput v-model="addProdForm.unitPrice" :min="0" required />
+          </div>
+          <div class="field">
+            <label>Satuan Hitung (per ...)</label>
+            <select v-model="addProdForm.unit" class="input" required>
+              <option v-for="u in UNIT_MEASURE_OPTIONS" :key="u.value" :value="u.value">{{ u.label }}</option>
+              <option value="__CUSTOM__">+ Satuan Lain...</option>
+            </select>
+            <input
+              v-if="addProdForm.unit === '__CUSTOM__'"
+              v-model="addProdCustomUnit"
+              type="text"
+              class="input"
+              style="margin-top: 6px;"
+              placeholder="Contoh: Sesi / Lembar / Kg"
+              required
+            />
+          </div>
+        </div>
+        <div class="field">
+          <label>Kode COA Pendapatan (Per Unit · v7)</label>
+          <select v-model="addProdForm.revenueAccountCode" class="input" required>
+            <optgroup :label="addProdGroupedCoas.unitGroupLabel">
+              <option v-for="c in addProdGroupedCoas.primary" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+            </optgroup>
+            <optgroup v-if="addProdGroupedCoas.others.length" :label="addProdGroupedCoas.othersGroupLabel">
+              <option v-for="c in addProdGroupedCoas.others" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="field">
+          <label>Skema Pajak Default (Otomatis sesuai Unit)</label>
+          <select v-model="addProdForm.taxScheme" class="input">
+            <option v-for="ts in TAX_SCHEMES" :key="ts.value" :value="ts.value">{{ ts.label }}</option>
+          </select>
+        </div>
+        <label class="check-label">
+          <input v-model="addProdForm.taxInclusive" type="checkbox" />
+          <span>Tarif sudah termasuk pajak (Inclusive)</span>
+        </label>
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="addProdModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy">Simpan Layanan</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 8: PELANGGAN BARU ==================== -->
+    <ModalDialog :open="addCustModalOpen" title="Daftarkan Pelanggan / Instansi" maxWidth="600px" @close="addCustModalOpen = false">
+      <form class="clean-form" @submit.prevent="submitAddCustomer">
+        <div class="form-2col">
+          <div class="field">
+            <label>Nama Pelanggan / Instansi</label>
+            <input v-model="addCustForm.name" type="text" class="input" required />
+          </div>
+          <div class="field">
+            <label>Tipe Organisasi</label>
+            <select v-model="addCustForm.organizationType" class="input" @change="handleAddCustOrgTypeChange">
+              <option value="CORPORATE">Korporasi / Swasta</option>
+              <option value="GOVERNMENT">Instansi Pemerintah / PTN</option>
+              <option value="SOE_BUMN">BUMN</option>
+              <option value="INDIVIDUAL">Perorangan / Umum</option>
+              <option value="INTERNAL_UT">Internal Satker UT (PPK)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Profil Pemungut Pajak</label>
+            <select v-model="addCustForm.taxCollectorProfile" class="input">
+              <option v-for="p in COLLECTOR_PROFILES" :key="p.value" :value="p.value">{{ p.label }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>NPWP / NIK</label>
+            <input v-model="addCustForm.taxIdNpwp" type="text" class="input" />
+          </div>
+          <div class="field">
+            <label>PIC / Kontak</label>
+            <input v-model="addCustForm.contactPerson" type="text" class="input" required />
+          </div>
+          <div class="field">
+            <label>Email</label>
+            <input v-model="addCustForm.email" type="email" class="input" required />
+          </div>
+          <div class="field">
+            <label>Telepon</label>
+            <input v-model="addCustForm.phone" type="text" class="input" required />
+          </div>
+          <div class="field">
+            <label>Alamat</label>
+            <input v-model="addCustForm.address" type="text" class="input" required />
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="addCustModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy">Simpan Pelanggan</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 9: BUKTI POTONG & TAMPUNGAN ==================== -->
+    <ModalDialog :open="slipModalOpen" title="Update Bukti Potong & Status Tampungan" maxWidth="480px" @close="slipModalOpen = false">
+      <form v-if="selectedRowForSlip" class="clean-form" @submit.prevent="submitSlipUpdate">
+        <div class="field">
+          <label>Nomor Bukti Potong PPh / PPN dari Klien</label>
+          <input v-model="slipForm.withholdingSlipNo" type="text" class="input" placeholder="Contoh: BP-23-2026-0091" />
+        </div>
+        <div class="field">
+          <label>Tanggal Setor Bank</label>
+          <input v-model="slipForm.depositDate" type="date" class="input" />
+        </div>
+        <label class="check-label">
+          <input v-model="slipForm.taxAlreadyProcessed" type="checkbox" />
+          <span>Sudah diolah di Rekening Tampungan / Kelolaan sebelumnya (kecualikan dari Surat Pajak)</span>
+        </label>
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="slipModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy">Simpan</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 10: LIHAT / UNGGAH BUKTI DOKUMEN ==================== -->
+    <ModalDialog
+      :open="proofModalOpen"
+      :title="proofModalTargetType === 'INVOICE' ? 'Bukti Pendukung Invoice' : 'Bukti Pembayaran Buku Harian'"
+      maxWidth="660px"
+      @close="closeProofModal"
+    >
+      <div v-if="proofModalRow" class="clean-form">
+        <div class="pay-banner">
+          <div>
+            <strong>{{ proofModalTargetType === 'INVOICE' ? proofModalRow.docNumber : proofModalRow.receiptNumber }}</strong>
+            <div class="cell-sub">
+              {{ proofModalTargetType === 'INVOICE' ? proofModalRow.customer?.name : proofModalRow.payerName }} · {{ proofModalRow.activityTitle }}
+            </div>
+          </div>
+          <div class="col-num">
+            <span class="cell-sub">{{ formatDate(proofModalTargetType === 'INVOICE' ? proofModalRow.issueDate : proofModalRow.paymentDate) }}</span>
+            <strong class="money">{{ formatRupiah(proofModalTargetType === 'INVOICE' ? proofModalRow.totalAmount : proofModalRow.bankReceivedAmount) }}</strong>
+          </div>
+        </div>
+
+        <div v-if="proofLoading" class="empty-cell">Memuat file bukti dokumen...</div>
+
+        <div v-else-if="proofPreviewUrl" class="proof-viewer-box">
+          <img
+            v-if="proofPreviewMime.startsWith('image/')"
+            :src="proofPreviewUrl"
+            :alt="proofPreviewFileName"
+            class="proof-full-img"
+          />
+          <iframe
+            v-else
+            :src="proofPreviewUrl"
+            title="Pratinjau Bukti Dokumen PDF"
+            class="proof-pdf-frame"
+          ></iframe>
+          <div class="proof-viewer-foot">
+            <span class="cell-sub">{{ proofPreviewFileName }}</span>
+            <button type="button" class="mini-action-btn soft" @click="downloadActiveProof">Unduh Bukti</button>
+          </div>
+        </div>
+
+        <div v-else class="proof-empty-box">
+          Belum ada gambar atau dokumen bukti terlampir untuk transaksi ini.
+        </div>
+
+        <div v-if="auth.hasPermission('payment:create') || auth.hasPermission('revenue:create')" class="proof-upload-box">
+          <div class="proof-upload-head">
+            <div>
+              <strong>{{ proofPreviewUrl ? 'Ganti Bukti Dokumen' : 'Unggah Bukti Dokumen' }}</strong>
+              <div class="cell-sub">JPG, PNG, WebP, atau PDF (maks 4 MB)</div>
+            </div>
+            <label class="mini-action-btn soft" style="cursor: pointer;">
+              Pilih File
+              <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" style="display: none;" @change="handleStandaloneProofChange" />
+            </label>
+          </div>
+          <div v-if="standaloneProofDataUrl" class="proof-thumb-row">
+            <img v-if="standaloneProofDataUrl.startsWith('data:image/')" :src="standaloneProofDataUrl" alt="Pratinjau unggahan baru" class="proof-thumb" />
+            <span v-else class="tag-pill info">PDF</span>
+            <span class="proof-file-name">{{ standaloneProofFileName }}</span>
+            <button type="button" class="pill-btn-navy" :disabled="proofUploading" @click="submitStandaloneProofUpload">
+              {{ proofUploading ? 'Menyimpan...' : 'Simpan Bukti' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="closeProofModal">Tutup</button>
         </div>
       </div>
     </ModalDialog>
+
+    <!-- ==================== MODAL 11: MINTA REVISI / TOLAK DOKUMEN ==================== -->
+    <ModalDialog
+      :open="rejectModalOpen"
+      :title="rejectTargetType === 'INVOICE' ? 'Minta Revisi Invoice' : 'Minta Revisi Kwitansi / Tanda Terima'"
+      maxWidth="480px"
+      @close="rejectModalOpen = false"
+    >
+      <form v-if="rejectTargetRow" class="clean-form" @submit.prevent="submitRejectDocument">
+        <p class="cell-sub">
+          Dokumen <strong>{{ rejectTargetType === 'INVOICE' ? rejectTargetRow.docNumber : rejectTargetRow.receiptNumber }}</strong>
+          akan dikembalikan ke PIC pembuat dengan status <strong>Perlu Revisi</strong> (tombol Cetak tetap terkunci &amp; belum masuk jurnal).
+        </p>
+        <div class="field">
+          <label>Catatan Revisi / Alasan Penolakan *</label>
+          <input v-model="rejectReason" type="text" class="input" required minlength="4" placeholder="Cth: Nominal/COA belum sesuai bukti transfer" />
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="rejectModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-danger" :disabled="approvalBusyId === rejectTargetRow.id">Kirim Permintaan Revisi</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 12: REVISI & AJUKAN ULANG DOKUMEN ==================== -->
+    <ModalDialog
+      :open="resubmitModalOpen"
+      :title="resubmitTargetType === 'INVOICE' ? 'Revisi & Ajukan Ulang Invoice' : 'Revisi & Ajukan Ulang Dokumen'"
+      maxWidth="680px"
+      @close="resubmitModalOpen = false"
+    >
+      <form v-if="resubmitTargetRow" class="clean-form" @submit.prevent="submitResubmitDocument">
+        <div v-if="resubmitTargetRow.rejectionReason" class="overpay-note" style="margin-top: 0;">
+          <strong>Catatan Manajer Keuangan:</strong> {{ resubmitTargetRow.rejectionReason }}
+        </div>
+        <div v-if="resubmitTargetType === 'PAYMENT'" class="form-2col">
+          <div class="field">
+            <label>Nama Pembayar *</label>
+            <input v-model="resubmitForm.payerName" type="text" class="input" required />
+          </div>
+          <div class="field">
+            <label>Nominal Masuk (Rp) *</label>
+            <CurrencyInput v-model="resubmitForm.grossAmount" required />
+          </div>
+        </div>
+        <div class="field">
+          <label>Uraian Kegiatan *</label>
+          <input v-model="resubmitForm.activityTitle" type="text" class="input" required />
+        </div>
+        <div class="field">
+          <label>Rincian Layanan / Objek *</label>
+          <input v-model="resubmitForm.rincianLabel" type="text" class="input" required />
+        </div>
+        <div class="field">
+          <label>Kode COA Pendapatan (Per Unit · v7) *</label>
+          <select v-model="resubmitForm.revenueAccountCode" class="input" required>
+            <optgroup :label="resubmitGroupedCoas.unitGroupLabel">
+              <option v-for="c in resubmitGroupedCoas.primary" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+            </optgroup>
+            <optgroup v-if="resubmitGroupedCoas.others.length" :label="resubmitGroupedCoas.othersGroupLabel">
+              <option v-for="c in resubmitGroupedCoas.others" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="field">
+          <label>Catatan Tambahan</label>
+          <input v-model="resubmitForm.notes" type="text" class="input" placeholder="Opsional" />
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="resubmitModalOpen = false">Batal</button>
+          <button type="submit" class="pill-btn-navy" :disabled="approvalBusyId === resubmitTargetRow.id">Ajukan Ulang ke Manajer</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 13: BATALKAN (VOID) DOKUMEN BUKU HARIAN ==================== -->
+    <ModalDialog :open="voidPayModalOpen" title="Batalkan Dokumen Buku Harian" maxWidth="480px" @close="voidPayModalOpen = false">
+      <form v-if="selectedPaymentForVoid" class="clean-form" @submit.prevent="submitVoidPayment">
+        <p class="cell-sub">
+          Dokumen <strong>{{ selectedPaymentForVoid.receiptNumber }}</strong> akan dibatalkan.
+          <template v-if="selectedPaymentForVoid.status === 'CONFIRMED'">
+            Jurnal pembalik otomatis akan diposting agar buku besar tetap seimbang.
+          </template>
+        </p>
+        <div class="field">
+          <label>Alasan Pembatalan *</label>
+          <input v-model="voidPayReason" type="text" class="input" required minlength="4" placeholder="Cth: Salah input nominal / transaksi dobel" />
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="pill-btn-soft" @click="voidPayModalOpen = false">Tutup</button>
+          <button type="submit" class="pill-btn-danger" :disabled="approvalBusyId === selectedPaymentForVoid.id">Batalkan Dokumen</button>
+        </div>
+      </form>
+    </ModalDialog>
+
+    <!-- ==================== MODAL 14: TINJAU DETAIL DOKUMEN SEBELUM APPROVAL ==================== -->
+    <ModalDialog
+      :open="reviewModalOpen"
+      :title="reviewTargetType === 'INVOICE' ? 'Tinjau Detail Invoice' : 'Tinjau Detail Kwitansi / Tanda Terima'"
+      maxWidth="640px"
+      @close="reviewModalOpen = false"
+    >
+      <div v-if="reviewTargetRow" class="clean-form">
+        <div class="pay-banner">
+          <div>
+            <strong>{{ reviewTargetType === 'INVOICE' ? reviewTargetRow.docNumber : reviewTargetRow.receiptNumber }}</strong>
+            <div class="cell-sub">
+              {{ reviewTargetType === 'INVOICE' ? reviewTargetRow.customer?.name : reviewTargetRow.payerName }} ·
+              {{ reviewTargetType === 'INVOICE' ? reviewTargetRow.businessUnit?.name : reviewTargetRow.businessUnitName }}
+            </div>
+          </div>
+          <div class="col-num">
+            <span class="tag-pill" :class="reviewTargetRow.approvalStatus === 'APPROVED' ? 'ok' : reviewTargetRow.approvalStatus === 'REJECTED' ? 'danger' : 'warn-soft'">
+              {{ reviewTargetRow.approvalStatus === 'APPROVED' ? 'Disetujui' : reviewTargetRow.approvalStatus === 'REJECTED' ? 'Perlu Revisi' : 'Menunggu Approval' }}
+            </span>
+            <strong class="money" style="display: block; margin-top: 4px;">
+              {{ formatRupiah(reviewTargetType === 'INVOICE' ? reviewTargetRow.totalAmount : reviewTargetRow.bankReceivedAmount) }}
+            </strong>
+          </div>
+        </div>
+
+        <div class="review-meta-grid">
+          <div>
+            <span>Pengaju / Operator</span>
+            <strong>{{ reviewTargetType === 'INVOICE' ? (reviewTargetRow.createdByName || '-') : (reviewTargetRow.receivedByName || '-') }}</strong>
+          </div>
+          <div>
+            <span>Tanggal Dokumen</span>
+            <strong>{{ formatDate(reviewTargetType === 'INVOICE' ? reviewTargetRow.issueDate : reviewTargetRow.paymentDate) }}</strong>
+          </div>
+          <div>
+            <span>Kode COA Pendapatan</span>
+            <strong class="mono-code">{{ reviewTargetRow.revenueAccountCode || '-' }}</strong>
+          </div>
+          <div>
+            <span>Skema Pajak &amp; FP</span>
+            <strong>{{ getTaxSchemeShort(reviewTargetRow.taxScheme) }} · FP {{ reviewTargetRow.fakturPajakCode || '040' }}</strong>
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <span>Uraian Kegiatan &amp; Rincian</span>
+            <strong>{{ reviewTargetRow.activityTitle || '-' }}</strong>
+            <div class="cell-sub">{{ reviewTargetRow.rincianLabel || '' }}</div>
+          </div>
+        </div>
+
+        <div v-if="reviewTargetType === 'INVOICE' && reviewTargetRow.lines?.length" class="lines-box">
+          <div class="lines-head"><strong>Rincian Item Tagihan ({{ reviewTargetRow.lines.length }})</strong></div>
+          <table class="clean-table compact">
+            <thead>
+              <tr>
+                <th>Deskripsi</th>
+                <th class="col-num">Vol</th>
+                <th class="col-num">Tarif</th>
+                <th class="col-num">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="l in reviewTargetRow.lines" :key="l.id || l.description">
+                <td>{{ l.description }}</td>
+                <td class="col-num">{{ l.quantity }}<template v-if="Number(l.duration || 1) > 1"> &times; {{ l.duration }} {{ l.durationUnit || '' }}</template></td>
+                <td class="col-num money">{{ formatRupiah(l.unitPrice) }}</td>
+                <td class="col-num money"><strong>{{ formatRupiah(l.lineTotal) }}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="live-tax-preview">
+          <div>
+            <span>Nilai Jual / DPP</span>
+            <strong class="money">{{ formatRupiah(reviewTargetRow.nilaiJual || reviewTargetRow.dppPb1 || 0) }}</strong>
+          </div>
+          <div>
+            <span>PPN 12%</span>
+            <strong class="money">{{ formatRupiah(reviewTargetRow.ppnAmount || 0) }}</strong>
+          </div>
+          <div>
+            <span>PPh 4(2) / 23 / 21</span>
+            <strong class="money">{{ formatRupiah((Number(reviewTargetRow.pph42Amount) || 0) + (Number(reviewTargetRow.pph23Amount) || 0) + (Number(reviewTargetRow.pph23Rate15Amount) || 0) + (Number(reviewTargetRow.pph21Amount) || 0)) }}</strong>
+          </div>
+          <div>
+            <span>PB1 10%</span>
+            <strong class="money">{{ formatRupiah(reviewTargetRow.pb1Amount || 0) }}</strong>
+          </div>
+          <div class="highlight">
+            <span>{{ reviewTargetType === 'INVOICE' ? 'Tagihan Neto' : 'Nominal Masuk' }}</span>
+            <strong class="money">{{ formatRupiah(reviewTargetType === 'INVOICE' ? reviewTargetRow.totalAmount : reviewTargetRow.bankReceivedAmount) }}</strong>
+          </div>
+        </div>
+
+        <div v-if="reviewTargetRow.notes" class="cell-sub" style="padding: 8px 12px; background: #f8fafc; border-radius: 10px;">
+          <strong>Catatan:</strong> {{ reviewTargetRow.notes }}
+        </div>
+
+        <div class="modal-foot">
+          <button
+            type="button"
+            class="pill-btn-soft"
+            @click="reviewModalOpen = false; openProofModal(reviewTargetRow, reviewTargetType)"
+          >
+            {{ (reviewTargetType === 'INVOICE' ? reviewTargetRow.invoiceProof : reviewTargetRow.paymentProof) ? 'Lihat Bukti Lampiran' : 'Unggah / Cek Bukti' }}
+          </button>
+          <template v-if="auth.hasPermission('payment:approve') && reviewTargetRow.status !== 'VOID' && reviewTargetRow.approvalStatus === 'PENDING_APPROVAL'">
+            <button
+              type="button"
+              class="mini-action-btn revise-warn"
+              style="padding: 8px 16px; font-size: 0.8rem;"
+              @click="reviewModalOpen = false; openRejectModal(reviewTargetType, reviewTargetRow)"
+            >
+              Minta Revisi
+            </button>
+            <button
+              type="button"
+              class="mini-action-btn approve-ok"
+              style="padding: 8px 18px; font-size: 0.8rem;"
+              :disabled="approvalBusyId === reviewTargetRow.id"
+              @click="reviewModalOpen = false; approveDocument(reviewTargetType, reviewTargetRow)"
+            >
+              Setujui Dokumen
+            </button>
+          </template>
+          <button type="button" class="pill-btn-soft" @click="reviewModalOpen = false">Tutup</button>
+        </div>
+      </div>
+    </ModalDialog>
+
+    <!-- Formal Print Modal (Invoice KU-003 / Kuitansi KU-001 / Tanda Terima KU-002 / Surat Pajak) -->
+    <PenerimaanPrintModal
+      :open="printOpen"
+      :mode="printMode"
+      :data="printPayload"
+      :bank-account="activePrintBankAccount"
+      @close="printOpen = false"
+    />
   </div>
 </template>
 
 <style scoped>
-.invoice-printable-card {
-  background: #ffffff;
-  color: #1e293b;
-  padding: 16px 12px;
-  border-radius: 8px;
-  font-family: inherit;
-}
-
-.inv-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding-bottom: 16px;
-  border-bottom: 2px solid #034693;
-  margin-bottom: 18px;
-}
-
-.inv-brand {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.inv-logo-badge {
-  width: 44px;
-  height: 44px;
-  background: #034693;
-  color: #ffffff;
-  font-weight: 800;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  letter-spacing: 1px;
-}
-
-.inv-inst-name {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 800;
-  color: #034693;
-  letter-spacing: 0.5px;
-}
-
-.inv-inst-sub {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #475569;
-}
-
-.inv-inst-addr {
-  font-size: 0.72rem;
-  color: #64748b;
-}
-
-.inv-title-box {
-  text-align: right;
-}
-
-.inv-badge-type {
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: #034693;
-}
-
-.inv-number {
-  font-size: 1.15rem;
-  font-weight: 800;
-  font-family: monospace;
-  color: #0f172a;
-}
-
-.inv-status-pill {
-  display: inline-block;
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 12px;
-  margin-top: 4px;
-}
-
-.inv-status-pill.paid {
-  background: #dcfce7;
-  color: #15803d;
-}
-
-.inv-status-pill.partially_paid {
-  background: #fef9c3;
-  color: #a16207;
-}
-
-.inv-status-pill.unpaid,
-.inv-status-pill.issued,
-.inv-status-pill.draft {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
-.inv-meta-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  margin-bottom: 18px;
-  background: #f8fafc;
-  padding: 12px 14px;
-  border-radius: 6px;
-  border: 1px solid #e2e8f0;
-}
-
-.meta-label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  color: #64748b;
-  font-weight: 700;
-  display: block;
-}
-
-.meta-val-primary {
-  font-size: 1rem;
-  font-weight: 700;
-  color: #0f172a;
-  margin-top: 2px;
-}
-
-.meta-val-sub {
-  font-size: 0.8rem;
-  color: #475569;
-  margin-top: 2px;
-}
-
-.inv-meta-right {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.meta-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.82rem;
-}
-
-.inv-items-table {
+.poital-penerimaan {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 0.82rem;
-  margin-bottom: 16px;
-}
-
-.inv-items-table th {
-  background: #034693;
-  color: #ffffff;
-  padding: 8px 10px;
-  text-align: left;
-  font-weight: 600;
-}
-
-.inv-items-table td {
-  padding: 8px 10px;
-  border-bottom: 1px solid #e2e8f0;
-  color: #1e293b;
-}
-
-.inv-summary-wrapper {
-  display: grid;
-  grid-template-columns: 1.1fr 1fr;
-  gap: 20px;
-  margin-bottom: 24px;
-}
-
-.inv-payment-instruction {
-  background: #f1f5f9;
-  padding: 12px;
-  border-radius: 6px;
-  border-left: 4px solid #034693;
-}
-
-.pay-title {
-  margin: 0 0 4px 0;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #034693;
-}
-
-.pay-desc {
-  margin: 0 0 8px 0;
-  font-size: 0.76rem;
-  color: #475569;
-}
-
-.bank-box {
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: #0f172a;
-}
-
-.inv-totals-box {
+  padding-bottom: 84px;
+  max-width: 1400px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 16px;
+  padding-bottom: 84px;
 }
 
-.total-row {
+.rev-top-bar {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  font-size: 0.82rem;
-  padding: 2px 0;
-  color: #334155;
-}
-
-.total-row.grand-total {
-  font-weight: 800;
-  font-size: 1.05rem;
-  color: #034693;
-  border-top: 2px solid #cbd5e1;
-  border-bottom: 2px solid #cbd5e1;
-  padding: 6px 0;
-  margin: 4px 0;
-}
-
-.grand-total-val {
-  font-family: monospace;
-}
-
-.total-row.sisa-total {
-  font-weight: 700;
-  font-size: 0.9rem;
-}
-
-.inv-signatures {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 40px;
-  margin-top: 28px;
-  padding-top: 14px;
-  border-top: 1px dashed #cbd5e1;
-}
-
-.sig-box {
-  text-align: center;
-}
-
-.sig-title {
-  font-size: 0.78rem;
-  color: #64748b;
-  margin-bottom: 40px;
-}
-
-.sig-space {
-  height: 35px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sig-stamp {
-  font-size: 0.68rem;
-  font-weight: 800;
-  color: #034693;
-  border: 2px solid #034693;
-  padding: 2px 8px;
-  border-radius: 4px;
-  transform: rotate(-5deg);
-  letter-spacing: 0.5px;
-}
-
-.sig-name {
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #0f172a;
-  border-top: 1px solid #94a3b8;
-  display: inline-block;
-  padding-top: 4px;
-  min-width: 170px;
-}
-
-.sig-role {
-  font-size: 0.72rem;
-  color: #64748b;
-}
-
-.pertor-revenue-banner {
-  display: flex;
-  align-items: center;
   gap: 12px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 8px;
-  padding: 10px 14px;
-  margin-bottom: 14px;
-  font-size: 0.82rem;
-  color: #166534;
+  flex-wrap: wrap;
 }
 
-.pertor-revenue-banner .banner-badge {
-  background: #15803d;
-  color: #fff;
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
-
-.pertor-revenue-banner code {
-  background: #dcfce7;
-  color: #14532d;
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-family: monospace;
-}
-
-.active-session-banner {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-  border: 1px solid #86efac;
-  border-radius: 10px;
-  padding: 16px 20px;
-}
-
-.session-badge {
-  background: #166534;
-  color: #fff;
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 4px;
-  letter-spacing: 0.5px;
-}
-
-.session-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.stat-box {
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(22, 101, 52, 0.15);
-  border-radius: 8px;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.stat-label {
-  font-size: 0.74rem;
-  color: #475569;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.stat-value {
-  font-size: 1.05rem;
-  color: #0f172a;
-}
-
-.empty-shift-banner {
-  background: #f8fafc;
-  border: 1px dashed #cbd5e1;
-  border-radius: 10px;
-  padding: 16px 20px;
-}
-
-.pos-receipt-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.pos-receipt-card {
-  width: 100%;
-  max-width: 420px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 24px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-  font-family: 'Courier New', Courier, monospace;
-}
-
-.pos-receipt-header {
-  text-align: center;
-  margin-bottom: 12px;
-}
-
-.pos-receipt-logo {
-  display: inline-block;
-  background: #034693;
-  color: #fff;
-  font-weight: 800;
-  font-size: 1.1rem;
-  padding: 4px 10px;
-  border-radius: 4px;
-  margin-bottom: 6px;
-}
-
-.pos-receipt-header h3 {
+.rev-title {
   margin: 0;
-  font-size: 1.1rem;
-  font-weight: 800;
-  color: #0f172a;
-  letter-spacing: 0.5px;
+  font-size: 1.35rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
 }
 
-.pos-sub {
-  margin: 2px 0 0;
-  font-size: 0.78rem;
-  color: #475569;
-}
-
-.pos-legal {
-  margin: 2px 0 0;
-  font-size: 0.7rem;
-  color: #64748b;
-}
-
-.receipt-divider {
-  border-top: 1px dashed #94a3b8;
-  margin: 12px 0;
-}
-
-.receipt-title-tag {
-  display: inline-block;
-  background: #f1f5f9;
-  color: #0f172a;
-  font-weight: 700;
-  font-size: 0.74rem;
-  padding: 2px 8px;
-  border-radius: 3px;
-  margin-top: 6px;
-}
-
-.receipt-meta-grid {
+.rev-top-actions {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.8rem;
-}
-
-.receipt-row {
-  display: flex;
-  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.receipt-row .lbl {
-  color: #64748b;
-}
-
-.receipt-row .val {
-  color: #0f172a;
-  text-align: right;
-}
-
-.receipt-total-box {
+.unit-filter-bar {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.receipt-pertor-box {
+.unit-quick-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bh-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #e2e8f080;
+  padding: 3px;
+  border-radius: 999px;
+}
+
+.bh-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border-radius: 16px;
   background: #f8fafc;
-  border-radius: 6px;
-  padding: 10px;
-  font-size: 0.74rem;
+  border: 1px solid #e2e8f0;
 }
 
-.pertor-title {
-  font-weight: 700;
-  color: #0f172a;
-  margin-bottom: 4px;
+.bh-toolbar-selects {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.pertor-coa-list {
+.pill-select.compact {
+  padding: 6px 12px;
+  font-size: 0.77rem;
+}
+
+.pill-select.sort-select {
+  border-color: #94a3b8;
+  color: #0b2144;
+}
+
+.row-num-cell {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.bh-filter-pill {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bh-filter-pill.active {
+  background: #ffffff;
+  color: #0b2144;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.tag-pill.warn-soft {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.entry-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.entry-mode-card {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  align-items: flex-start;
+  text-align: left;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1.5px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.entry-mode-card strong {
+  font-size: 0.85rem;
+  color: #0b2144;
+}
+
+.entry-mode-card span {
+  font-size: 0.74rem;
+  color: #64748b;
+  line-height: 1.3;
+}
+
+.entry-mode-card.active {
+  background: #eff6ff;
+  border-color: #0b2144;
+  box-shadow: 0 0 0 2px rgba(11, 33, 68, 0.12);
+}
+
+.auto-sku-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  font-size: 0.8rem;
   color: #475569;
 }
 
-.pertor-coa-list code {
-  background: #e2e8f0;
-  padding: 1px 3px;
-  border-radius: 3px;
-  color: #0f172a;
+.poital-pv-select {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md, 10px) !important;
+  border: 1px solid var(--border-subtle, #cbd5e1) !important;
+  background: #ffffff !important;
+  color: var(--text-primary, #0f172a) !important;
+  font-size: 0.88rem;
+  cursor: pointer;
 }
 
-.receipt-footer {
-  text-align: center;
-  margin-top: 16px;
-  font-size: 0.75rem;
+:deep(.poital-pv-select .p-select-label) {
+  padding: 8px 10px;
+  font-size: 0.84rem;
+  color: var(--text-primary, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:deep(.poital-pv-select .p-select-label.p-placeholder) {
   color: #64748b;
 }
 
-.receipt-stamp {
-  display: inline-block;
-  font-weight: 800;
-  font-size: 0.72rem;
-  color: #166534;
-  border: 1px solid #166534;
-  padding: 3px 8px;
-  border-radius: 4px;
-  margin-top: 6px;
+:deep(.poital-pv-select .p-select-dropdown) {
+  color: #475569;
 }
 
-@media print {
-  body * {
-    visibility: hidden;
+.mini-action-btn.proof-ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.proof-upload-box {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.proof-upload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.84rem;
+  color: #0b2144;
+}
+
+.proof-thumb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.proof-thumb {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+}
+
+.proof-file-name {
+  font-size: 0.8rem;
+  color: #334155;
+  flex: 1;
+  min-width: 140px;
+  word-break: break-all;
+}
+
+.proof-viewer-box {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.proof-full-img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  background: #0f172a0a;
+}
+
+.proof-pdf-frame {
+  width: 100%;
+  height: 420px;
+  border: none;
+}
+
+.proof-viewer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #ffffff;
+  border-top: 1px solid #e2e8f0;
+}
+
+.proof-empty-box {
+  padding: 20px;
+  text-align: center;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.84rem;
+}
+
+@media (max-width: 680px) {
+  .entry-mode-grid {
+    grid-template-columns: 1fr;
   }
-  .invoice-printable-card,
-  .invoice-printable-card *,
-  .pos-receipt-card,
-  .pos-receipt-card * {
-    visibility: visible;
-  }
-  .invoice-printable-card,
-  .pos-receipt-card {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    padding: 0;
-  }
-  .no-print {
-    display: none !important;
-  }
+}
+
+.pill-month-input,
+.pill-select,
+.pill-search-input {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  padding: 7px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.pill-search-input {
+  min-width: 240px;
+  font-weight: 500;
+}
+
+.pill-btn-navy {
+  border: none;
+  border-radius: 9999px;
+  padding: 8px 18px;
+  background: #0b2144;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+.pill-btn-navy:hover { opacity: 0.9; }
+
+.pill-btn-soft {
+  border: none;
+  border-radius: 9999px;
+  padding: 8px 16px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+}
+.pill-btn-soft:hover { background: #eff6ff; color: #034693; }
+
+.pill-btn-danger {
+  border: none;
+  border-radius: 9999px;
+  padding: 8px 18px;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+/* Unit Filter Pills */
+.unit-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.unit-pill {
+  border: none;
+  border-radius: 9999px;
+  padding: 6px 14px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.unit-pill.active {
+  background: #0b2144;
+  color: #ffffff;
+}
+
+/* Signature Poital 4-Card Row */
+.kpi-metric-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.metric-card {
+  border-radius: 20px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+}
+.metric-title { font-size: 0.8rem; font-weight: 600; }
+.metric-number-val {
+  font-size: clamp(1.12rem, 1.4vw, 1.48rem);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.trend-text { font-size: 0.74rem; color: var(--text-secondary); }
+.hero-card { background: #0b2144; color: #ffffff; }
+.hero-card .metric-title { color: rgba(255, 255, 255, 0.82); }
+.hero-card .trend-text { color: rgba(255, 255, 255, 0.65); }
+.blue-card { background: #eff6ff; color: #034693; }
+.amber-card { background: #fef9ed; color: #b45309; }
+.white-card { background: var(--bg-surface); color: var(--text-primary); }
+.dark-num { color: var(--text-primary); }
+
+/* Tabs & Cards */
+.rev-tab-strip,
+.subtab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tab-pills {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 9999px;
+  background: var(--bg-surface);
+  box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.05);
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.tab-pill {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 650;
+  padding: 7px 15px;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+.tab-pill.sm { padding: 6px 13px; font-size: 0.76rem; }
+.tab-pill.active { background: #0b2144; color: #ffffff; }
+
+.poital-card {
+  background: var(--bg-surface);
+  border-radius: 20px;
+  padding: 20px 22px;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+}
+
+.rev-stack { display: flex; flex-direction: column; gap: 16px; }
+.split-2-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+
+.card-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.card-title { margin: 0; font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+.card-sub { display: block; font-size: 0.76rem; color: var(--text-secondary); margin-top: 2px; }
+.btn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Aging Piutang Strip */
+.aging-strip-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.aging-bucket-card {
+  border: 2px solid transparent;
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: var(--bg-surface);
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 140ms ease, border-color 140ms ease;
+}
+.aging-bucket-card:hover { transform: translateY(-2px); }
+.aging-bucket-card span { font-size: 0.74rem; font-weight: 600; color: var(--text-secondary); }
+.aging-bucket-card strong { font-size: 1.05rem; font-weight: 750; color: var(--text-primary); }
+.aging-bucket-card.warn strong { color: #b45309; }
+.aging-bucket-card.danger strong { color: #dc2626; }
+.aging-bucket-card.active { border-color: #0b2144; background: #eff6ff; }
+
+/* Clean Tables */
+.table-wrap { width: 100%; overflow-x: auto; }
+.clean-table { width: 100%; border-collapse: collapse; }
+.clean-table th {
+  text-align: left;
+  font-size: 0.73rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+.clean-table td {
+  padding: 10px;
+  font-size: 0.81rem;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+.clean-table.compact td, .clean-table.compact th { padding: 8px 8px; font-size: 0.76rem; }
+.col-num,
+.clean-table th.col-num { text-align: right; white-space: nowrap; }
+.nowrap-cell { white-space: nowrap; }
+.muted-money { color: #64748b; }
+.doc-link-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.doc-link-btn:hover { text-decoration: underline; }
+.review-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.review-meta-grid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.review-meta-grid span { font-size: 0.7rem; color: var(--text-secondary); }
+.review-meta-grid strong { font-size: 0.82rem; color: var(--text-primary); }
+.empty-cell { text-align: center; padding: 28px !important; color: var(--text-secondary); }
+.row-void { opacity: 0.6; }
+.summary-row td { background: #eff6ff; border-top: 1.5px solid #0b2144; }
+
+.mono-code { font-family: ui-monospace, monospace; font-size: 0.76rem; font-weight: 650; color: #034693; }
+.cell-sub { font-size: 0.73rem; color: var(--text-secondary); margin-top: 2px; }
+.cell-warn { font-size: 0.72rem; color: #b45309; font-weight: 600; margin-top: 2px; }
+.unit-mini-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 9999px;
+  background: var(--bg-subtle); color: var(--text-secondary); font-size: 0.68rem; font-weight: 700;
+}
+
+.tag-pill {
+  display: inline-block; padding: 2px 9px; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; white-space: nowrap;
+}
+.tag-pill.ok { background: #ecfdf5; color: #047857; }
+.tag-pill.info { background: #eff6ff; color: #034693; }
+.tag-pill.muted { background: var(--bg-subtle); color: var(--text-secondary); }
+.tag-pill.danger { background: #fef2f2; color: #dc2626; }
+
+.overdue-chip {
+  display: inline-block; margin-top: 2px; padding: 1px 7px; border-radius: 9999px;
+  background: #fef2f2; color: #dc2626; font-size: 0.68rem; font-weight: 700;
+}
+
+.inline-actions { display: inline-flex; gap: 5px; justify-content: flex-end; flex-wrap: wrap; }
+.mini-action-btn {
+  border: none; border-radius: 9999px; padding: 5px 11px; font-size: 0.72rem; font-weight: 650;
+  background: #eff6ff; color: #034693; cursor: pointer; white-space: nowrap;
+}
+.mini-action-btn.navy { background: #0b2144; color: #ffffff; }
+.mini-action-btn.soft { background: var(--bg-subtle); color: var(--text-primary); }
+.mini-action-btn.warn { background: #fef3c7; color: #92400e; }
+.mini-action-btn.danger { background: #fef2f2; color: #dc2626; }
+.mini-action-btn.approve-ok { background: #059669; color: #ffffff; }
+.mini-action-btn.approve-ok:hover:not(:disabled) { background: #047857; }
+.mini-action-btn.revise-warn { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+.mini-action-btn.revise-warn:hover:not(:disabled) { background: #fef3c7; }
+.mini-action-btn.locked-print,
+.mini-action-btn:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+.tag-pill.warn-soft { background: #fef3c7; color: #92400e; }
+.bh-filter-pill.warn-pill { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.bh-filter-pill.danger-pill { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.tab-pending-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; margin-left: 5px;
+  border-radius: 9999px; background: #f59e0b; color: #ffffff;
+  font-size: 0.68rem; font-weight: 800; line-height: 1;
+}
+
+.overpay-note {
+  margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: #fef9ed; color: #92400e; font-size: 0.8rem;
+}
+.text-pos { color: #059669; }
+
+/* Clean Modal Forms */
+.clean-form { display: flex; flex-direction: column; gap: 14px; }
+.clean-form .input { height: 46px; min-height: 46px; font-size: 0.9rem; box-sizing: border-box; }
+.clean-form textarea.input {
+  height: auto;
+  min-height: 144px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+.clean-form :deep(.poital-pv-select) { height: 46px; min-height: 46px; font-size: 0.9rem; }
+.form-2col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: end; }
+.form-3col { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.inline-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.inline-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field label { font-size: 0.8rem; font-weight: 650; color: var(--text-secondary); }
+.field-head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inline-link-btn {
+  border: none; background: transparent; padding: 0; color: #034693; font-size: 0.76rem; font-weight: 700; cursor: pointer;
+}
+.inline-link-btn:hover { text-decoration: underline; }
+.pill-btn-outline {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid #cbd5e1; border-radius: 9999px; padding: 6px 13px;
+  background: #ffffff; color: #0b2144; font-size: 0.78rem; font-weight: 650; cursor: pointer;
+  white-space: nowrap; transition: background 140ms ease, border-color 140ms ease;
+}
+.pill-btn-outline:hover { background: #eff6ff; border-color: #93c5fd; color: #034693; }
+.check-align { justify-content: center; height: 46px; padding-bottom: 0; }
+.check-label { display: inline-flex; align-items: center; gap: 8px; font-size: 0.84rem; color: var(--text-primary); cursor: pointer; }
+
+.lines-box {
+  padding: 14px; border-radius: 14px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 12px;
+}
+.lines-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; }
+.line-item-card {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  border-radius: 12px; background: #ffffff; border: 1px solid var(--border-subtle, #e2e8f0);
+}
+.line-card-top {
+  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; align-items: end;
+}
+.line-card-top.has-del {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 36px;
+}
+.line-del-btn { height: 46px; width: 36px; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; padding: 0; }
+.line-card-bottom {
+  display: grid; grid-template-columns: 100px 100px minmax(180px, 1.2fr) minmax(150px, 0.9fr); gap: 12px; align-items: end;
+}
+.line-sub-col { text-align: right; }
+.line-sub-val {
+  min-height: 46px; display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 12px; border-radius: var(--radius-md, 10px); background: #f8fafc; border: 1px solid #e2e8f0;
+  font-size: 0.88rem; font-weight: 700; color: #0b2144; white-space: nowrap;
+}
+.direct-calc-strip {
+  display: grid; grid-template-columns: 88px auto 116px auto minmax(110px, 1fr) auto minmax(120px, 1fr);
+  gap: 8px; align-items: end; padding: 10px 12px; border-radius: 12px;
+  background: #f8fafc; border: 1px solid #e2e8f0;
+}
+.direct-calc-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.direct-calc-field label { font-size: 0.7rem; font-weight: 650; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.direct-calc-op { padding-bottom: 11px; font-weight: 700; color: #64748b; text-align: center; }
+.direct-calc-rate { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; }
+.direct-calc-rate span { font-size: 0.69rem; color: var(--text-secondary); }
+.direct-calc-rate strong { font-size: 0.85rem; color: #0b2144; }
+
+.extra-accordion-btn {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
+  padding: 9px 14px; border-radius: 12px; border: 1px dashed #cbd5e1; background: #f8fafc;
+  color: #034693; font-size: 0.78rem; font-weight: 650; cursor: pointer; text-align: left;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.extra-accordion-btn:hover { background: #eff6ff; border-color: #93c5fd; }
+.extra-accordion-panel {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0;
+}
+
+.live-tax-preview {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px;
+  padding: 12px 14px; border-radius: 14px; background: #f8fafc;
+}
+.live-tax-preview > div { display: flex; flex-direction: column; gap: 2px; }
+.live-tax-preview span { font-size: 0.69rem; color: var(--text-secondary); }
+.live-tax-preview strong { font-size: 0.84rem; color: var(--text-primary); }
+.live-tax-preview .highlight strong { color: #034693; }
+
+.pay-banner {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 14px; background: #eff6ff;
+}
+
+.modal-foot {
+  position: sticky;
+  bottom: -24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 0 18px;
+  margin-top: 4px;
+  background: var(--bg-surface, #ffffff);
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+  z-index: 5;
+}
+
+@media (max-width: 1120px) {
+  .kpi-metric-row, .aging-strip-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split-2-grid { grid-template-columns: 1fr; }
+  .live-tax-preview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 680px) {
+  .kpi-metric-row, .aging-strip-grid, .form-2col, .form-3col, .line-card-top, .line-card-bottom, .direct-calc-strip { grid-template-columns: 1fr; }
+  .direct-calc-op { display: none; }
+  .line-sub-col { text-align: left; }
+  .line-sub-val { justify-content: flex-start; }
+  .pill-search-input { width: 100%; min-width: 0; }
+  .poital-card { padding: 16px; }
 }
 </style>

@@ -1,6 +1,7 @@
 /* PMO UTama Corporate Workspace Design Tokens */
 :root,
 [data-theme='light'] {
+  color-scheme: light;
   --bg-canvas: #f0f2f5;
   --bg-surface: #ffffff;
   --bg-subtle: #f8fafc;
@@ -42,6 +43,70 @@
   --status-neutral-bg: #f1f5f9;
   --status-neutral-text: #334155;
   --status-neutral-border: #cbd5e1;
+}
+
+/* Keep PrimeVue Select dropdowns clean light, wrapped, and strictly ABOVE ModalDialog (z-index 99999) */
+.p-select-overlay,
+.p-multiselect-overlay,
+.p-autocomplete-overlay,
+.p-popover {
+  max-width: min(540px, 92vw) !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 14px !important;
+  box-shadow: 0 14px 36px rgba(11, 33, 68, 0.18) !important;
+  z-index: 100200 !important;
+}
+
+.p-select-header {
+  background: #f8fafc !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  padding: 8px 10px !important;
+}
+
+.p-select-filter {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 9px !important;
+  font-size: 0.83rem !important;
+  padding: 7px 10px !important;
+}
+
+.p-select-list-container {
+  max-height: 260px !important;
+}
+
+.p-select-option {
+  white-space: normal !important;
+  line-height: 1.38 !important;
+  font-size: 0.83rem !important;
+  color: #0f172a !important;
+  padding: 8px 12px !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+}
+
+.p-select-option:hover,
+.p-select-option.p-focus {
+  background: #eff6ff !important;
+  color: #0b2144 !important;
+}
+
+.p-select-option.p-select-option-selected {
+  background: #dbeafe !important;
+  color: #0b2144 !important;
+  font-weight: 600 !important;
+}
+
+.p-select-empty-message {
+  color: #64748b !important;
+  font-size: 0.82rem !important;
+  padding: 12px !important;
+}
+
+:root {
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -1417,4 +1482,21 @@ p {
   font-family: inherit !important;
   font-weight: 700 !important;
   letter-spacing: 0.02em !important;
+}
+
+select.input {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.p-select-overlay {
+  max-width: min(460px, calc(100vw - 32px)) !important;
+  box-sizing: border-box !important;
+}
+
+.p-select-option {
+  white-space: normal !important;
+  line-height: 1.35 !important;
+  word-break: break-word !important;
 }

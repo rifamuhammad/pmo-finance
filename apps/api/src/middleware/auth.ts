@@ -109,7 +109,7 @@ export function requirePermission(permission: string) {
  */
 export function enforceUnitScope(user: Express.Request['user'], targetBusinessUnitId: string | null | undefined): void {
   if (!user || !targetBusinessUnitId) return;
-  const globalRoles = ['SUPER_ADMIN', 'GM_PMO', 'FINANCE_MANAGER', 'ACCOUNTING', 'PROCUREMENT', 'TAX_OFFICER', 'AUDITOR'];
+  const globalRoles = ['SUPER_ADMIN', 'GM_PMO', 'FINANCE_MANAGER', 'ACCOUNTING', 'PROCUREMENT', 'TAX_OFFICER', 'REVENUE_OPERATOR', 'AUDITOR'];
   if (globalRoles.includes(user.roleCode)) return;
   if (user.businessUnitId && user.businessUnitId !== targetBusinessUnitId) {
     throw new AppError(

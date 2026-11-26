@@ -8,6 +8,8 @@ import ApprovalsView from '../modules/ApprovalsView.vue';
 import BudgetsView from '../modules/BudgetsView.vue';
 import ProcurementView from '../modules/ProcurementView.vue';
 import RevenueCashierView from '../modules/RevenueCashierView.vue';
+import PenerimaanPembukuanView from '../modules/PenerimaanPembukuanView.vue';
+import PenerimaanLaporanView from '../modules/PenerimaanLaporanView.vue';
 import ReconciliationView from '../modules/ReconciliationView.vue';
 import AccountingView from '../modules/AccountingView.vue';
 import ReportsStrategyView from '../modules/ReportsStrategyView.vue';
@@ -67,7 +69,19 @@ export const router = createRouter({
           path: 'revenue',
           name: 'revenue',
           component: RevenueCashierView,
-          meta: { title: 'Penagihan Layanan, Pesanan & Faktur Invoice', permission: 'revenue:view' },
+          meta: { title: 'Buku Harian Penerimaan (Invoice, Kwitansi & Tanda Terima)', permission: 'revenue:view' },
+        },
+        {
+          path: 'penerimaan/pembukuan',
+          name: 'penerimaan-pembukuan',
+          component: PenerimaanPembukuanView,
+          meta: { title: 'Pembukuan Penerimaan (Umum & Pajak)', permission: 'revenue:view' },
+        },
+        {
+          path: 'penerimaan/laporan',
+          name: 'penerimaan-laporan',
+          component: PenerimaanLaporanView,
+          meta: { title: 'Laporan Penerimaan & Aging Piutang', permission: 'revenue:view' },
         },
         {
           path: 'cashier',

@@ -38,10 +38,16 @@ const currentModuleContext = computed(() => {
     return { section: 'Pengadaan', title: 'Pengadaan Lab & PO' };
   }
   if (path.startsWith('/revenue')) {
-    return { section: 'Finansial', title: 'Pendapatan & Kasir POS' };
+    return { section: 'Penerimaan', title: 'Buku Harian Penerimaan' };
+  }
+  if (path.startsWith('/penerimaan/pembukuan')) {
+    return { section: 'Penerimaan', title: 'Pembukuan (Umum & Pajak)' };
+  }
+  if (path.startsWith('/penerimaan/laporan')) {
+    return { section: 'Penerimaan', title: 'Laporan Penerimaan & Aging' };
   }
   if (path.startsWith('/reconciliation')) {
-    return { section: 'Finansial', title: 'Kas & Rekonsiliasi Bank' };
+    return { section: auth.activeWorkspace === 'PENERIMAAN' ? 'Penerimaan' : 'Finansial', title: 'Rekonsiliasi Rekening Bank' };
   }
   if (path.startsWith('/accounting')) {
     return { section: 'Finansial', title: 'Akuntansi & Jurnal Umum' };
@@ -78,9 +84,16 @@ const businessUnits = ref<any[]>([]);
 const fiscalPeriods = ref<any[]>([]);
 
 const activeFiscalPeriod = computed(() => {
+  if (auth.activePeriod?.code) return auth.activePeriod;
   if (!fiscalPeriods.value || fiscalPeriods.value.length === 0) return null;
-  const open = fiscalPeriods.value.find((p) => p.status === 'OPEN');
-  return open || fiscalPeriods.value[0];
+  const nowMs = Date.now();
+  const openList = fiscalPeriods.value.filter((p) => p.status === 'OPEN' && !p.isClosed);
+  const covering = openList
+    .filter((p) => new Date(p.startDate).getTime() <= nowMs && new Date(p.endDate).getTime() >= nowMs)
+    .sort((a, b) => (new Date(a.endDate).getTime() - new Date(a.startDate).getTime()) - (new Date(b.endDate).getTime() - new Date(b.startDate).getTime()));
+  if (covering.length > 0) return covering[0];
+  const monthly = openList.find((p) => String(p.code || '').startsWith('FP-'));
+  return monthly || openList[0] || fiscalPeriods.value[0];
 });
 
 function getFiscalBadgeClass(status: string) {
@@ -98,13 +111,14 @@ function getFiscalBadgeClass(status: string) {
 
 function getFiscalPeriodTooltip(period: any) {
   if (!period) return '';
+  const code = period.code || period.periodCode || '';
   if (period.status === 'OPEN') {
-    return `Periode Fiskal: ${period.name} (${period.periodCode}) — Status OPEN: Seluruh transaksi diizinkan.`;
+    return `Periode Fiskal: ${period.name} (${code}) - Status OPEN: Seluruh transaksi diizinkan.`;
   }
   if (period.status === 'LOCKED') {
-    return `Periode Fiskal: ${period.name} (${period.periodCode}) — Status LOCKED: Terkunci sementara untuk rekonsiliasi & tutup buku.`;
+    return `Periode Fiskal: ${period.name} (${code}) - Status LOCKED: Terkunci sementara untuk rekonsiliasi & tutup buku.`;
   }
-  return `Periode Fiskal: ${period.name} (${period.periodCode}) — Status CLOSED: Ditutup permanen untuk audit.`;
+  return `Periode Fiskal: ${period.name} (${code}) - Status CLOSED: Ditutup permanen untuk audit.`;
 }
 
 // Provide open AI assistant action to child views like AppsLauncherView
@@ -119,13 +133,41 @@ watch(sidebarCollapsed, (val) => {
   }
 });
 
-// Close drawers and menus on route navigation
-watch(() => route.path, () => {
-  mobileNavOpen.value = false;
-  notifDrawerOpen.value = false;
-  profileMenuOpen.value = false;
-  unitDropdownOpen.value = false;
-});
+// Close drawers and menus on route navigation + sync workspace context
+watch(
+  () => route.path,
+  (newPath) => {
+    mobileNavOpen.value = false;
+    notifDrawerOpen.value = false;
+    profileMenuOpen.value = false;
+    unitDropdownOpen.value = false;
+    if (auth.activeWorkspace === 'GATEWAY') {
+      if ((newPath.startsWith('/revenue') || newPath.startsWith('/penerimaan')) && auth.canAccessPenerimaan) {
+        auth.setWorkspace('PENERIMAAN');
+      } else if (
+        (newPath.startsWith('/budgets') ||
+          newPath.startsWith('/procurement') ||
+          newPath.startsWith('/petty-cash') ||
+          newPath.startsWith('/hris') ||
+          newPath.startsWith('/assets')) &&
+        auth.canAccessPengeluaran
+      ) {
+        auth.setWorkspace('PENGELUARAN');
+      }
+    }
+  }
+);
+
+function goToGatewayHome() {
+  auth.resetWorkspace();
+  router.push('/');
+}
+
+function switchHeaderWorkspace(ws: 'PENERIMAAN' | 'PENGELUARAN') {
+  if (auth.setWorkspace(ws)) {
+    router.push({ path: '/', query: { domain: ws.toLowerCase() } });
+  }
+}
 
 // Prevent body scroll when mobile drawer is open
 watch(mobileNavOpen, (isOpen) => {
@@ -310,6 +352,16 @@ async function openNotifications() {
   }
 }
 
+async function markAllNotificationsRead() {
+  try {
+    await apiFetch('/reports/notifications/read-all', { method: 'PATCH' });
+    notifications.value = notifications.value.map((n) => ({ ...n, isRead: true }));
+    auth.unreadNotifications = 0;
+  } catch {
+    // Non-blocking
+  }
+}
+
 async function markRead(notif: any) {
   if (!notif.isRead) {
     await apiFetch(`/reports/notifications/${notif.id}/read`, { method: 'PATCH' });
@@ -348,12 +400,13 @@ onUnmounted(() => {
     <!-- Top Modern Adaptive Glass Navbar (Linear / Stripe Style) -->
     <header class="top-header" :class="{ 'is-launcher-header': isHomeLauncher }">
       <div class="header-left-cluster">
-        <!-- Mobile Sidebar Hamburger Toggle (< 900px) -->
+        <!-- Mobile Menu Toggle (< 840px) -->
         <button
           type="button"
           class="mobile-menu-toggle-btn"
+          title="Buka Menu Modul"
           aria-label="Buka Menu Navigasi"
-          @click="mobileNavOpen = true"
+          @click="appLauncherOpen = true"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="3" y1="12" x2="21" y2="12"></line>
@@ -369,15 +422,45 @@ onUnmounted(() => {
           <span class="nav-brand-pill desktop-only">FINANCE</span>
         </div>
 
-        <!-- Dynamic Breadcrumb Navigation saat di dalam Modul Kerja -->
+        <!-- Dynamic Breadcrumb Navigation + Domain Workspace Switcher saat di dalam Modul Kerja -->
         <nav v-else class="nav-breadcrumb-trail" aria-label="Breadcrumb Navigasi">
-          <router-link to="/" class="bc-crumb-link" title="Kembali ke Menu Aplikasi">
+          <button
+            type="button"
+            class="bc-crumb-link bc-gateway-btn"
+            title="Kembali ke Gerbang Utama (Penerimaan / Pengeluaran)"
+            @click="goToGatewayHome"
+          >
             <img :src="logoPmoEmblem" alt="PMO UTama" class="bc-crumb-logo" />
-            <span class="bc-crumb-text hide-on-mobile">PMO UTama</span>
-          </router-link>
-          <span class="bc-sep hide-on-mobile">/</span>
-          <span class="bc-section hide-on-tablet">{{ currentModuleContext.section }}</span>
-          <span v-if="currentModuleContext.title !== currentModuleContext.section" class="bc-sep hide-on-tablet">/</span>
+            <span class="bc-crumb-text hide-on-mobile">Gerbang Utama</span>
+          </button>
+
+          <div
+            v-if="auth.canAccessPenerimaan || auth.canAccessPengeluaran"
+            class="header-ws-switcher hide-on-mobile"
+            role="group"
+            aria-label="Pindah Ruang Kerja"
+          >
+            <button
+              v-if="auth.canAccessPenerimaan"
+              type="button"
+              class="hws-pill"
+              :class="{ 'is-active-in': auth.activeWorkspace === 'PENERIMAAN' }"
+              @click="switchHeaderWorkspace('PENERIMAAN')"
+            >
+              Penerimaan
+            </button>
+            <button
+              v-if="auth.canAccessPengeluaran"
+              type="button"
+              class="hws-pill"
+              :class="{ 'is-active-out': auth.activeWorkspace === 'PENGELUARAN' }"
+              @click="switchHeaderWorkspace('PENGELUARAN')"
+            >
+              Pengeluaran
+            </button>
+          </div>
+
+          <span class="bc-sep hide-on-tablet">/</span>
           <span class="bc-title">{{ currentModuleContext.title }}</span>
         </nav>
       </div>
@@ -396,14 +479,16 @@ onUnmounted(() => {
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <span class="nav-search-text">Cari aset, SPJ, PO, staf (⌘K)...</span>
+          <span class="nav-search-text">
+            {{ auth.activeWorkspace === 'PENERIMAAN' || !auth.canAccessPengeluaran ? 'Cari kwitansi, invoice, COA...' : 'Cari modul, PO, SPJ...' }}
+          </span>
           <kbd class="nav-search-kbd">⌘K</kbd>
         </div>
       </div>
 
       <!-- Right Corporate Utilities -->
       <div class="header-right-actions">
-        <!-- Compact Search Icon Trigger on Mobile/Tablet (< 1024px) -->
+        <!-- Compact Search Icon Trigger on Mobile/Tablet (< 1080px) -->
         <button
           v-if="!isHomeLauncher"
           type="button"
@@ -418,14 +503,14 @@ onUnmounted(() => {
           </svg>
         </button>
 
-        <!-- Real-Time Fiscal Period Status Pill -->
+        <!-- Real-Time Fiscal Period Status Pill (Compact Code; Full Name in Tooltip) -->
         <div
           v-if="!isHomeLauncher && activeFiscalPeriod"
-          class="custom-fiscal-pill"
+          class="custom-fiscal-pill hide-on-mobile"
           :title="getFiscalPeriodTooltip(activeFiscalPeriod)"
         >
           <span class="fiscal-icon">📅</span>
-          <span class="fiscal-name hide-on-tablet">{{ activeFiscalPeriod.name || activeFiscalPeriod.periodCode }}</span>
+          <span class="fiscal-name hide-on-tablet">{{ activeFiscalPeriod.code || activeFiscalPeriod.periodCode || activeFiscalPeriod.name }}</span>
           <span class="fiscal-badge" :class="getFiscalBadgeClass(activeFiscalPeriod.status)">
             {{ activeFiscalPeriod.status }}
           </span>
@@ -628,19 +713,41 @@ onUnmounted(() => {
       <!-- Notification Drawer -->
       <div v-if="notifDrawerOpen" class="notif-drawer-box panel panel-elevated" role="region" aria-label="Pusat Notifikasi">
         <div class="drawer-header">
-          <h3>Pusat Notifikasi & Peringatan</h3>
-          <button type="button" class="btn btn-sm btn-ghost" @click="notifDrawerOpen = false">✕</button>
+          <div class="drawer-title-wrap">
+            <h3>Pusat Notifikasi</h3>
+            <span v-if="auth.unreadNotifications > 0" class="drawer-unread-pill">{{ auth.unreadNotifications }} baru</span>
+          </div>
+          <div class="drawer-header-actions">
+            <button
+              v-if="auth.unreadNotifications > 0"
+              type="button"
+              class="notif-mark-all-btn"
+              @click="markAllNotificationsRead"
+            >
+              Tandai dibaca
+            </button>
+            <button type="button" class="btn btn-sm btn-ghost" @click="notifDrawerOpen = false">✕</button>
+          </div>
         </div>
         <div v-if="notifications.length === 0" class="empty-notif">Belum ada notifikasi baru untuk peran Anda.</div>
         <ul v-else class="notif-list-items">
-          <li v-for="n in notifications" :key="n.id" class="notif-item-row" :class="{ unread: !n.isRead }">
-            <div>
-              <strong>{{ n.title }}</strong>
+          <li
+            v-for="n in notifications"
+            :key="n.id"
+            class="notif-item-row"
+            :class="{ unread: !n.isRead, 'sev-warning': n.severity === 'WARNING' }"
+          >
+            <div class="notif-item-body">
+              <div class="notif-title-line">
+                <span v-if="!n.isRead" class="notif-unread-dot" aria-label="Belum dibaca"></span>
+                <span v-if="n.severity === 'WARNING'" class="notif-sev-tag">Pengingat</span>
+                <strong>{{ n.title }}</strong>
+              </div>
               <p>{{ n.message }}</p>
               <small>{{ formatDateTime(n.createdAt) }}</small>
             </div>
-            <button type="button" class="btn btn-sm btn-primary" @click="markRead(n)">
-              Buka
+            <button type="button" class="notif-open-btn" @click="markRead(n)">
+              Lihat &rarr;
             </button>
           </li>
         </ul>
@@ -798,6 +905,53 @@ onUnmounted(() => {
 
 .poital-shell.is-odoo-launcher .mobile-toggle-btn {
   display: none !important;
+}
+
+.bc-gateway-btn {
+  background: transparent;
+  border: none;
+  padding: 4px 8px 4px 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-ws-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9999px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  margin-left: 4px;
+}
+
+.hws-pill {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.hws-pill:hover {
+  color: var(--text-primary);
+}
+
+.hws-pill.is-active-in {
+  background: #059669;
+  color: #ffffff;
+}
+
+.hws-pill.is-active-out {
+  background: #0b2144;
+  color: #ffffff;
 }
 
 .poital-shell {
@@ -1298,9 +1452,9 @@ onUnmounted(() => {
 .header-left-cluster {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  flex-shrink: 0;
+  flex: 0 1 auto;
 }
 
 .nav-icon-circle-btn {
@@ -1426,21 +1580,23 @@ onUnmounted(() => {
 
 /* Center Global Search / Fast Command Palette */
 .header-center-cluster {
-  flex: 1;
-  max-width: 360px;
+  flex: 1 1 150px;
+  max-width: 280px;
+  min-width: 0;
   display: flex;
   justify-content: center;
 }
 
 .nav-search-pill {
   width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 9999px;
-  padding: 6px 14px;
+  padding: 6px 12px;
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
   transition: all 140ms ease;
@@ -1480,7 +1636,7 @@ onUnmounted(() => {
 .header-right-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -1844,16 +2000,19 @@ onUnmounted(() => {
 
 /* Notification Drawer */
 .notif-drawer-box {
-  position: absolute;
-  top: 60px;
+  position: fixed;
+  top: 64px;
   right: 16px;
-  width: 360px;
+  width: 400px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 88px);
+  display: flex;
+  flex-direction: column;
   background: var(--bg-surface);
   border-radius: 16px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16);
-  padding: 18px;
-  z-index: 100;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.22);
+  padding: 16px;
+  z-index: 200;
   border: 1px solid var(--border-subtle);
 }
 
@@ -1861,38 +2020,154 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  gap: 8px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.drawer-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .drawer-header h3 {
   font-size: 0.92rem;
   font-weight: 700;
+  margin: 0;
 }
+
+.drawer-unread-pill {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: #dbeafe;
+  color: #034693;
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.drawer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notif-mark-all-btn {
+  border: none;
+  background: transparent;
+  color: #034693;
+  font-size: 0.74rem;
+  font-weight: 650;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.notif-mark-all-btn:hover { background: #eff6ff; }
 
 .empty-notif {
   color: var(--text-secondary);
   font-size: 0.82rem;
-  padding: 12px 0;
+  padding: 16px 0;
+  text-align: center;
 }
 
 .notif-list-items {
   list-style: none;
-  padding: 0;
+  padding: 0 2px 4px 0;
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow-y: auto;
 }
 
 .notif-item-row {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--bg-subtle);
-  font-size: 0.82rem;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid transparent;
+  font-size: 0.8rem;
+  opacity: 0.78;
+  transition: background 140ms ease, opacity 140ms ease;
+}
+.notif-item-row:hover { opacity: 1; }
+.notif-item-row.unread {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  border-left-color: #034693;
+  opacity: 1;
+}
+.notif-item-row.unread.sev-warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+  border-left-color: #d97706;
+}
+.notif-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.notif-item-body p {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.notif-item-body small {
+  font-size: 0.7rem;
+  color: #64748b;
+}
+.notif-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.notif-title-line strong {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+.notif-unread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #034693;
+  flex-shrink: 0;
+}
+.notif-item-row.sev-warning .notif-unread-dot {
+  background: #d97706;
+}
+.notif-sev-tag {
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.65rem;
+  font-weight: 750;
+}
+.notif-open-btn {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0b2144;
+  border-radius: 9999px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.notif-open-btn:hover {
+  background: #0b2144;
+  color: #ffffff;
+  border-color: #0b2144;
 }
 
 /* Content Canvas */
@@ -1941,9 +2216,9 @@ onUnmounted(() => {
   }
 
   .poital-shell {
-    padding: 10px 12px;
+    padding: 0;
     flex-direction: column;
-    gap: 12px;
+    gap: 0;
   }
 
   .mobile-nav-backdrop {
@@ -2000,105 +2275,6 @@ onUnmounted(() => {
 
 }
 
-/* Responsive Navbar & Shell Reflow */
-@media (max-width: 1279px) {
-  .desktop-xl-only {
-    display: none !important;
-  }
-  .nav-search-pill {
-    width: 200px;
-  }
-}
-
-@media (max-width: 1099px) {
-  .hide-on-tablet {
-    display: none !important;
-  }
-  .custom-unit-btn {
-    padding: 6px 8px;
-  }
-  .nav-user-capsule {
-    padding: 0;
-    border: none;
-    background: transparent;
-    box-shadow: none;
-  }
-  .nav-user-capsule:hover,
-  .nav-user-capsule.is-active {
-    background: transparent;
-    border: none;
-  }
-}
-
-@media (max-width: 1023px) {
-  .desktop-search {
-    display: none !important;
-  }
-  .header-center-cluster {
-    display: none !important;
-  }
-  .mobile-search-btn {
-    display: flex !important;
-  }
-  .top-header {
-    padding: 8px 18px;
-    gap: 12px;
-  }
-}
-
-@media (max-width: 899px) {
-  .mobile-menu-toggle-btn {
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .hide-on-mobile {
-    display: none !important;
-  }
-  .top-header {
-    padding: 8px 12px;
-    gap: 8px;
-  }
-  .header-left-cluster {
-    gap: 8px;
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-  .header-right-actions {
-    gap: 6px;
-    flex-shrink: 0;
-  }
-  .bc-title {
-    max-width: 170px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-}
-
-@media (max-width: 600px) {
-  .top-header {
-    padding: 8px 10px;
-    gap: 6px;
-  }
-  .bc-title {
-    max-width: 130px;
-    font-size: 0.8rem;
-  }
-  .nav-icon-circle-btn {
-    width: 34px;
-    height: 34px;
-  }
-}
-
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -2143,14 +2319,15 @@ onUnmounted(() => {
 }
 
 .nav-search-pill {
-  width: 260px;
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
-  padding: 6px 14px;
+  padding: 6px 12px;
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
   transition: all 140ms ease;
@@ -2217,6 +2394,9 @@ onUnmounted(() => {
 
 .fiscal-name {
   white-space: nowrap;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fiscal-badge {
@@ -2250,18 +2430,18 @@ onUnmounted(() => {
 .custom-unit-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 12px;
+  gap: 6px;
+  padding: 6px 10px;
   border-radius: var(--radius-md);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 140ms ease;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
-  max-width: 190px;
+  max-width: 160px;
 }
 
 .custom-unit-btn:hover,
@@ -2460,6 +2640,10 @@ onUnmounted(() => {
   color: var(--primary);
   font-weight: 700;
   font-size: 0.84rem;
+  max-width: 185px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* User Capsule */
@@ -2643,5 +2827,125 @@ onUnmounted(() => {
 .toast-pop-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(16px) scale(0.96);
+}
+
+/* Authoritative Responsive Navbar & Shell Reflow (Placed Last in Cascade) */
+@media (max-width: 1360px) {
+  .top-header {
+    padding: 9px 18px;
+    gap: 10px;
+  }
+  .header-center-cluster {
+    max-width: 220px;
+  }
+  .bc-title {
+    max-width: 145px;
+  }
+  .custom-unit-btn {
+    max-width: 140px;
+  }
+}
+
+@media (max-width: 1220px) {
+  .desktop-xl-only,
+  .bc-crumb-text,
+  .nav-ai-pill-btn {
+    display: none !important;
+  }
+  .bc-gateway-btn {
+    padding: 4px 2px 4px 0;
+  }
+  .header-center-cluster {
+    max-width: 190px;
+  }
+  .custom-unit-btn {
+    max-width: 130px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .desktop-search,
+  .header-center-cluster,
+  .hide-on-tablet {
+    display: none !important;
+  }
+  .mobile-search-btn {
+    display: flex !important;
+  }
+  .custom-unit-btn {
+    padding: 6px 8px;
+    max-width: none;
+  }
+  .nav-user-capsule {
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+  }
+  .nav-user-capsule:hover,
+  .nav-user-capsule.is-active {
+    background: transparent;
+    border: none;
+  }
+  .top-header {
+    padding: 8px 16px;
+    gap: 10px;
+  }
+  .poital-shell:not(.is-odoo-launcher) .workspace-area {
+    padding: 18px 20px 96px;
+  }
+}
+
+@media (max-width: 840px) {
+  .mobile-menu-toggle-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .hide-on-mobile {
+    display: none !important;
+  }
+  .top-header {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .header-left-cluster {
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .header-right-actions {
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .bc-title {
+    max-width: 165px;
+  }
+}
+
+@media (max-width: 600px) {
+  .top-header {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  .poital-shell:not(.is-odoo-launcher) .workspace-area {
+    padding: 14px 12px 92px;
+  }
+  .bc-title {
+    max-width: 120px;
+    font-size: 0.8rem;
+  }
+  .nav-icon-circle-btn {
+    width: 34px;
+    height: 34px;
+  }
 }
 </style>

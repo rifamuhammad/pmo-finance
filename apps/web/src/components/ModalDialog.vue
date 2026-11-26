@@ -13,6 +13,9 @@ const emit = defineEmits<{
 
 function onKeydown(e: KeyboardEvent) {
   if (props.open && e.key === 'Escape') {
+    if (typeof document !== 'undefined' && document.querySelector('.p-select-overlay, .p-popover')) {
+      return;
+    }
     emit('close');
   }
 }
