@@ -4135,6 +4135,162 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
       expect(parseXlsxRes.body.data.rows[1].direction).toBe('DEBIT');
     });
 
+    it('manages Penerimaan Master Data (overview, customer update, master config sync) and locks Auto-Fit Tax on invoices & direct receipts', async () => {
+      const ym = new Date().toISOString().slice(0, 7);
+
+      // 1. Master Overview returns all 5 Master Data pillars
+      const [overviewRes, prodsRes] = await Promise.all([
+        request(app).get('/api/v1/revenue/master/overview').set('Authorization', `Bearer ${financeToken}`),
+        request(app).get('/api/v1/revenue/products').set('Authorization', `Bearer ${financeToken}`),
+      ]);
+      expect(overviewRes.status).toBe(200);
+      expect(prodsRes.status).toBe(200);
+      expect(overviewRes.body.data.businessUnits.length).toBeGreaterThanOrEqual(4);
+      expect(prodsRes.body.data.length).toBeGreaterThanOrEqual(80);
+      const revCoas = overviewRes.body.data.coaAccounts.filter((c: any) => c.type === 'REVENUE');
+      expect(revCoas.length).toBe(18);
+      expect(overviewRes.body.data.taxSchemes.length).toBe(7);
+      expect(overviewRes.body.data.collectorProfiles.length).toBe(5);
+      expect(overviewRes.body.data.config.taxRemittanceBank.accountNo).toBe('1173.01.000574.30.4');
+
+      // 2. Edit Customer via PUT /revenue/customers/:id
+      const updCust = await request(app)
+        .put(`/api/v1/revenue/customers/${testCustomerId}`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          name: `Universitas Uji PTNBH ${runTag}`,
+          organizationType: 'GOVERNMENT',
+          taxCollectorProfile: 'FP_020_INSTANSI',
+          contactPerson: 'Kepala Bagian Keuangan',
+          phone: '021-7490999',
+        });
+      expect(updCust.status).toBe(200);
+      expect(updCust.body.data.contactPerson).toBe('Kepala Bagian Keuangan');
+      expect(updCust.body.data.taxCollectorProfile).toBe('FP_020_INSTANSI');
+
+      // 3. RBAC check on PUT /revenue/master/config + live sync to tax-recap (then restore original)
+      const opLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: 'penerimaan@pmoutama.demo.id', password: 'DemoErp!2026' });
+      const opToken = opLogin.body.data.token;
+
+      const forbiddenCfg = await request(app)
+        .put('/api/v1/revenue/master/config')
+        .set('Authorization', `Bearer ${opToken}`)
+        .send({
+          signatory: { managerName: 'Unauthorized Edit' },
+        });
+      expect(forbiddenCfg.status).toBe(403);
+
+      const origConfig = overviewRes.body.data.config;
+      const testRabMice = 20000000000;
+      const updCfg = await request(app)
+        .put('/api/v1/revenue/master/config')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          signatory: {
+            ...origConfig.signatory,
+            managerName: `Manajer Uji ${runTag}`,
+          },
+          rabTargets: {
+            ...origConfig.rabTargets,
+            'BU-MICE': testRabMice,
+          },
+        });
+      expect(updCfg.status).toBe(200);
+      expect(updCfg.body.data.rabTargets['BU-MICE']).toBe(testRabMice);
+
+      const syncedRecap = await request(app)
+        .get(`/api/v1/revenue/tax-recap?month=${ym}`)
+        .set('Authorization', `Bearer ${financeToken}`);
+      expect(syncedRecap.status).toBe(200);
+      const syncedMice = syncedRecap.body.data.byUnit.find((u: any) => u.unitCode === 'BU-MICE');
+      expect(syncedMice?.targetRabAnnual).toBe(testRabMice);
+      expect(syncedRecap.body.data.withdrawal.signatory.managerName).toBe(`Manajer Uji ${runTag}`);
+
+      // Restore original master config immediately
+      const restoreCfg = await request(app)
+        .put('/api/v1/revenue/master/config')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          taxRemittanceBank: origConfig.taxRemittanceBank,
+          signatory: origConfig.signatory,
+          rabTargets: origConfig.rabTargets,
+        });
+      expect(restoreCfg.status).toBe(200);
+
+      // 4. Auto-Fit Locked Tax on Invoice ignores spoofed taxScheme/taxCollectorProfile
+      const autoInv = await request(app)
+        .post('/api/v1/revenue/invoices')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          customerId: testCustomerId,
+          businessUnitId: unitItsId,
+          invoiceType: 'PELUNASAN',
+          activityTitle: `Uji AutoFit Invoice ${runTag}`,
+          rincianLabel: 'Jasa ITS',
+          revenueAccountCode: '420301040200',
+          autoFitTax: true,
+          taxScheme: 'BEBAS_PAJAK', // Spoofed; must be locked to PPN12_PPH23 by COA 420301040200
+          taxInclusive: false, // Spoofed; must be locked to true
+          taxCollectorProfile: 'FP_040_UMUM', // Spoofed; must be locked to FP_020_INSTANSI from testCustomerId
+          lines: [{ description: 'Jasa Sistem Informasi', quantity: 1, unitPrice: 11100000 }],
+        });
+      expect(autoInv.status).toBe(201);
+      expect(autoInv.body.data.taxScheme).toBe('PPN12_PPH23');
+      expect(autoInv.body.data.taxCollectorProfile).toBe('FP_020_INSTANSI');
+      expect(autoInv.body.data.taxInclusive).toBe(true);
+
+      // 5. Auto-Fit Locked Tax on Direct Receipt (Kwitansi Wisma -> PB1_10 + Customer FP_020_INSTANSI)
+      const autoPay = await request(app)
+        .post('/api/v1/revenue/direct-receipts')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          businessUnitId: unitMiceId,
+          customerId: testCustomerId,
+          receiptType: 'KUITANSI',
+          paymentStage: 'PELUNASAN',
+          method: 'BANK_TRANSFER',
+          payerName: `Universitas Uji PTNBH ${runTag}`,
+          activityTitle: `Uji AutoFit Wisma ${runTag}`,
+          rincianLabel: 'Kamar Wisma',
+          revenueAccountCode: '420301070400',
+          autoFitTax: true,
+          taxScheme: 'BEBAS_PAJAK', // Spoofed; must be locked to PB1_10 by COA 420301070400 (Wisma)
+          taxCollectorProfile: 'FP_040_UMUM', // Spoofed; must be locked to FP_020_INSTANSI
+          grossAmount: 1100000,
+          referenceNo: `AUTOFIT-${runTag}`,
+        });
+      expect(autoPay.status).toBe(201);
+      expect(autoPay.body.data.taxScheme).toBe('PB1_10');
+      expect(autoPay.body.data.taxCollectorProfile).toBe('FP_020_INSTANSI');
+      expect(Number(autoPay.body.data.pb1Amount)).toBe(100000);
+
+      // 6. Auto-Fit Locked Tax on Tanda Terima (Klinik -> BEBAS_PAJAK + INTERNAL_UT)
+      const autoTt = await request(app)
+        .post('/api/v1/revenue/direct-receipts')
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({
+          businessUnitId: unitKlinikId,
+          receiptType: 'TANDA_TERIMA',
+          paymentStage: 'PELUNASAN',
+          method: 'BANK_TRANSFER',
+          payerName: `Unit Internal UT ${runTag}`,
+          activityTitle: `Uji AutoFit Tanda Terima Klinik ${runTag}`,
+          rincianLabel: 'Poli Umum',
+          revenueAccountCode: '420301060100',
+          autoFitTax: true,
+          taxScheme: 'PPN12_PPH23', // Spoofed; must be locked to BEBAS_PAJAK
+          taxCollectorProfile: 'FP_040_UMUM', // Spoofed; must be locked to INTERNAL_UT
+          grossAmount: 500000,
+          referenceNo: `AUTOFIT-TT-${runTag}`,
+        });
+      expect(autoTt.status).toBe(201);
+      expect(autoTt.body.data.taxScheme).toBe('BEBAS_PAJAK');
+      expect(autoTt.body.data.taxCollectorProfile).toBe('INTERNAL_UT');
+      expect(Number(autoTt.body.data.ppnAmount)).toBe(0);
+    });
+
     afterAll(async () => {
       // Self-clean Section 28 test data so repeated test runs do not clutter Buku Harian
       try {
@@ -4142,7 +4298,7 @@ describe('ERP Keuangan & Operasional PMO UTama - Comprehensive Integration Suite
           where: {
             OR: [
               { customerId: testCustomerId },
-              { referenceNo: { in: [`WSM-${runTag}`, `KLN-${runTag}`, `APR-${runTag}`] } },
+              { referenceNo: { in: [`WSM-${runTag}`, `KLN-${runTag}`, `APR-${runTag}`, `AUTOFIT-${runTag}`, `AUTOFIT-TT-${runTag}`] } },
               { payerName: { in: ['Tamu CSV 1', 'Pasien Klinik CSV'] }, createdAt: { gte: new Date(Date.now() - 120000) } },
             ],
           },

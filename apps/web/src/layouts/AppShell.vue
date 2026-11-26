@@ -49,23 +49,32 @@ const cmdPaletteOpen = ref(false);
 const notifications = ref<any[]>([]);
 const fiscalPeriods = ref<any[]>([]);
 
-// Expanded accordion groups (open by default for Penerimaan so senior managers see every submenu clearly)
-const openGroups = ref<Record<string, boolean>>({
-  'rev-transaksi': true,
-  'rev-pembukuan': true,
-  'rev-laporan': true,
-  'out-pengadaan': true,
-});
+// Exclusive accordion state: only one sidebar group stays open at a time
+const openGroups = ref<Record<string, boolean>>({});
 
 const isGatewayScreen = computed(() => route.path === '/');
+
+function setSingleOpenGroup(groupId: string | null) {
+  openGroups.value = groupId ? { [groupId]: true } : {};
+}
+
+function getActiveGroupForPath(p: string): string | null {
+  if (p.startsWith('/revenue')) return 'rev-transaksi';
+  if (p.startsWith('/penerimaan/pembukuan')) return 'rev-pembukuan';
+  if (p.startsWith('/penerimaan/laporan')) return 'rev-laporan';
+  if (p.startsWith('/penerimaan/master')) return 'rev-master';
+  if (p.startsWith('/procurement') || p.startsWith('/petty-cash')) return 'out-pengadaan';
+  return null;
+}
 
 function toggleGroup(groupId: string) {
   if (sidebarCollapsed.value) {
     sidebarCollapsed.value = false;
-    openGroups.value[groupId] = true;
+    setSingleOpenGroup(groupId);
     return;
   }
-  openGroups.value[groupId] = !openGroups.value[groupId];
+  const willOpen = !openGroups.value[groupId];
+  setSingleOpenGroup(willOpen ? groupId : null);
 }
 
 function toggleDesktopSidebar() {
@@ -151,12 +160,6 @@ const sidebarSections = computed<SidebarSection[]>(() => {
                 to: '/revenue?tab=invoices',
                 permission: 'revenue:view',
               },
-              {
-                id: 'rev-layanan',
-                label: 'Katalog Layanan & Tarif',
-                to: '/revenue?tab=layanan',
-                permission: 'revenue:view',
-              },
             ],
           },
           {
@@ -220,6 +223,50 @@ const sidebarSections = computed<SidebarSection[]>(() => {
                 id: 'laporan-aging',
                 label: 'Aging Piutang Penerimaan',
                 to: '/penerimaan/laporan?section=aging',
+                permission: 'revenue:view',
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'master-penerimaan',
+        title: 'MASTER DATA',
+        items: [
+          {
+            id: 'rev-master',
+            label: 'Master Penerimaan',
+            icon: 'database',
+            permission: 'revenue:view',
+            children: [
+              {
+                id: 'master-layanan',
+                label: 'Layanan & Tarif',
+                to: '/penerimaan/master/layanan',
+                permission: 'revenue:view',
+              },
+              {
+                id: 'master-pelanggan',
+                label: 'Pelanggan & Instansi',
+                to: '/penerimaan/master/pelanggan',
+                permission: 'revenue:view',
+              },
+              {
+                id: 'master-coa-pajak',
+                label: 'Akun COA & Pajak',
+                to: '/penerimaan/master/coa-pajak',
+                permission: 'revenue:view',
+              },
+              {
+                id: 'master-bank-pejabat',
+                label: 'Bank & Penandatangan',
+                to: '/penerimaan/master/bank-pejabat',
+                permission: 'revenue:view',
+              },
+              {
+                id: 'master-target-rab',
+                label: 'Target RAB Pendapatan',
+                to: '/penerimaan/master/target-rab',
                 permission: 'revenue:view',
               },
             ],
@@ -432,6 +479,16 @@ const breadcrumbItems = computed<Array<{ label: string; to?: string }>>(() => {
     base.push({ label: sec === 'aging' ? 'Aging Piutang' : 'Realisasi & Target RAB' });
     return base;
   }
+  if (route.path.startsWith('/penerimaan/master')) {
+    const sec = String(route.params.section || route.query.section || 'layanan');
+    base.push({ label: 'Master Data' });
+    if (sec === 'pelanggan') base.push({ label: 'Pelanggan & Instansi' });
+    else if (sec === 'coa-pajak') base.push({ label: 'Akun COA & Pajak' });
+    else if (sec === 'bank-pejabat') base.push({ label: 'Bank & Penandatangan' });
+    else if (sec === 'target-rab') base.push({ label: 'Target RAB Pendapatan' });
+    else base.push({ label: 'Layanan & Tarif' });
+    return base;
+  }
   base.push({ label: String(route.meta.title || 'Modul') });
   return base;
 });
@@ -568,6 +625,7 @@ watch(
     if (p === '/revenue' || p.startsWith('/penerimaan')) {
       if (auth.canAccessPenerimaan) auth.setWorkspace('PENERIMAAN');
     }
+    setSingleOpenGroup(getActiveGroupForPath(p));
   },
   { immediate: true }
 );
@@ -695,6 +753,7 @@ onUnmounted(() => {
                     <svg v-if="item.icon === 'receipt'" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 1 1V2H4z"/><path d="M8 7h8"/><path d="M8 11h8"/><path d="M8 15h5"/></svg>
                     <svg v-else-if="item.icon === 'book'" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                     <svg v-else-if="item.icon === 'chart'" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                    <svg v-else-if="item.icon === 'database'" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
                     <svg v-else width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
                   </span>
                   <span v-if="!sidebarCollapsed" class="sb-label">{{ item.label }}</span>

@@ -10,6 +10,7 @@ import ProcurementView from '../modules/ProcurementView.vue';
 import RevenueCashierView from '../modules/RevenueCashierView.vue';
 import PenerimaanPembukuanView from '../modules/PenerimaanPembukuanView.vue';
 import PenerimaanLaporanView from '../modules/PenerimaanLaporanView.vue';
+import PenerimaanMasterView from '../modules/PenerimaanMasterView.vue';
 import ReconciliationView from '../modules/ReconciliationView.vue';
 import AccountingView from '../modules/AccountingView.vue';
 import ReportsStrategyView from '../modules/ReportsStrategyView.vue';
@@ -85,6 +86,12 @@ export const router = createRouter({
           name: 'penerimaan-laporan',
           component: PenerimaanLaporanView,
           meta: { title: 'Laporan Penerimaan & Aging Piutang', permission: 'revenue:view' },
+        },
+        {
+          path: 'penerimaan/master/:section?',
+          name: 'penerimaan-master',
+          component: PenerimaanMasterView,
+          meta: { title: 'Master Data Penerimaan', permission: 'revenue:view' },
         },
         {
           path: 'cashier',

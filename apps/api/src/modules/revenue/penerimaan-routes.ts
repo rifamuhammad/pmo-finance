@@ -120,6 +120,101 @@ const OFFICIAL_UNIT_RAB_TARGETS: Record<string, { unitName: string; annualTarget
   'BU-KLINIK': { unitName: 'Divisi Klinik Pratama', annualTarget: 1387750008, internalValuation: 0 },
 };
 
+const PENERIMAAN_MASTER_SETTING_KEY = 'PENERIMAAN_MASTER_CONFIG';
+
+interface PenerimaanMasterConfig {
+  taxRemittanceBank: {
+    bankLabel: string;
+    accountNo: string;
+    accountHolder: string;
+  };
+  signatory: {
+    managerTitle: string;
+    managerName: string;
+    managerNip: string;
+    headTitle: string;
+    headName: string;
+    headNip: string;
+    recipientTitle: string;
+    letterPrefix: string;
+  };
+  rabTargets: Record<string, number>;
+}
+
+const DEFAULT_PENERIMAAN_MASTER_CONFIG: PenerimaanMasterConfig = {
+  taxRemittanceBank: {
+    bankLabel: 'Bank BRI',
+    accountNo: '1173.01.000574.30.4',
+    accountHolder: 'PTNBH UT NON PPh 21',
+  },
+  signatory: {
+    managerTitle: 'Manajer Keuangan, Sumber Daya, dan Umum',
+    managerName: 'Husain Husin Mamonto, S.M.',
+    managerNip: 'NIP. 197506182003121002',
+    headTitle: 'Plh. Kepala Pusat Bisnis dan Investasi',
+    headName: 'Dr. Abdurrahman Rahim Thaha, M.A.B.',
+    headNip: 'NIP. 198612162022031003',
+    recipientTitle: 'Kepala Pusat Pengelolaan Keuangan, Universitas Terbuka',
+    letterPrefix: 'UN31.PMO/KU',
+  },
+  rabTargets: {
+    'BU-MICE': OFFICIAL_UNIT_RAB_TARGETS['BU-MICE'].annualTarget,
+    'BU-ITS': OFFICIAL_UNIT_RAB_TARGETS['BU-ITS'].annualTarget,
+    'BU-TCI': OFFICIAL_UNIT_RAB_TARGETS['BU-TCI'].annualTarget,
+    'BU-KLINIK': OFFICIAL_UNIT_RAB_TARGETS['BU-KLINIK'].annualTarget,
+  },
+};
+
+function getDefaultTaxSchemeForCoa(coaCode?: string | null, unitCode?: string | null): string {
+  const code = String(coaCode || '').trim();
+  if (code.startsWith('42030106') || unitCode === 'BU-KLINIK') return 'BEBAS_PAJAK';
+  if (code === '420301070400') return 'PB1_10';
+  if (code === '420301070100' || code === '420301070200') return 'PPN12_PPH4_2';
+  if (code === '420301070300' || code === '420301090100') return 'PPN12_PMK131';
+  if (
+    code.startsWith('42030101') ||
+    code.startsWith('42030102') ||
+    code.startsWith('42030103') ||
+    code.startsWith('42030104') ||
+    code.startsWith('42030105') ||
+    unitCode === 'BU-ITS' ||
+    unitCode === 'BU-TCI'
+  ) {
+    return 'PPN12_PPH23';
+  }
+  return 'PPN12_PMK131';
+}
+
+async function loadPenerimaanMasterConfig(): Promise<PenerimaanMasterConfig> {
+  try {
+    const row = await prisma.systemSetting.findUnique({ where: { key: PENERIMAAN_MASTER_SETTING_KEY } });
+    if (row?.value) {
+      const parsed = JSON.parse(row.value);
+      return {
+        taxRemittanceBank: {
+          ...DEFAULT_PENERIMAAN_MASTER_CONFIG.taxRemittanceBank,
+          ...(parsed.taxRemittanceBank || {}),
+        },
+        signatory: {
+          ...DEFAULT_PENERIMAAN_MASTER_CONFIG.signatory,
+          ...(parsed.signatory || {}),
+        },
+        rabTargets: {
+          ...DEFAULT_PENERIMAAN_MASTER_CONFIG.rabTargets,
+          ...(parsed.rabTargets || {}),
+        },
+      };
+    }
+  } catch {
+    // Fall back safely to official defaults
+  }
+  return {
+    taxRemittanceBank: { ...DEFAULT_PENERIMAAN_MASTER_CONFIG.taxRemittanceBank },
+    signatory: { ...DEFAULT_PENERIMAAN_MASTER_CONFIG.signatory },
+    rabTargets: { ...DEFAULT_PENERIMAAN_MASTER_CONFIG.rabTargets },
+  };
+}
+
 function inferPreferredMandiriCode(_unitCode?: string | null, _rincianOrTitle?: string | null): 'BNK-MDR-01' {
   return 'BNK-MDR-01'; // Rekening tunggal Bank Mandiri Penerimaan (164-00-2022-999-5)
 }
@@ -415,6 +510,7 @@ const updateProductSchema = z.object({
   revenueAccountCode: z.string().min(4).optional(),
   overtimeNote: z.string().nullable().optional(),
   freeFacilities: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
   reason: z.string().optional(),
 });
 
@@ -455,6 +551,7 @@ penerimaanRouter.patch('/products/:id', requirePermission('revenue:create'), asy
           ...(parsed.revenueAccountCode !== undefined ? { revenueAccountCode: parsed.revenueAccountCode.trim() } : {}),
           ...(parsed.overtimeNote !== undefined ? { overtimeNote: parsed.overtimeNote?.trim() || null } : {}),
           ...(parsed.freeFacilities !== undefined ? { freeFacilities: parsed.freeFacilities?.trim() || null } : {}),
+          ...(parsed.isActive !== undefined ? { isActive: parsed.isActive } : {}),
         },
         include: { businessUnit: true, priceHistories: { orderBy: { changedAt: 'desc' }, take: 5 } },
       });
@@ -558,6 +655,7 @@ const createOfficialInvoiceSchema = z.object({
   taxCollectorProfile: z
     .enum(['FP_040_UMUM', 'FP_020_INSTANSI', 'FP_030_BUMN', 'BADAN_POTONG_PPH', 'INTERNAL_UT'])
     .optional(),
+  autoFitTax: z.boolean().optional().default(false),
   discountPercent: z.number().min(0).max(100).default(0),
   discountAmount: z.number().nonnegative().default(0),
   dpPercent: z.number().min(0).max(100).default(0),
@@ -602,12 +700,22 @@ penerimaanRouter.post('/invoices', requirePermission('revenue:create'), async (r
       firstProd = await prisma.productService.findUnique({ where: { id: firstProdId } });
     }
 
-    const effectiveTaxScheme = normalizeTaxScheme(parsed.taxScheme || firstProd?.taxScheme || 'PPN12_PMK131');
-    const effectiveCollector = normalizeCollectorProfile(
-      parsed.taxCollectorProfile || customer.taxCollectorProfile || customer.organizationType
-    );
     const effectiveCoa =
-      parsed.revenueAccountCode?.trim() || firstProd?.revenueAccountCode || getDefaultRevenueCoaForUnit(unit.code);
+      (parsed.autoFitTax && firstProd?.revenueAccountCode) ||
+      parsed.revenueAccountCode?.trim() ||
+      firstProd?.revenueAccountCode ||
+      getDefaultRevenueCoaForUnit(unit.code);
+    const effectiveTaxScheme = parsed.autoFitTax
+      ? normalizeTaxScheme(firstProd?.taxScheme || getDefaultTaxSchemeForCoa(effectiveCoa, unit.code))
+      : normalizeTaxScheme(parsed.taxScheme || firstProd?.taxScheme || getDefaultTaxSchemeForCoa(effectiveCoa, unit.code));
+    const effectiveTaxInclusive = parsed.autoFitTax
+      ? firstProd
+        ? firstProd.taxInclusive !== false
+        : true
+      : parsed.taxInclusive;
+    const effectiveCollector = parsed.autoFitTax
+      ? normalizeCollectorProfile(customer.taxCollectorProfile || customer.organizationType)
+      : normalizeCollectorProfile(parsed.taxCollectorProfile || customer.taxCollectorProfile || customer.organizationType);
     const effectiveRincian =
       parsed.rincianLabel?.trim() || firstProd?.location || firstProd?.category || parsed.lines[0].description;
 
@@ -639,7 +747,7 @@ penerimaanRouter.post('/invoices', requirePermission('revenue:create'), async (r
     const tax = computePtnbhRevenueTax({
       amountAfterDiscount: taxableBasis,
       taxScheme: effectiveTaxScheme,
-      taxInclusive: parsed.taxInclusive,
+      taxInclusive: effectiveTaxInclusive,
       taxCollectorProfile: effectiveCollector,
     });
 
@@ -1360,6 +1468,7 @@ const directReceiptSchema = z.object({
   taxCollectorProfile: z
     .enum(['FP_040_UMUM', 'FP_020_INSTANSI', 'FP_030_BUMN', 'BADAN_POTONG_PPH', 'INTERNAL_UT'])
     .default('FP_040_UMUM'),
+  autoFitTax: z.boolean().optional().default(false),
   grossAmount: z.number().positive('Nominal masuk wajib lebih dari 0.'),
   feeAmount: z.number().nonnegative().default(0),
   overpaymentAmount: z.number().nonnegative().default(0),
@@ -1378,14 +1487,31 @@ async function recordSingleDirectReceipt(tx: any, parsed: z.infer<typeof directR
   const unit = await tx.businessUnit.findUnique({ where: { id: parsed.businessUnitId } });
   if (!unit) throw new AppError(404, 'UNIT_NOT_FOUND', 'Unit bisnis tidak ditemukan.');
 
-  const prod = parsed.productServiceId
-    ? await tx.productService.findUnique({ where: { id: parsed.productServiceId } })
-    : null;
+  const [prod, customer] = await Promise.all([
+    parsed.productServiceId
+      ? tx.productService.findUnique({ where: { id: parsed.productServiceId } })
+      : Promise.resolve(null),
+    parsed.customerId
+      ? tx.customer.findUnique({ where: { id: parsed.customerId } })
+      : Promise.resolve(null),
+  ]);
 
-  const taxScheme = normalizeTaxScheme(parsed.taxScheme || prod?.taxScheme || 'PPN12_PMK131');
-  const collector = normalizeCollectorProfile(parsed.taxCollectorProfile);
   const coaCode =
-    parsed.revenueAccountCode?.trim() || prod?.revenueAccountCode || getDefaultRevenueCoaForUnit(unit.code);
+    (parsed.autoFitTax && prod?.revenueAccountCode) ||
+    parsed.revenueAccountCode?.trim() ||
+    prod?.revenueAccountCode ||
+    getDefaultRevenueCoaForUnit(unit.code);
+  const taxScheme = parsed.autoFitTax
+    ? normalizeTaxScheme(prod?.taxScheme || getDefaultTaxSchemeForCoa(coaCode, unit.code))
+    : normalizeTaxScheme(parsed.taxScheme || prod?.taxScheme || getDefaultTaxSchemeForCoa(coaCode, unit.code));
+  const taxInclusive = parsed.autoFitTax ? (prod ? prod.taxInclusive !== false : true) : parsed.taxInclusive;
+  const collector = parsed.autoFitTax
+    ? normalizeCollectorProfile(
+        parsed.receiptType === 'TANDA_TERIMA'
+          ? 'INTERNAL_UT'
+          : customer?.taxCollectorProfile || customer?.organizationType || 'FP_040_UMUM'
+      )
+    : normalizeCollectorProfile(parsed.taxCollectorProfile);
 
   const overpayNum = Math.min(parsed.grossAmount, Math.round(parsed.overpaymentAmount || 0));
   const docBrutoBasis = Math.max(0, Math.round(parsed.grossAmount) - overpayNum);
@@ -1393,7 +1519,7 @@ async function recordSingleDirectReceipt(tx: any, parsed: z.infer<typeof directR
   const tax = computePtnbhRevenueTax({
     amountAfterDiscount: docBrutoBasis,
     taxScheme,
-    taxInclusive: parsed.taxInclusive,
+    taxInclusive,
     taxCollectorProfile: collector,
     taxAlreadyProcessed: parsed.taxAlreadyProcessed,
   });
@@ -2655,9 +2781,12 @@ async function loadMonthlyBukuHarianData(params: {
       realizationPercentMonthly: number;
     }
   >();
+  const masterConfig = await loadPenerimaanMasterConfig();
+
   // Pre-seed all 4 official operational units so Target RAB vs Realisasi is always visible when unfiltered
   if (!scopedUnitId) {
     for (const [uCode, meta] of Object.entries(OFFICIAL_UNIT_RAB_TARGETS)) {
+      const annualTarget = Number(masterConfig.rabTargets[uCode] ?? meta.annualTarget);
       unitMap.set(uCode, {
         unitCode: uCode,
         unitName: meta.unitName,
@@ -2668,8 +2797,8 @@ async function loadMonthlyBukuHarianData(params: {
         totalTaxUt: 0,
         totalOverpayment: 0,
         netClean: 0,
-        targetRabAnnual: meta.annualTarget,
-        targetRabMonthly: Math.round(meta.annualTarget / 12),
+        targetRabAnnual: annualTarget,
+        targetRabMonthly: Math.round(annualTarget / 12),
         realizationPercentAnnual: 0,
         realizationPercentMonthly: 0,
       });
@@ -2708,6 +2837,7 @@ async function loadMonthlyBukuHarianData(params: {
 
     if (!unitMap.has(r.businessUnitCode)) {
       const rabMeta = OFFICIAL_UNIT_RAB_TARGETS[r.businessUnitCode];
+      const annualTarget = Number(masterConfig.rabTargets[r.businessUnitCode] ?? rabMeta?.annualTarget ?? 0);
       unitMap.set(r.businessUnitCode, {
         unitCode: r.businessUnitCode,
         unitName: r.businessUnitName,
@@ -2718,8 +2848,8 @@ async function loadMonthlyBukuHarianData(params: {
         totalTaxUt: 0,
         totalOverpayment: 0,
         netClean: 0,
-        targetRabAnnual: rabMeta?.annualTarget || 0,
-        targetRabMonthly: rabMeta ? Math.round(rabMeta.annualTarget / 12) : 0,
+        targetRabAnnual: annualTarget,
+        targetRabMonthly: annualTarget > 0 ? Math.round(annualTarget / 12) : 0,
         realizationPercentAnnual: 0,
         realizationPercentMonthly: 0,
       });
@@ -2881,9 +3011,10 @@ async function loadMonthlyBukuHarianData(params: {
       sourceBankLabel: activeBankObj?.bankName || 'Bank Mandiri (Final) - Penerimaan Usaha Non Akademik',
       sourceBankAccountNo: activeBankObj?.accountNumberMasked || '164-00-2022-999-5',
       sourceBankAccountHolder: activeBankObj?.accountHolder || 'PTNBH UT .USAHA NON AKADEMIK',
-      targetTaxBankLabel: 'Bank BRI',
-      targetTaxAccountNo: '1173.01.000574.30.4',
-      targetTaxAccountHolder: 'PTNBH UT NON PPh 21',
+      targetTaxBankLabel: masterConfig.taxRemittanceBank.bankLabel,
+      targetTaxAccountNo: masterConfig.taxRemittanceBank.accountNo,
+      targetTaxAccountHolder: masterConfig.taxRemittanceBank.accountHolder,
+      signatory: masterConfig.signatory,
       coaColumns,
       rows: withdrawalRows,
       totalTaxWithdrawal,
@@ -3107,6 +3238,288 @@ penerimaanRouter.get('/aging/export.xlsx', requirePermission('revenue:view'), as
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="Aging-Penerimaan-${data.asOfDate}.xlsx"`);
     res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================================
+// 9. MASTER DATA PENERIMAAN OVERVIEW & PERSISTENT CONFIG (COA, PAJAK, BANK, PEJABAT, TARGET RAB)
+// ============================================================================
+const PENERIMAAN_TAX_SCHEMES_CATALOG = [
+  {
+    code: 'PB1_10',
+    label: 'PB1 10% (Kamar Wisma)',
+    formula: 'DPP = 10/11 × Bruto; PB1 = 10% × DPP',
+    appliesTo: 'Sewa Kamar Wisma (MICE)',
+  },
+  {
+    code: 'PPN12_PPH4_2',
+    label: 'PPN 12% (PMK 131) + PPh 4(2) 10%',
+    formula: 'Nilai Jual = 100/111 × Bruto; PPN = 12% × (11/12 × NJ); PPh 4(2) = 10% × NJ',
+    appliesTo: 'Sewa Gedung, UTCC, Ballroom, Ruang & Kios (MICE)',
+  },
+  {
+    code: 'PPN12_PMK131',
+    label: 'PPN 12% (DPP Nilai Lain PMK 131)',
+    formula: 'Nilai Jual = 100/111 × Bruto; DPP = 11/12 × NJ; PPN = 12% × DPP',
+    appliesTo: 'Sewa Peralatan, F&B, Catering & Pendapatan Lainnya (MICE)',
+  },
+  {
+    code: 'PPN12_PPH23',
+    label: 'PPN 12% + PPh 23 (2%)',
+    formula: 'PPN 12% (PMK 131) + PPh 23 = 2% × NJ (khusus pemotong badan/instansi/BUMN)',
+    appliesTo: 'Jasa TI / Hosting / Promise (ITS) & Pelatihan / Sertifikasi (TCI)',
+  },
+  {
+    code: 'PPN12_PPH23_15',
+    label: 'PPN 12% + PPh 23 (15%)',
+    formula: 'PPN 12% (PMK 131) + PPh 23 = 15% × NJ',
+    appliesTo: 'Royalti / Hadiah / Penghargaan (khusus)',
+  },
+  {
+    code: 'PPH21_5',
+    label: 'PPh 21 (5%)',
+    formula: 'PPh 21 = 5% × Bruto',
+    appliesTo: 'Honorarium / Jasa Perorangan tertentu',
+  },
+  {
+    code: 'BEBAS_PAJAK',
+    label: 'Bebas Pajak (0%)',
+    formula: 'Tanpa potongan PPN, PPh, maupun PB1',
+    appliesTo: 'Layanan Medis, BPJS, Mandiri Inhealth & MCU (Klinik Pratama)',
+  },
+];
+
+const PENERIMAAN_COLLECTOR_PROFILES_CATALOG = [
+  {
+    code: 'FP_040_UMUM',
+    fakturCode: '040',
+    label: 'Umum / Perorangan (FP 040)',
+    withholdingRule: 'PPN & PPh 4(2) dipungut & disetor oleh UT; PPh 23 tidak dipotong perorangan',
+  },
+  {
+    code: 'BADAN_POTONG_PPH',
+    fakturCode: '040',
+    label: 'Korporasi / Swasta Pemotong PPh (FP 040)',
+    withholdingRule: 'PPN dipungut UT; PPh 23 / PPh 4(2) dipotong & disetor klien (bukti potong)',
+  },
+  {
+    code: 'FP_020_INSTANSI',
+    fakturCode: '020',
+    label: 'Instansi Pemerintah / PTN (FP 020)',
+    withholdingRule: 'PPN & PPh dipungut/dipotong langsung oleh Bendahara Instansi',
+  },
+  {
+    code: 'FP_030_BUMN',
+    fakturCode: '030',
+    label: 'BUMN / WAPU (FP 030)',
+    withholdingRule: 'PPN & PPh dipungut/dipotong langsung oleh BUMN sebagai WAPU',
+  },
+  {
+    code: 'INTERNAL_UT',
+    fakturCode: 'INTERNAL',
+    label: 'Internal Satker Universitas Terbuka',
+    withholdingRule: 'Transaksi internal antar unit UT (Tanda Terima / non-pemungutan eksternal)',
+  },
+];
+
+function inferCoaUnitScope(code: string): string {
+  if (code.startsWith('42030107') || code === '420301090100') return 'MICE';
+  if (code.startsWith('42030106')) return 'KLINIK';
+  if (code.startsWith('42030104') || code.startsWith('42030105')) return 'ITS';
+  if (code.startsWith('42030101') || code.startsWith('42030102') || code.startsWith('42030103')) return 'TCI';
+  return 'UMUM';
+}
+
+penerimaanRouter.get('/master/overview', requirePermission('revenue:view'), async (req, res, next) => {
+  try {
+    const [config, coas, bankAccounts, units] = await Promise.all([
+      loadPenerimaanMasterConfig(),
+      prisma.chartOfAccount.findMany({
+        where: {
+          isActive: true,
+          OR: [
+            { type: 'REVENUE' },
+            { code: { in: ['110102010100', '110302030100', '110502020100', '210202010100', '210203010100', '210201010500', '210401020500', '210401020900'] } },
+          ],
+        },
+        orderBy: { code: 'asc' },
+      }),
+      prisma.bankAccount.findMany({
+        where: {
+          isActive: true,
+          OR: [{ code: { contains: 'MDR' } }, { glAccountCode: '110102010100' }],
+        },
+        include: { businessUnit: true },
+        orderBy: { code: 'asc' },
+      }),
+      prisma.businessUnit.findMany({
+        where: { code: { in: ['BU-MICE', 'BU-KLINIK', 'BU-ITS', 'BU-TCI'] } },
+        orderBy: { code: 'asc' },
+      }),
+    ]);
+
+    const unitOrder = ['BU-MICE', 'BU-KLINIK', 'BU-ITS', 'BU-TCI'];
+    const orderedUnits = [...units].sort((a, b) => unitOrder.indexOf(a.code) - unitOrder.indexOf(b.code));
+
+    res.json({
+      success: true,
+      data: {
+        config,
+        bankAccounts: bankAccounts.map((b) => ({
+          id: b.id,
+          code: b.code,
+          bankName: b.bankName,
+          accountNumberMasked: b.accountNumberMasked,
+          accountHolder: b.accountHolder,
+          glAccountCode: b.glAccountCode,
+          currentBalance: Number(b.currentBalance),
+          businessUnitCode: b.businessUnit?.code || 'PMO',
+          isActive: b.isActive,
+        })),
+        coaAccounts: coas.map((c) => ({
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          type: c.type,
+          normalBalance: c.normalBalance,
+          unitScope: c.type === 'REVENUE' ? inferCoaUnitScope(c.code) : 'PENDUKUNG',
+          defaultTaxScheme: c.type === 'REVENUE' ? getDefaultTaxSchemeForCoa(c.code, null) : null,
+        })),
+        taxSchemes: PENERIMAAN_TAX_SCHEMES_CATALOG,
+        collectorProfiles: PENERIMAAN_COLLECTOR_PROFILES_CATALOG,
+        businessUnits: orderedUnits.map((u) => {
+          const annualTarget = Number(config.rabTargets[u.code] ?? OFFICIAL_UNIT_RAB_TARGETS[u.code]?.annualTarget ?? 0);
+          return {
+            id: u.id,
+            code: u.code,
+            name: u.name,
+            annualTarget,
+            monthlyTarget: Math.round(annualTarget / 12),
+          };
+        }),
+      },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const updateMasterConfigSchema = z.object({
+  taxRemittanceBank: z
+    .object({
+      bankLabel: z.string().min(2),
+      accountNo: z.string().min(5),
+      accountHolder: z.string().min(3),
+    })
+    .optional(),
+  signatory: z
+    .object({
+      managerTitle: z.string().min(3),
+      managerName: z.string().min(3),
+      managerNip: z.string().min(3),
+      headTitle: z.string().min(3),
+      headName: z.string().min(3),
+      headNip: z.string().min(3),
+      recipientTitle: z.string().min(3),
+      letterPrefix: z.string().min(2),
+    })
+    .optional(),
+  rabTargets: z.record(z.string(), z.number().nonnegative()).optional(),
+  primaryBankAccount: z
+    .object({
+      id: z.string().min(1),
+      bankName: z.string().min(3),
+      accountNumberMasked: z.string().min(5),
+      accountHolder: z.string().min(3),
+    })
+    .optional(),
+});
+
+penerimaanRouter.put('/master/config', requirePermission('payment:approve'), async (req, res, next) => {
+  try {
+    const parsed = updateMasterConfigSchema.parse(req.body);
+    const current = await loadPenerimaanMasterConfig();
+
+    const nextConfig: PenerimaanMasterConfig = {
+      taxRemittanceBank: parsed.taxRemittanceBank
+        ? {
+            bankLabel: parsed.taxRemittanceBank.bankLabel.trim(),
+            accountNo: parsed.taxRemittanceBank.accountNo.trim(),
+            accountHolder: parsed.taxRemittanceBank.accountHolder.trim(),
+          }
+        : current.taxRemittanceBank,
+      signatory: parsed.signatory
+        ? {
+            managerTitle: parsed.signatory.managerTitle.trim(),
+            managerName: parsed.signatory.managerName.trim(),
+            managerNip: parsed.signatory.managerNip.trim(),
+            headTitle: parsed.signatory.headTitle.trim(),
+            headName: parsed.signatory.headName.trim(),
+            headNip: parsed.signatory.headNip.trim(),
+            recipientTitle: parsed.signatory.recipientTitle.trim(),
+            letterPrefix: parsed.signatory.letterPrefix.trim(),
+          }
+        : current.signatory,
+      rabTargets: parsed.rabTargets
+        ? {
+            ...current.rabTargets,
+            ...Object.fromEntries(
+              Object.entries(parsed.rabTargets).map(([k, v]) => [k, Math.round(Number(v) || 0)])
+            ),
+          }
+        : current.rabTargets,
+    };
+
+    await prisma.$transaction(async (tx) => {
+      await tx.systemSetting.upsert({
+        where: { key: PENERIMAAN_MASTER_SETTING_KEY },
+        update: {
+          value: JSON.stringify(nextConfig),
+          updatedById: req.user!.userId,
+        },
+        create: {
+          key: PENERIMAAN_MASTER_SETTING_KEY,
+          value: JSON.stringify(nextConfig),
+          category: 'PENERIMAAN',
+          description: 'Master Data Penerimaan: Rekening Tujuan Pajak, Pejabat Penandatangan, dan Target RAB 4 Unit',
+          updatedById: req.user!.userId,
+        },
+      });
+
+      if (parsed.primaryBankAccount) {
+        await tx.bankAccount.update({
+          where: { id: parsed.primaryBankAccount.id },
+          data: {
+            bankName: parsed.primaryBankAccount.bankName.trim(),
+            accountNumberMasked: parsed.primaryBankAccount.accountNumberMasked.trim(),
+            accountHolder: parsed.primaryBankAccount.accountHolder.trim(),
+          },
+        });
+      }
+
+      await recordAuditLog(
+        {
+          actorId: req.user!.userId,
+          actorName: req.user!.fullName,
+          actorRole: req.user!.roleCode,
+          action: 'PENERIMAAN_MASTER_CONFIG_UPDATED',
+          module: 'REVENUE',
+          entityType: 'SystemSetting',
+          entityId: PENERIMAAN_MASTER_SETTING_KEY,
+          entityCode: PENERIMAAN_MASTER_SETTING_KEY,
+          summary: 'Memperbarui Master Data Penerimaan (Rekening Bank, Pejabat Penandatangan, atau Target RAB Pendapatan)',
+          beforeData: current,
+          afterData: nextConfig,
+          requestId: req.requestId,
+        },
+        tx as any
+      );
+    });
+
+    res.json({ success: true, data: nextConfig, meta: { requestId: req.requestId } });
   } catch (err) {
     next(err);
   }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import ModalDialog from './ModalDialog.vue';
+import { apiFetch } from '../services/api';
 import { formatRupiah, formatDate } from '../utils/format';
 
 export type PrintDocMode = 'INVOICE' | 'KUITANSI' | 'TANDA_TERIMA' | 'SURAT_PAJAK';
@@ -16,39 +17,47 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
-// Remember signatory & letter number cleanly in localStorage so PIC doesn't retype every month
-const SIGN_KEY = 'pmo_penerimaan_print_signatory_v1';
-function loadStoredSign() {
-  try {
-    const raw = localStorage.getItem(SIGN_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    // ignore storage errors
+const signConfig = ref({
+  managerTitle: 'Manajer Keuangan, Sumber Daya, dan Umum',
+  managerName: 'Husain Husin Mamonto, S.M.',
+  managerNip: 'NIP. 197506182003121002',
+  headTitle: 'Plh. Kepala Pusat Bisnis dan Investasi',
+  headName: 'Dr. Abdurrahman Rahim Thaha, M.A.B.',
+  headNip: 'NIP. 198612162022031003',
+  recipientTitle: 'Kepala Pusat Pengelolaan Keuangan, Universitas Terbuka',
+  letterPrefix: 'UN31.PMO/KU',
+  suratNomor: '',
+});
+
+async function syncMasterSignatory() {
+  if (props.data?.signatory) {
+    signConfig.value = {
+      ...signConfig.value,
+      ...props.data.signatory,
+    };
   }
-  return {
-    managerTitle: 'Manajer Keuangan, Sumber Daya, dan Umum',
-    managerName: 'Husain Husin Mamonto, S.M.',
-    managerNip: 'NIP. 197506182003121002',
-    headTitle: 'Plh. Kepala Pusat Bisnis dan Investasi',
-    headName: 'Dr. Abdurrahman Rahim Thaha, M.A.B.',
-    headNip: 'NIP. 198612162022031003',
-    suratNomor: '',
-  };
+  try {
+    const res = await apiFetch('/revenue/master/overview');
+    const masterSign = res.data?.config?.signatory;
+    if (masterSign) {
+      signConfig.value = {
+        ...signConfig.value,
+        ...masterSign,
+      };
+    }
+  } catch {
+    // Keep existing signatory defaults if offline
+  }
 }
 
-const signConfig = ref(loadStoredSign());
-const showSignEditor = ref(false);
-
 watch(
-  signConfig,
-  (val) => {
-    try {
-      localStorage.setItem(SIGN_KEY, JSON.stringify(val));
-    } catch {
-      // ignore storage errors
+  () => props.open,
+  (isOpen) => {
+    if (isOpen) {
+      syncMasterSignatory();
     }
   },
-  { deep: true }
+  { immediate: true }
 );
 
 function terbilang(angka: number): string {
@@ -127,11 +136,15 @@ function printDocument() {
   <ModalDialog :open="open" :title="modalTitle" maxWidth="860px" @close="emit('close')">
     <div v-if="data" class="print-sheet-shell">
       <div class="print-toolbar no-print">
-        <span class="print-hint">Format resmi PMO UTama (KU-001 / KU-002 / KU-003 / Surat Pajak) siap cetak / Simpan PDF</span>
+        <span class="print-hint">Pejabat penandatangan &amp; rekening tujuan otomatis ditarik dari Master Data</span>
         <div class="print-actions">
-          <button type="button" class="btn-soft" @click="showSignEditor = !showSignEditor">
-            {{ showSignEditor ? 'Tutup Pejabat' : (mode === 'SURAT_PAJAK' ? 'Atur Pejabat & No. Surat' : 'Atur Pejabat Penandatangan') }}
-          </button>
+          <input
+            v-if="mode === 'SURAT_PAJAK'"
+            v-model="signConfig.suratNomor"
+            type="text"
+            class="se-input"
+            :placeholder="`No. Surat (cth: 732/${signConfig.letterPrefix || 'UN31.PMO/KU'}/2026)`"
+          />
           <button type="button" class="btn-soft" @click="emit('close')">Tutup</button>
           <button
             type="button"
@@ -147,42 +160,6 @@ function printDocument() {
 
       <div v-if="!isApprovedToPrint" class="approval-lock-banner no-print">
         <strong>Cetak Terkunci:</strong> Dokumen ini belum mendapat persetujuan (Approval) dari Manajer Keuangan sehingga tidak dapat dicetak atau diterbitkan resmi.
-      </div>
-
-      <!-- Quick Signatory & Letter Number Editor (persisted in localStorage) -->
-      <div v-if="showSignEditor" class="sign-editor-bar no-print">
-        <template v-if="mode === 'SURAT_PAJAK'">
-          <div class="se-field">
-            <label>Nomor Surat</label>
-            <input v-model="signConfig.suratNomor" type="text" class="se-input" placeholder="Cth: 732/UN31.PBI/KU/2026" />
-          </div>
-          <div class="se-field">
-            <label>Jabatan Penandatangan</label>
-            <input v-model="signConfig.headTitle" type="text" class="se-input" />
-          </div>
-          <div class="se-field">
-            <label>Nama Pejabat</label>
-            <input v-model="signConfig.headName" type="text" class="se-input" />
-          </div>
-          <div class="se-field">
-            <label>NIP</label>
-            <input v-model="signConfig.headNip" type="text" class="se-input" />
-          </div>
-        </template>
-        <template v-else>
-          <div class="se-field">
-            <label>Jabatan Penandatangan</label>
-            <input v-model="signConfig.managerTitle" type="text" class="se-input" />
-          </div>
-          <div class="se-field">
-            <label>Nama Pejabat</label>
-            <input v-model="signConfig.managerName" type="text" class="se-input" />
-          </div>
-          <div class="se-field">
-            <label>NIP</label>
-            <input v-model="signConfig.managerNip" type="text" class="se-input" />
-          </div>
-        </template>
       </div>
 
       <!-- ==================== 1. INVOICE KU-003 ==================== -->
@@ -492,13 +469,12 @@ function printDocument() {
 
         <div class="meta-grid" style="margin-top: 14px;">
           <div>
-            <div class="meta-row"><span>Nomor</span><strong>{{ signConfig.suratNomor || '......./UN31.PMO/KU/2026' }}</strong></div>
+            <div class="meta-row"><span>Nomor</span><strong>{{ signConfig.suratNomor || `......./${signConfig.letterPrefix || 'UN31.PMO/KU'}/2026` }}</strong></div>
             <div class="meta-row"><span>Lamp.</span><span>1 Lampiran (Perincian + Pajak)</span></div>
             <div class="meta-row"><span>Hal</span><strong>Permohonan Penarikan Dana Pajak {{ data.bankFilterLabel || 'Bank Mandiri' }} Bulan {{ data.periodLabel }}</strong></div>
           </div>
           <div>
-            <div class="meta-row"><span>Kepada Yth.</span><strong>Kepala Pusat Pengelolaan Keuangan</strong></div>
-            <div class="meta-row"><span>Instansi</span><span>Universitas Terbuka</span></div>
+            <div class="meta-row"><span>Kepada Yth.</span><strong>{{ signConfig.recipientTitle || 'Kepala Pusat Pengelolaan Keuangan, Universitas Terbuka' }}</strong></div>
             <div class="meta-row"><span>Rekening Sumber</span><span>{{ data.sourceBankAccountNo || '164-00-2022-999-5' }}</span></div>
           </div>
         </div>

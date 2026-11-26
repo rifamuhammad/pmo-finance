@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import Select from 'primevue/select';
 import { useAuthStore } from '../stores/auth';
 import { apiFetch, downloadApiBlob, fetchApiBlob } from '../services/api';
@@ -27,8 +27,9 @@ function getLocalMonthIso(): string {
 
 const auth = useAuthStore();
 const route = useRoute();
+const router = useRouter();
 
-type MainTab = 'buku_harian' | 'invoices' | 'layanan';
+type MainTab = 'buku_harian' | 'invoices';
 
 const activeTab = ref<MainTab>('buku_harian');
 const loading = ref(true);
@@ -48,6 +49,8 @@ const bhSortBy = ref<'newest' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amou
 const invoiceStatusFilter = ref('');
 const invSortBy = ref<'newest' | 'due_asc' | 'amount_desc' | 'balance_desc'>('newest');
 const activeAgingBucket = ref<'' | 'current' | 'days31to60' | 'days61to90' | 'over90'>('');
+const showBhAdvFilters = ref(false);
+const catalogSection = ref<'services' | 'customers'>('services');
 
 // Approval / Reminder / Reject / Resubmit / Void Payment Modals
 const approvalBusyId = ref('');
@@ -85,31 +88,29 @@ function openReviewModal(targetType: 'PAYMENT' | 'INVOICE', row: any) {
 
 const pageTitle = computed(() => {
   if (activeTab.value === 'invoices') return 'Tagihan & Invoice Penerimaan';
-  if (activeTab.value === 'layanan') return 'Katalog Layanan & Tarif';
   return 'Buku Harian Penerimaan';
 });
 
 const pageSubtitle = computed(() => {
   if (activeTab.value === 'invoices') {
-    return 'Kelola tagihan klien, persetujuan Manajer Keuangan, cetak Invoice KU-003, dan pelunasan piutang';
+    return 'Kelola tagihan klien, persetujuan, cetak Invoice KU-003, dan pelunasan piutang.';
   }
-  if (activeTab.value === 'layanan') {
-    return 'Daftar tarif layanan operasional 4 unit bisnis (MICE, Klinik, ITS, TCI) dan pemetaan akun COA resmi';
-  }
-  return 'Pencatatan uang masuk Kwitansi (KU-001) & Tanda Terima (KU-002), persetujuan Manajer Keuangan, serta status rekonsiliasi Bank Mandiri';
+  return 'Catat uang masuk Kwitansi (KU-001) dan Tanda Terima (KU-002) ke Bank Mandiri.';
 });
 
 function applyRouteQueryFilters() {
   const qTab = typeof route.query.tab === 'string' ? route.query.tab : '';
   const qStatus = typeof route.query.status === 'string' ? route.query.status : '';
+  if (qTab === 'layanan') {
+    router.replace('/penerimaan/master/layanan');
+    return;
+  }
   if (qTab === 'invoices') {
     activeTab.value = 'invoices';
     if (qStatus) {
       invoiceStatusFilter.value = qStatus;
       invPage.value = 1;
     }
-  } else if (qTab === 'layanan') {
-    activeTab.value = 'layanan';
   } else if (qTab === 'buku_harian' || qTab === 'buku-harian') {
     activeTab.value = 'buku_harian';
     if (['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'VOID'].includes(qStatus)) {
@@ -645,6 +646,7 @@ const invoiceTaxPreview = computed(() => {
 const directForm = ref({
   businessUnitId: '',
   productServiceId: '',
+  customerId: '',
   bankAccountId: '',
   receiptType: 'LANGSUNG',
   paymentStage: 'PELUNASAN',
@@ -679,6 +681,86 @@ const directTaxPreview = computed(() => {
   const basis = Math.max(0, Number(directForm.value.grossAmount || 0) - Number(directForm.value.overpaymentAmount || 0));
   return previewTax(basis, 0, directForm.value.taxScheme, directForm.value.taxInclusive, directForm.value.taxCollectorProfile);
 });
+
+function inferTaxSchemeForCoa(coaCode?: string | null, unitCode?: string | null): string {
+  const code = String(coaCode || '').trim();
+  if (code.startsWith('42030106') || unitCode === 'BU-KLINIK') return 'BEBAS_PAJAK';
+  if (code === '420301070400') return 'PB1_10';
+  if (code === '420301070100' || code === '420301070200') return 'PPN12_PPH4_2';
+  if (code === '420301070300' || code === '420301090100') return 'PPN12_PMK131';
+  if (
+    code.startsWith('42030101') ||
+    code.startsWith('42030102') ||
+    code.startsWith('42030103') ||
+    code.startsWith('42030104') ||
+    code.startsWith('42030105') ||
+    unitCode === 'BU-ITS' ||
+    unitCode === 'BU-TCI'
+  ) {
+    return 'PPN12_PPH23';
+  }
+  return 'PPN12_PMK131';
+}
+
+function formatCollectorShort(profile?: string | null): string {
+  if (profile === 'FP_020_INSTANSI') return 'FP 020 · Instansi Pemerintah';
+  if (profile === 'FP_030_BUMN') return 'FP 030 · BUMN / WAPU';
+  if (profile === 'BADAN_POTONG_PPH') return 'FP 040 · Badan Potong PPh';
+  if (profile === 'INTERNAL_UT') return 'Internal Satker UT';
+  return 'FP 040 · Umum / Perorangan';
+}
+
+const invoiceAutoTaxSummary = computed(() => {
+  const firstProdId = invoiceForm.value.lines.find((l) => l.productServiceId)?.productServiceId;
+  const prod = firstProdId ? products.value.find((p) => p.id === firstProdId) : null;
+  const cust = customers.value.find((c) => c.id === invoiceForm.value.customerId);
+  return {
+    schemeLabel: getTaxSchemeShort(invoiceForm.value.taxScheme),
+    inclusiveLabel: invoiceForm.value.taxInclusive ? 'Include Pajak' : 'Exclude Pajak',
+    collectorLabel: formatCollectorShort(invoiceForm.value.taxCollectorProfile),
+    sourceHint: prod
+      ? `Terkunci otomatis dari Master Layanan (${prod.sku}) & Master Pelanggan (${cust?.name || 'Terdaftar'})`
+      : `Terkunci otomatis dari Default COA ${invoiceForm.value.revenueAccountCode} & Master Pelanggan (${cust?.name || 'Terdaftar'})`,
+  };
+});
+
+const directAutoTaxSummary = computed(() => {
+  const prod = directForm.value.productServiceId
+    ? products.value.find((p) => p.id === directForm.value.productServiceId)
+    : null;
+  const cust = directForm.value.customerId
+    ? customers.value.find((c) => c.id === directForm.value.customerId)
+    : null;
+  const payerSource =
+    entryMode.value === 'TANDA_TERIMA'
+      ? 'Mode Tanda Terima (Internal UT)'
+      : cust
+        ? `Master Pelanggan (${cust.code})`
+        : 'Pembayar Umum (Non-Terdaftar)';
+  return {
+    schemeLabel: getTaxSchemeShort(directForm.value.taxScheme),
+    inclusiveLabel: directForm.value.taxInclusive ? 'Include Pajak' : 'Exclude Pajak',
+    collectorLabel: formatCollectorShort(directForm.value.taxCollectorProfile),
+    sourceHint: prod
+      ? `Terkunci otomatis dari Master Layanan (${prod.sku}) & ${payerSource}`
+      : `Terkunci otomatis dari Default COA ${directForm.value.revenueAccountCode} & ${payerSource}`,
+  };
+});
+
+function handleInvoiceCoaChange() {
+  const hasProd = invoiceForm.value.lines.some((l) => Boolean(l.productServiceId));
+  if (hasProd) return;
+  const u = businessUnits.value.find((x) => x.id === invoiceForm.value.businessUnitId);
+  invoiceForm.value.taxScheme = inferTaxSchemeForCoa(invoiceForm.value.revenueAccountCode, u?.code);
+  invoiceForm.value.taxInclusive = true;
+}
+
+function handleDirectCoaChange() {
+  if (directForm.value.productServiceId) return;
+  const u = businessUnits.value.find((x) => x.id === directForm.value.businessUnitId);
+  directForm.value.taxScheme = inferTaxSchemeForCoa(directForm.value.revenueAccountCode, u?.code);
+  directForm.value.taxInclusive = true;
+}
 
 const csvForm = ref({
   businessUnitId: '',
@@ -892,8 +974,34 @@ const invVoidCount = computed(
 const invApprovedCount = computed(
   () => customerInvoices.value.filter((inv) => inv.status !== 'VOID' && inv.approvalStatus === 'APPROVED').length
 );
-const totalPendingApprovals = computed(() => cashInCounts.value.pendingApproval + invPendingApprovalCount.value);
-const totalApprovedDocs = computed(() => cashInCounts.value.approved + invApprovedCount.value);
+const invOverdueCount = computed(
+  () => customerInvoices.value.filter((inv) => inv.status !== 'VOID' && inv.status !== 'PAID' && inv.approvalStatus === 'APPROVED' && getDaysOverdue(inv) > 0).length
+);
+const invOverdueAmount = computed(
+  () =>
+    customerInvoices.value
+      .filter((inv) => inv.status !== 'VOID' && inv.status !== 'PAID' && inv.approvalStatus === 'APPROVED' && getDaysOverdue(inv) > 0)
+      .reduce((sum, inv) => sum + Number(inv.balanceDue || 0), 0)
+);
+const bhAdvFilterCount = computed(() => {
+  let c = 0;
+  if (bhReconFilter.value) c++;
+  if (stageFilter.value) c++;
+  if (bhProofFilter.value) c++;
+  if (bhSortBy.value !== 'newest') c++;
+  return c;
+});
+const filteredCustomers = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) return customers.value;
+  return customers.value.filter((c: any) =>
+    [c.code, c.name, c.address, c.contactPerson, c.email, c.phone, c.organizationType, c.taxCollectorProfile]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(q)
+  );
+});
 
 const visibleBukuHarian = computed(() => {
   let list = cashInRows.value;
@@ -1167,15 +1275,28 @@ function applyDirectQtyCalc() {
 
 function handleDirectPayerInput() {
   const q = directForm.value.payerName.trim().toLowerCase();
-  if (!q) return;
+  if (!q) {
+    directForm.value.customerId = '';
+    directForm.value.taxCollectorProfile = entryMode.value === 'TANDA_TERIMA' ? 'INTERNAL_UT' : 'FP_040_UMUM';
+    directForm.value.subCategory = entryMode.value === 'TANDA_TERIMA' ? 'Internal UT' : 'Umum';
+    return;
+  }
   const matched = customers.value.find((c) => String(c.name || '').trim().toLowerCase() === q);
   if (matched) {
+    directForm.value.customerId = matched.id;
     if (!directForm.value.payerTaxId && matched.taxIdNpwp) directForm.value.payerTaxId = matched.taxIdNpwp;
     if (!directForm.value.payerAddress && matched.address) directForm.value.payerAddress = matched.address;
-    if (matched.taxCollectorProfile && entryMode.value !== 'TANDA_TERIMA') {
+    if (entryMode.value === 'TANDA_TERIMA') {
+      directForm.value.taxCollectorProfile = 'INTERNAL_UT';
+      directForm.value.subCategory = 'Internal UT';
+    } else if (matched.taxCollectorProfile) {
       directForm.value.taxCollectorProfile = matched.taxCollectorProfile;
       directForm.value.subCategory = matched.taxCollectorProfile === 'INTERNAL_UT' ? 'Internal UT' : 'Umum';
     }
+  } else {
+    directForm.value.customerId = '';
+    directForm.value.taxCollectorProfile = entryMode.value === 'TANDA_TERIMA' ? 'INTERNAL_UT' : 'FP_040_UMUM';
+    directForm.value.subCategory = entryMode.value === 'TANDA_TERIMA' ? 'Internal UT' : 'Umum';
   }
 }
 
@@ -1235,6 +1356,7 @@ function resetDirectForm(
   directForm.value = {
     businessUnitId: defaultUnitId,
     productServiceId: '',
+    customerId: '',
     bankAccountId: pickAutoBankAccountId(defaultUnitId),
     receiptType: presetType,
     paymentStage: presetType === 'KUITANSI_UM' ? 'UANG_MUKA' : presetStage,
@@ -1361,6 +1483,7 @@ async function submitCreateInvoice() {
       method: 'POST',
       body: JSON.stringify({
         ...invoiceForm.value,
+        autoFitTax: true,
         dpPercent: invoiceForm.value.invoiceType === 'UANG_MUKA' ? Number(invoiceForm.value.dpPercent || 0) : 0,
         salesOrderId: invoiceForm.value.salesOrderId || null,
         bankAccountId: invoiceForm.value.bankAccountId || null,
@@ -1431,6 +1554,8 @@ async function submitDirectReceipt() {
       method: 'POST',
       body: JSON.stringify({
         ...directForm.value,
+        autoFitTax: true,
+        customerId: directForm.value.customerId || null,
         referenceNo: directForm.value.referenceNo?.trim() || `TRF-${Date.now().toString().slice(-6)}`,
         receiptType: receiptTypeFinal,
         paymentStage: stageFinal,
@@ -2224,7 +2349,6 @@ onMounted(() => {
 
       <div class="rev-top-actions">
         <input
-          v-if="activeTab !== 'layanan'"
           v-model="selectedMonth"
           type="month"
           class="pill-month-input"
@@ -2254,204 +2378,201 @@ onMounted(() => {
         >
           + Buat Invoice
         </button>
-        <button
-          v-if="activeTab === 'layanan' && auth.hasPermission('revenue:create')"
-          type="button"
-          class="pill-btn-soft"
-          @click="addCustModalOpen = true"
-        >
-          + Pelanggan Baru
-        </button>
-        <button
-          v-if="activeTab === 'layanan' && auth.hasPermission('revenue:create')"
-          type="button"
-          class="pill-btn-navy"
-          @click="openAddProductModal"
-        >
-          + Tambah Layanan
-        </button>
       </div>
     </div>
 
     <AlertBanner v-if="feedbackMsg" variant="success" title="Berhasil" :message="feedbackMsg" @dismiss="feedbackMsg = ''" />
     <AlertBanner v-if="errorMsg" variant="danger" title="Perhatian" :message="errorMsg" @dismiss="errorMsg = ''" />
 
-    <!-- DropX 4 Luminous Gradient KPI Cards (Strictly Read-Only Metrics, No Cross-Feature Routing) -->
-    <section class="kpi-metric-row">
+    <!-- Context-Specific 3-Card KPI Strip: BUKU HARIAN ONLY -->
+    <section v-if="activeTab === 'buku_harian'" class="kpi-metric-row cols-3">
       <article class="dropx-kpi-card kpi-grad-navy">
         <div class="kpi-top-row">
-          <span class="kpi-label">Masuk Rekening ({{ bukuHarianData?.period?.label || selectedMonth }})</span>
+          <span class="kpi-label">Total Uang Masuk ({{ bukuHarianData?.period?.label || selectedMonth }})</span>
           <span class="kpi-icon-box" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
           </span>
         </div>
         <strong class="kpi-value money">{{ formatRupiah(bukuHarianData?.summary?.totalReceived || 0) }}</strong>
-        <span class="kpi-foot">{{ bukuHarianData?.summary?.totalTransactions || 0 }} transaksi · Bank Mandiri</span>
-      </article>
-
-      <article class="dropx-kpi-card kpi-grad-ocean">
-        <div class="kpi-top-row">
-          <span class="kpi-label">Piutang Terbuka (Invoice)</span>
-          <span class="kpi-icon-box" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
-          </span>
-        </div>
-        <strong class="kpi-value money">{{ formatRupiah(agingData?.buckets?.totalOutstanding || 0) }}</strong>
-        <span class="kpi-foot">{{ agingData?.buckets?.openCount || 0 }} invoice menunggu pelunasan</span>
-      </article>
-
-      <article class="dropx-kpi-card kpi-grad-amber">
-        <div class="kpi-top-row">
-          <span class="kpi-label">Rekonsiliasi Bank Mandiri</span>
-          <span class="kpi-icon-box" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M6 10v11"/><path d="M12 10v11"/><path d="M18 10v11"/></svg>
-          </span>
-        </div>
-        <strong class="kpi-value">
-          {{ bukuHarianData?.summary?.reconciledCount || 0 }} / {{ bukuHarianData?.summary?.allScopeCount || 0 }}
-        </strong>
-        <span class="kpi-foot">
-          {{ (bukuHarianData?.summary?.unreconciledCount || 0) > 0
-            ? `${bukuHarianData.summary.unreconciledCount} transaksi belum cocok rekening koran`
-            : 'Semua cocok dengan rekening koran' }}
-        </span>
+        <span class="kpi-foot">{{ bukuHarianData?.summary?.totalTransactions || 0 }} transaksi disetujui · Bank Mandiri</span>
       </article>
 
       <article
         class="dropx-kpi-card"
-        :class="totalPendingApprovals > 0 ? 'kpi-grad-amber' : 'kpi-grad-emerald'"
+        :class="cashInCounts.pendingApproval > 0 ? 'kpi-grad-amber' : 'kpi-grad-emerald'"
       >
         <div class="kpi-top-row">
-          <span class="kpi-label">Approval Manajer Keuangan</span>
+          <span class="kpi-label">Persetujuan Buku Harian</span>
           <span class="kpi-icon-box" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
           </span>
         </div>
         <strong class="kpi-value">
-          {{ totalPendingApprovals > 0 ? `${totalPendingApprovals} Menunggu` : `${totalApprovedDocs} Disetujui` }}
+          {{ cashInCounts.pendingApproval > 0 ? `${cashInCounts.pendingApproval} Menunggu` : `${cashInCounts.approved} Disetujui` }}
+        </strong>
+        <span class="kpi-foot">{{ cashInCounts.kwitansi }} Kwitansi · {{ cashInCounts.tandaTerima }} Tanda Terima</span>
+      </article>
+
+      <article
+        class="dropx-kpi-card"
+        :class="(bukuHarianData?.summary?.unreconciledCount || 0) > 0 ? 'kpi-grad-ocean' : 'kpi-grad-emerald'"
+      >
+        <div class="kpi-top-row">
+          <span class="kpi-label">Status Rekonsiliasi Bank</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M6 10v11"/><path d="M12 10v11"/><path d="M18 10v11"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value">
+          {{ bukuHarianData?.summary?.reconciledCount || 0 }} / {{ bukuHarianData?.summary?.allScopeCount || 0 }} Cocok
         </strong>
         <span class="kpi-foot">
-          {{ totalPendingApprovals > 0
-            ? `${cashInCounts.pendingApproval} Kwitansi/TT · ${invPendingApprovalCount} Invoice`
-            : `${kwitansiRows.length} KU · ${tandaTerimaRows.length} TT · ${customerInvoices.length} Inv` }}
+          {{ (bukuHarianData?.summary?.unreconciledCount || 0) > 0
+            ? `${bukuHarianData.summary.unreconciledCount} transaksi belum cocok rekening koran`
+            : 'Semua transaksi sudah cocok Bank Mandiri' }}
         </span>
       </article>
     </section>
 
-    <!-- Focused Unit Filter Bar Only (Switch between Buku Harian / Invoice / Layanan strictly via Sidebar) -->
-    <div class="unit-filter-bar-clean">
-      <div class="unit-filter-row" role="tablist" aria-label="Filter Unit Bisnis">
-        <button
-          type="button"
-          class="unit-pill"
-          :class="{ active: selectedUnitId === '' }"
-          @click="selectedUnitId = ''"
-        >
-          Semua Unit
-        </button>
-        <button
-          v-for="u in operationalUnits"
-          :key="u.id"
-          type="button"
-          class="unit-pill"
-          :class="{ active: selectedUnitId === u.id }"
-          @click="selectedUnitId = u.id"
-        >
-          {{ u.code.replace('BU-', '') }}
-        </button>
-      </div>
-    </div>
+    <!-- Context-Specific 3-Card KPI Strip: TAGIHAN & INVOICE ONLY -->
+    <section v-else-if="activeTab === 'invoices'" class="kpi-metric-row cols-3">
+      <article class="dropx-kpi-card kpi-grad-navy">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Total Piutang Terbuka</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(agingData?.buckets?.totalOutstanding || 0) }}</strong>
+        <span class="kpi-foot">{{ invOpenCount }} invoice menunggu pelunasan</span>
+      </article>
 
-    <StateBanner v-if="loading" state="loading" title="Memuat Penerimaan" message="Mengambil data Buku Harian Uang Masuk, Tagihan Invoice, dan status Rekonsiliasi Bank..." />
+      <article
+        class="dropx-kpi-card"
+        :class="invOverdueCount > 0 ? 'kpi-grad-amber' : 'kpi-grad-ocean'"
+      >
+        <div class="kpi-top-row">
+          <span class="kpi-label">Lewat Jatuh Tempo</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(invOverdueAmount) }}</strong>
+        <span class="kpi-foot">{{ invOverdueCount > 0 ? `${invOverdueCount} invoice perlu penagihan` : 'Semua tagihan masih sesuai jatuh tempo' }}</span>
+      </article>
 
-    <!-- ==================== TAB 1: BUKU HARIAN (DROPX SINGLE-CARD FULL-BLEED TABLE) ==================== -->
+      <article
+        class="dropx-kpi-card"
+        :class="invPendingApprovalCount > 0 ? 'kpi-grad-amber' : 'kpi-grad-emerald'"
+      >
+        <div class="kpi-top-row">
+          <span class="kpi-label">Persetujuan Invoice</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value">
+          {{ invPendingApprovalCount > 0 ? `${invPendingApprovalCount} Menunggu` : `${invApprovedCount} Disetujui` }}
+        </strong>
+        <span class="kpi-foot">{{ invPaidCount }} Lunas · {{ invVoidCount }} HANGUS</span>
+      </article>
+    </section>
+
+    <StateBanner v-if="loading" state="loading" title="Memuat Data Penerimaan" message="Mengambil data terbaru..." />
+
+    <!-- ==================== TAB 1: BUKU HARIAN (CLEAN 2-ROW TOOLBAR + FULL-BLEED TABLE) ==================== -->
     <section v-else-if="activeTab === 'buku_harian'" class="poital-card table-card-flush">
       <div class="dropx-card-head">
-        <div class="dropx-head-top">
-          <div>
-            <h2 class="card-title">Buku Harian Penerimaan (Uang Masuk)</h2>
-            <span class="card-sub">
-              {{ bukuHarianData?.period?.label }} · {{ bhFilteredSummary.count }} transaksi masuk ·
-              Total Masuk (Disetujui) <strong class="text-pos">{{ formatRupiah(bhFilteredSummary.cashIn) }}</strong>
-            </span>
+        <!-- Row 1: Search + Unit Select + Expandable Filter + Export -->
+        <div class="dropx-filter-row">
+          <div class="dropx-toolbar-left">
+            <div class="dropx-search-box">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input
+                v-model="searchQuery"
+                type="search"
+                class="dropx-search-input"
+                placeholder="Cari no. bukti, pembayar, COA..."
+              />
+            </div>
+
+            <select v-model="selectedUnitId" class="pill-select compact" aria-label="Filter Unit Bisnis">
+              <option value="">Semua Unit</option>
+              <option v-for="u in operationalUnits" :key="u.id" :value="u.id">
+                Unit {{ u.code.replace('BU-', '') }}
+              </option>
+            </select>
           </div>
-          <div class="btn-row">
-            <button v-if="hasActiveBhFilters" type="button" class="pill-btn-soft" @click="resetBhFilters">
-              Reset Filter
+
+          <div class="dropx-toolbar-right">
+            <button
+              type="button"
+              class="pill-btn-soft filter-toggle-btn"
+              :class="{ active: showBhAdvFilters || bhAdvFilterCount > 0 }"
+              @click="showBhAdvFilters = !showBhAdvFilters"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+              <span>Filter</span>
+              <span v-if="bhAdvFilterCount > 0" class="filter-badge">{{ bhAdvFilterCount }}</span>
             </button>
+
+            <button v-if="hasActiveBhFilters" type="button" class="pill-btn-soft" @click="resetBhFilters">
+              Reset
+            </button>
+
             <button type="button" class="pill-btn-soft" @click="exportMonthlyExcel">
               Export Excel
             </button>
           </div>
         </div>
 
-        <!-- DropX Integrated Search + Dropdowns Row -->
-        <div class="dropx-filter-row">
-          <div class="dropx-search-box">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            <input
-              v-model="searchQuery"
-              type="search"
-              class="dropx-search-input"
-              placeholder="Cari nomor bukti, klien, COA..."
-            />
-          </div>
+        <!-- Optional Expandable Advanced Filter Tray (Hidden by Default for Visual Calm) -->
+        <div v-if="showBhAdvFilters" class="adv-filter-tray">
+          <select v-model="bhReconFilter" class="pill-select compact" aria-label="Filter Status Rekonsiliasi Bank">
+            <option value="">Rekon Bank: Semua</option>
+            <option value="RECONCILED">Terekonsiliasi</option>
+            <option value="UNRECONCILED">Belum Rekon</option>
+          </select>
 
-          <div class="bh-toolbar-selects">
-            <select v-model="bhApprovalFilter" class="pill-select compact" aria-label="Filter Status Approval">
-              <option value="">Approval: Semua</option>
-              <option value="PENDING_APPROVAL">Menunggu Approval</option>
-              <option value="APPROVED">Disetujui</option>
-              <option value="REJECTED">Perlu Revisi</option>
-              <option value="VOID">Dibatalkan</option>
-            </select>
+          <select v-model="stageFilter" class="pill-select compact" aria-label="Filter Tahap Bayar">
+            <option value="">Tahap: Semua</option>
+            <option value="UANG_MUKA">Uang Muka (DP)</option>
+            <option value="TERMIN">Termin</option>
+            <option value="PELUNASAN">Pelunasan</option>
+          </select>
 
-            <select v-model="bhReconFilter" class="pill-select compact" aria-label="Filter Status Rekonsiliasi Bank">
-              <option value="">Rekon Bank: Semua</option>
-              <option value="RECONCILED">Terekonsiliasi</option>
-              <option value="UNRECONCILED">Belum Rekon</option>
-            </select>
+          <select v-model="bhProofFilter" class="pill-select compact" aria-label="Filter Bukti Pembayaran">
+            <option value="">Bukti: Semua</option>
+            <option value="HAS_PROOF">Ada Bukti</option>
+            <option value="NO_PROOF">Belum Ada Bukti</option>
+          </select>
 
-            <select v-model="stageFilter" class="pill-select compact" aria-label="Filter Tahap Bayar">
-              <option value="">Tahap: Semua</option>
-              <option value="UANG_MUKA">Uang Muka (DP)</option>
-              <option value="TERMIN">Termin</option>
-              <option value="PELUNASAN">Pelunasan</option>
-            </select>
-
-            <select v-model="bhProofFilter" class="pill-select compact" aria-label="Filter Bukti Pembayaran">
-              <option value="">Bukti: Semua</option>
-              <option value="HAS_PROOF">Ada Bukti</option>
-              <option value="NO_PROOF">Belum Ada Bukti</option>
-            </select>
-
-            <select v-model="bhSortBy" class="pill-select compact sort-select" aria-label="Urutkan Data Buku Harian">
-              <option value="newest">Terbaru Diinput</option>
-              <option value="date_desc">Tanggal Terbaru</option>
-              <option value="date_asc">Tanggal Terlama</option>
-              <option value="amount_desc">Nominal Terbesar</option>
-              <option value="amount_asc">Nominal Terkecil</option>
-            </select>
-          </div>
+          <select v-model="bhSortBy" class="pill-select compact sort-select" aria-label="Urutkan Data Buku Harian">
+            <option value="newest">Urut: Terbaru Diinput</option>
+            <option value="date_desc">Urut: Tanggal Terbaru</option>
+            <option value="date_asc">Urut: Tanggal Terlama</option>
+            <option value="amount_desc">Urut: Nominal Terbesar</option>
+            <option value="amount_asc">Urut: Nominal Terkecil</option>
+          </select>
         </div>
 
-        <!-- DropX Compact Status Filter Pills with Colored Dots & Count Chips -->
+        <!-- Row 2: Quick Status & Type Filter Chips -->
         <div class="dropx-pill-row" role="group" aria-label="Filter Jenis Bukti Uang Masuk">
           <button type="button" class="dx-filter-tab" :class="{ active: bhDocFilter === 'all' && !bhApprovalFilter }" @click="bhDocFilter = 'all'; bhApprovalFilter = ''">
             Semua <span class="dx-count">{{ cashInCounts.all }}</span>
           </button>
-          <button type="button" class="dx-filter-tab" :class="{ active: bhDocFilter === 'KU' }" @click="bhDocFilter = 'KU'">
+          <button type="button" class="dx-filter-tab" :class="{ active: bhDocFilter === 'KU' && !bhApprovalFilter }" @click="bhDocFilter = 'KU'; bhApprovalFilter = ''">
             <span class="dx-dot dot-emerald"></span> Kwitansi <span class="dx-count">{{ cashInCounts.kwitansi }}</span>
           </button>
-          <button type="button" class="dx-filter-tab" :class="{ active: bhDocFilter === 'TT' }" @click="bhDocFilter = 'TT'">
+          <button type="button" class="dx-filter-tab" :class="{ active: bhDocFilter === 'TT' && !bhApprovalFilter }" @click="bhDocFilter = 'TT'; bhApprovalFilter = ''">
             <span class="dx-dot dot-blue"></span> Tanda Terima <span class="dx-count">{{ cashInCounts.tandaTerima }}</span>
           </button>
           <button
             v-if="cashInCounts.langsung > 0"
             type="button"
             class="dx-filter-tab"
-            :class="{ active: bhDocFilter === 'DIRECT' }"
-            @click="bhDocFilter = 'DIRECT'"
+            :class="{ active: bhDocFilter === 'DIRECT' && !bhApprovalFilter }"
+            @click="bhDocFilter = 'DIRECT'; bhApprovalFilter = ''"
           >
             <span class="dx-dot dot-sky"></span> Langsung <span class="dx-count">{{ cashInCounts.langsung }}</span>
           </button>
@@ -2658,100 +2779,41 @@ onMounted(() => {
       />
     </section>
 
-    <!-- ==================== TAB 2: TAGIHAN & INVOICE (100% PIUTANG, AGING & KONTRAK) ==================== -->
+    <!-- ==================== TAB 2: TAGIHAN & INVOICE (CLEAN 2-ROW TOOLBAR, ZERO AGING DUPLICATION) ==================== -->
     <div v-else-if="activeTab === 'invoices'" class="rev-stack">
-      <!-- Clickable 4-Bucket Aging Piutang Strip -->
-      <section class="aging-strip-grid" aria-label="Aging Piutang Penerimaan">
-        <button
-          type="button"
-          class="aging-bucket-card"
-          :class="{ active: activeAgingBucket === 'current' }"
-          @click="toggleAgingFilter('current')"
-        >
-          <span>0 - 30 Hari</span>
-          <strong class="money">{{ formatRupiah(agingData?.buckets?.current || 0) }}</strong>
-        </button>
-        <button
-          type="button"
-          class="aging-bucket-card"
-          :class="{ active: activeAgingBucket === 'days31to60' }"
-          @click="toggleAgingFilter('days31to60')"
-        >
-          <span>31 - 60 Hari</span>
-          <strong class="money">{{ formatRupiah(agingData?.buckets?.days31to60 || 0) }}</strong>
-        </button>
-        <button
-          type="button"
-          class="aging-bucket-card warn"
-          :class="{ active: activeAgingBucket === 'days61to90' }"
-          @click="toggleAgingFilter('days61to90')"
-        >
-          <span>61 - 90 Hari</span>
-          <strong class="money">{{ formatRupiah(agingData?.buckets?.days61to90 || 0) }}</strong>
-        </button>
-        <button
-          type="button"
-          class="aging-bucket-card danger"
-          :class="{ active: activeAgingBucket === 'over90' }"
-          @click="toggleAgingFilter('over90')"
-        >
-          <span>&gt; 90 Hari</span>
-          <strong class="money">{{ formatRupiah(agingData?.buckets?.over90 || 0) }}</strong>
-        </button>
-      </section>
-
       <section class="poital-card table-card-flush">
         <div class="dropx-card-head">
-          <div class="dropx-head-top">
-            <div>
-              <h2 class="card-title">Tagihan &amp; Invoice Pelanggan</h2>
-              <span class="card-sub">
-                {{ invFilteredSummary.count }} invoice tampil ·
-                Total Tagihan <strong>{{ formatRupiah(invFilteredSummary.totalNet) }}</strong>
-                <template v-if="invFilteredSummary.totalOpen > 0">
-                  · Sisa Piutang <strong>{{ formatRupiah(invFilteredSummary.totalOpen) }}</strong>
-                </template>
-              </span>
-            </div>
-            <div class="btn-row">
-              <button v-if="hasActiveInvFilters" type="button" class="pill-btn-soft" @click="resetInvFilters">
-                Reset Filter
-              </button>
-              <button type="button" class="pill-btn-soft" @click="exportAgingExcel">
-                Export Aging .xlsx
-              </button>
-            </div>
-          </div>
-
           <div class="dropx-filter-row">
-            <div class="dropx-search-box">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-              <input
-                v-model="searchQuery"
-                type="search"
-                class="dropx-search-input"
-                placeholder="Cari no. invoice, pelanggan, kegiatan..."
-              />
+            <div class="dropx-toolbar-left">
+              <div class="dropx-search-box">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input
+                  v-model="searchQuery"
+                  type="search"
+                  class="dropx-search-input"
+                  placeholder="Cari no. invoice, pelanggan, kegiatan..."
+                />
+              </div>
+
+              <select v-model="selectedUnitId" class="pill-select compact" aria-label="Filter Unit Bisnis">
+                <option value="">Semua Unit</option>
+                <option v-for="u in operationalUnits" :key="u.id" :value="u.id">
+                  Unit {{ u.code.replace('BU-', '') }}
+                </option>
+              </select>
             </div>
 
-            <div class="bh-toolbar-selects">
-              <select v-model="invoiceStatusFilter" class="pill-select compact" aria-label="Filter Status Invoice">
-                <option value="">Status: Semua</option>
-                <option value="PENDING_APPROVAL">Menunggu Approval</option>
-                <option value="REJECTED">Perlu Revisi</option>
-                <option value="OPEN">Belum Lunas (Semua)</option>
-                <option value="ISSUED">Disetujui · Belum Bayar</option>
-                <option value="PARTIALLY_PAID">Sebagian Bayar</option>
-                <option value="PAID">Lunas</option>
-                <option value="VOID">HANGUS / Batal</option>
+            <div class="dropx-toolbar-right">
+              <select v-model="invSortBy" class="pill-select compact sort-select" aria-label="Urutkan Daftar Invoice">
+                <option value="newest">Urut: Terbaru Dibuat</option>
+                <option value="due_asc">Urut: Jatuh Tempo Terdekat</option>
+                <option value="balance_desc">Urut: Sisa Piutang Terbesar</option>
+                <option value="amount_desc">Urut: Nilai Tagihan Terbesar</option>
               </select>
 
-              <select v-model="invSortBy" class="pill-select compact sort-select" aria-label="Urutkan Daftar Invoice">
-                <option value="newest">Terbaru Dibuat</option>
-                <option value="due_asc">Jatuh Tempo Terdekat</option>
-                <option value="balance_desc">Sisa Piutang Terbesar</option>
-                <option value="amount_desc">Nilai Tagihan Terbesar</option>
-              </select>
+              <button v-if="hasActiveInvFilters" type="button" class="pill-btn-soft" @click="resetInvFilters">
+                Reset
+              </button>
             </div>
           </div>
 
@@ -2855,7 +2917,7 @@ onMounted(() => {
                   <div v-else-if="inv.approvedByName" class="cell-sub">Disetujui {{ inv.approvedByName }}</div>
                 </td>
                 <td class="col-num">
-                  <div class="inline-actions">
+                  <div class="inline-actions inv-actions">
                     <!-- Button 1: Upload / Lihat Bukti Pendukung Invoice -->
                     <button
                       type="button"
@@ -3028,123 +3090,13 @@ onMounted(() => {
       </section>
     </div>
 
-    <!-- ==================== TAB 5: KATALOG LAYANAN 4 UNIT & PELANGGAN ==================== -->
-    <div v-else class="rev-stack">
-      <section class="poital-card table-card-flush">
-        <div class="dropx-card-head">
-          <div class="dropx-head-top">
-            <div>
-              <h2 class="card-title">Katalog Layanan &amp; Mapping COA (4 Unit)</h2>
-              <span class="card-sub">Kode layanan dibuat otomatis oleh sistem; tarif, kategori, COA Pertor 310, dan pajak dapat diperbarui kapan saja</span>
-            </div>
-          </div>
-          <div class="dropx-filter-row">
-            <div class="dropx-search-box">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-              <input
-                v-model="searchQuery"
-                type="search"
-                class="dropx-search-input"
-                placeholder="Cari kode layanan, nama, COA..."
-              />
-            </div>
-          </div>
-        </div>
-
-        <div class="table-wrap">
-          <table class="clean-table">
-            <thead>
-              <tr>
-                <th>Kode &amp; Unit</th>
-                <th>Nama Layanan &amp; Kategori</th>
-                <th>Kode COA</th>
-                <th>Skema Pajak</th>
-                <th class="col-num">Tarif Satuan</th>
-                <th class="col-num">Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="p in paginatedProducts" :key="p.id">
-                <td>
-                  <div class="mono-code">{{ p.sku }}</div>
-                  <span class="unit-mini-tag">{{ p.businessUnit?.code?.replace('BU-', '') }}</span>
-                </td>
-                <td>
-                  <strong>{{ p.name }}</strong>
-                  <div class="cell-sub">{{ p.category }}{{ p.location ? ` · ${p.location}` : '' }} · per {{ p.unit }}</div>
-                </td>
-                <td class="mono-code">{{ p.revenueAccountCode }}</td>
-                <td>
-                  <span class="tag-pill ok">{{ getTaxSchemeShort(p.taxScheme) }}</span>
-                  <div class="cell-sub">{{ p.taxInclusive !== false ? 'Include Pajak' : 'Exclude Pajak' }}</div>
-                </td>
-                <td class="col-num"><strong class="money">{{ formatRupiah(p.unitPrice) }}</strong></td>
-                <td class="col-num">
-                  <button v-if="auth.hasPermission('revenue:create')" type="button" class="mini-action-btn soft" @click="openEditProductModal(p)">
-                    Edit Layanan
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <TablePagination
-          v-model:page="prodPage"
-          v-model:pageSize="pageSize"
-          :total-items="filteredProducts.length"
-          item-label="layanan"
-        />
-      </section>
-
-      <!-- Master Pelanggan & Instansi -->
-      <section class="poital-card">
-        <div class="card-head-row">
-          <div>
-            <h2 class="card-title">Daftar Pelanggan &amp; Instansi ({{ customers.length }})</h2>
-            <span class="card-sub">Profil pemungut pajak (FP 040 / FP 020 / FP 030 / Internal UT) otomatis diterapkan saat menerbitkan tagihan</span>
-          </div>
-          <button v-if="auth.hasPermission('revenue:create')" type="button" class="pill-btn-soft" @click="addCustModalOpen = true">
-            + Pelanggan Baru
-          </button>
-        </div>
-
-        <div class="table-wrap">
-          <table class="clean-table">
-            <thead>
-              <tr>
-                <th>Kode</th>
-                <th>Nama Pelanggan / Instansi</th>
-                <th>Tipe &amp; Profil Pajak</th>
-                <th>PIC &amp; Kontak</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="customers.length === 0">
-                <td colspan="4" class="empty-cell">Belum ada data pelanggan terdaftar.</td>
-              </tr>
-              <tr v-for="c in customers" :key="c.id">
-                <td class="mono-code">{{ c.code }}</td>
-                <td>
-                  <strong>{{ c.name }}</strong>
-                  <div class="cell-sub">{{ c.address }}</div>
-                </td>
-                <td>
-                  <span class="tag-pill info">{{ formatOrgTypeLabel(c.organizationType) }}</span>
-                  <div class="cell-sub">{{ c.taxCollectorProfile || 'FP_040_UMUM' }}</div>
-                </td>
-                <td>
-                  <div>{{ c.contactPerson }}</div>
-                  <div class="cell-sub">{{ c.phone }} · {{ c.email }}</div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-
-    <!-- ==================== MODAL 1: UNIFIED INPUT BUKU HARIAN (KWITANSI / TANDA TERIMA / INVOICE) ==================== -->
-    <ModalDialog :open="entryModalOpen" title="Input Buku Harian Penerimaan" maxWidth="1120px" @close="!addCustModalOpen && (entryModalOpen = false)">
+    <!-- ==================== MODAL 1: INPUT BUKU HARIAN / BUAT INVOICE (100% AUTO-FIT TAX) ==================== -->
+    <ModalDialog
+      :open="entryModalOpen"
+      :title="entryMode === 'INVOICE' ? 'Terbitkan Tagihan & Invoice Baru' : 'Input Buku Harian Penerimaan'"
+      maxWidth="1040px"
+      @close="entryModalOpen = false"
+    >
       <AlertBanner
         v-if="modalErrorMsg"
         variant="danger"
@@ -3154,7 +3106,8 @@ onMounted(() => {
         @dismiss="modalErrorMsg = ''"
       />
 
-      <div class="entry-mode-grid" role="tablist" aria-label="Pilih Jenis Pencatatan Buku Harian">
+      <!-- Switcher khusus Buku Harian (Kwitansi vs Tanda Terima) -->
+      <div v-if="entryMode !== 'INVOICE'" class="entry-mode-grid cols-2" role="tablist" aria-label="Pilih Jenis Bukti Uang Masuk">
         <button
           v-if="auth.hasPermission('payment:create')"
           type="button"
@@ -3175,16 +3128,6 @@ onMounted(() => {
           <strong>Serah Terima &rarr; Tanda Terima</strong>
           <span>Kamar Wisma / unit internal UT (TT)</span>
         </button>
-        <button
-          v-if="auth.hasPermission('revenue:create')"
-          type="button"
-          class="entry-mode-card"
-          :class="{ active: entryMode === 'INVOICE' }"
-          @click="switchEntryMode('INVOICE')"
-        >
-          <strong>Tagihan Baru &rarr; Invoice</strong>
-          <span>Klien belum bayar, masuk Aging Piutang</span>
-        </button>
       </div>
 
       <div class="auto-sku-strip" style="margin-bottom: 14px;">
@@ -3194,7 +3137,7 @@ onMounted(() => {
 
       <!-- MODE A: TAGIHAN BARU -> TERBITKAN INVOICE -->
       <form v-if="entryMode === 'INVOICE'" class="clean-form" @submit.prevent="submitCreateInvoice">
-        <div class="form-2col">
+        <div class="form-3col">
           <div class="field">
             <label>Unit Bisnis</label>
             <select v-model="invoiceForm.businessUnitId" class="input" required @change="handleInvoiceUnitChange">
@@ -3202,10 +3145,7 @@ onMounted(() => {
             </select>
           </div>
           <div class="field">
-            <div class="field-head-row">
-              <label>Pelanggan / Instansi</label>
-              <button type="button" class="inline-link-btn" @click="openQuickAddCustomerForInvoice">+ Pelanggan Baru</button>
-            </div>
+            <label>Pelanggan / Instansi (dari Master Data)</label>
             <select v-model="invoiceForm.customerId" class="input" required @change="handleInvoiceCustomerChange">
               <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.name }} ({{ formatOrgTypeLabel(c.organizationType) }})</option>
             </select>
@@ -3214,12 +3154,6 @@ onMounted(() => {
             <label>Jenis Tagihan</label>
             <select v-model="invoiceForm.invoiceType" class="input">
               <option v-for="t in INVOICE_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Profil Pemungut Pajak / FP</label>
-            <select v-model="invoiceForm.taxCollectorProfile" class="input" @change="handleInvoiceCollectorChange">
-              <option v-for="p in COLLECTOR_PROFILES" :key="p.value" :value="p.value">{{ p.label }}</option>
             </select>
           </div>
         </div>
@@ -3244,7 +3178,7 @@ onMounted(() => {
           <div v-for="(line, idx) in invoiceForm.lines" :key="idx" class="line-item-card">
             <div class="line-card-top" :class="{ 'has-del': invoiceForm.lines.length > 1 }">
               <div class="field">
-                <label>Layanan Katalog</label>
+                <label>Layanan Katalog (Master Data)</label>
                 <Select
                   v-model="line.productServiceId"
                   :options="invoiceCatalogOptions"
@@ -3300,7 +3234,7 @@ onMounted(() => {
         <div class="form-2col">
           <div class="field">
             <label>Kode COA Pendapatan (Per Unit · v7)</label>
-            <select v-model="invoiceForm.revenueAccountCode" class="input" required>
+            <select v-model="invoiceForm.revenueAccountCode" class="input" required @change="handleInvoiceCoaChange">
               <optgroup :label="invoiceGroupedCoas.unitGroupLabel">
                 <option v-for="c in invoiceGroupedCoas.primary" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
               </optgroup>
@@ -3310,9 +3244,11 @@ onMounted(() => {
             </select>
           </div>
           <div class="field">
-            <label>Skema Pajak PTNBH</label>
-            <select v-model="invoiceForm.taxScheme" class="input">
-              <option v-for="ts in TAX_SCHEMES" :key="ts.value" :value="ts.value">{{ ts.label }}</option>
+            <label>Rekening Tujuan Transfer</label>
+            <select v-model="invoiceForm.bankAccountId" class="input">
+              <option v-for="b in penerimaanBankAccounts" :key="b.id" :value="b.id">
+                {{ b.code === 'BNK-MDR-01' ? 'Bank Mandiri Penerimaan (164-00-2022-999-5)' : `${b.bankName} (${b.accountNumberMasked})` }}
+              </option>
             </select>
           </div>
         </div>
@@ -3340,21 +3276,15 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="form-2col">
-          <div class="field">
-            <label>Rekening Tujuan Transfer</label>
-            <select v-model="invoiceForm.bankAccountId" class="input">
-              <option v-for="b in penerimaanBankAccounts" :key="b.id" :value="b.id">
-                {{ b.code === 'BNK-MDR-01' ? 'Bank Mandiri Penerimaan (164-00-2022-999-5)' : `${b.bankName} (${b.accountNumberMasked})` }}
-              </option>
-            </select>
+        <!-- Auto-Fit Locked Tax Summary Banner -->
+        <div class="auto-tax-banner">
+          <div class="auto-tax-head">
+            <span class="auto-tax-badge">Pajak Otomatis (Auto-Fit)</span>
+            <strong>{{ invoiceAutoTaxSummary.schemeLabel }} · {{ invoiceAutoTaxSummary.inclusiveLabel }}</strong>
+            <span class="auto-tax-sep">|</span>
+            <strong>{{ invoiceAutoTaxSummary.collectorLabel }}</strong>
           </div>
-          <div class="field check-align">
-            <label class="check-label">
-              <input v-model="invoiceForm.taxInclusive" type="checkbox" />
-              <span>Harga sudah termasuk pajak (Inclusive)</span>
-            </label>
-          </div>
+          <span class="auto-tax-sub">{{ invoiceAutoTaxSummary.sourceHint }}</span>
         </div>
 
         <!-- Collapsible Extra Metadata (PIC / SUB / Catatan) -->
@@ -3504,28 +3434,13 @@ onMounted(() => {
         <div class="form-2col">
           <div class="field">
             <label>Kode COA Pendapatan (Per Unit · v7)</label>
-            <select v-model="directForm.revenueAccountCode" class="input" required>
+            <select v-model="directForm.revenueAccountCode" class="input" required @change="handleDirectCoaChange">
               <optgroup :label="directGroupedCoas.unitGroupLabel">
                 <option v-for="c in directGroupedCoas.primary" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
               </optgroup>
               <optgroup v-if="directGroupedCoas.others.length" :label="directGroupedCoas.othersGroupLabel">
                 <option v-for="c in directGroupedCoas.others" :key="c.code" :value="c.code">{{ c.code }} - {{ c.name }}</option>
               </optgroup>
-            </select>
-          </div>
-          <div class="field">
-            <label>Skema Pajak PTNBH</label>
-            <select v-model="directForm.taxScheme" class="input">
-              <option v-for="ts in TAX_SCHEMES" :key="ts.value" :value="ts.value">{{ ts.label }}</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-2col">
-          <div class="field">
-            <label>Profil Pemungut Pajak / FP</label>
-            <select v-model="directForm.taxCollectorProfile" class="input" @change="handleDirectCollectorChange">
-              <option v-for="p in COLLECTOR_PROFILES" :key="p.value" :value="p.value">{{ p.label }}</option>
             </select>
           </div>
           <div class="field">
@@ -3539,7 +3454,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="form-3col">
+        <div class="form-2col">
           <div class="field">
             <label>Metode Pembayaran</label>
             <select v-model="directForm.method" class="input">
@@ -3562,12 +3477,17 @@ onMounted(() => {
               <option value="TERMIN">Termin</option>
             </select>
           </div>
-          <div class="field check-align">
-            <label class="check-label">
-              <input v-model="directForm.taxInclusive" type="checkbox" />
-              <span>Nominal sudah termasuk pajak (Inclusive)</span>
-            </label>
+        </div>
+
+        <!-- Auto-Fit Locked Tax Summary Banner -->
+        <div class="auto-tax-banner">
+          <div class="auto-tax-head">
+            <span class="auto-tax-badge">Pajak Otomatis (Auto-Fit)</span>
+            <strong>{{ directAutoTaxSummary.schemeLabel }} · {{ directAutoTaxSummary.inclusiveLabel }}</strong>
+            <span class="auto-tax-sep">|</span>
+            <strong>{{ directAutoTaxSummary.collectorLabel }}</strong>
           </div>
+          <span class="auto-tax-sub">{{ directAutoTaxSummary.sourceHint }}</span>
         </div>
 
         <!-- Collapsible Detail Tambahan (NPWP/KTP, Alamat, Tgl Kegiatan, Tgl Setor, PIC/SUB, Refund) -->
@@ -4490,6 +4410,86 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
+.dropx-toolbar-left,
+.dropx-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-toggle-btn.active {
+  border-color: #034693;
+  background: rgba(3, 70, 147, 0.06);
+  color: #034693;
+}
+
+.filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: #034693;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.adv-filter-tray {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.master-seg-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  gap: 3px;
+}
+
+.master-seg-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.master-seg-btn:hover:not(.active) {
+  color: #111827;
+}
+
+.master-seg-btn.active {
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
 .dropx-search-box {
   position: relative;
   display: flex;
@@ -4937,11 +4937,15 @@ onMounted(() => {
   color: #ffffff;
 }
 
-/* DropX Luminous 4-Card Gradient KPI Row */
+/* DropX Luminous Gradient KPI Row */
 .kpi-metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+}
+
+.kpi-metric-row.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .dropx-kpi-card {
@@ -5239,7 +5243,8 @@ onMounted(() => {
   background: rgba(239, 68, 68, 0.1); color: #dc2626; font-size: 11px; font-weight: 500;
 }
 
-.inline-actions { display: inline-flex; gap: 5px; justify-content: flex-end; flex-wrap: wrap; max-width: 190px; }
+.inline-actions { display: inline-flex; gap: 6px; justify-content: flex-end; flex-wrap: nowrap; align-items: center; }
+.inline-actions.inv-actions { display: inline-grid; grid-template-columns: repeat(2, auto); gap: 5px; justify-content: end; }
 .mini-action-btn {
   border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px 9px; height: 28px; font-size: 12px; font-weight: 500;
   background: #ffffff; color: #374151; cursor: pointer; white-space: nowrap;
@@ -5354,6 +5359,55 @@ onMounted(() => {
 .extra-accordion-panel {
   display: flex; flex-direction: column; gap: 10px;
   padding: 12px 14px; border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0;
+}
+
+.entry-mode-grid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.auto-tax-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(3, 70, 147, 0.05);
+  border: 1px solid rgba(3, 70, 147, 0.18);
+}
+
+.auto-tax-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+  color: #111827;
+}
+
+.auto-tax-head strong {
+  font-weight: 600;
+  color: #034693;
+}
+
+.auto-tax-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 9999px;
+  background: #034693;
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.auto-tax-sep {
+  color: #cbd5e1;
+}
+
+.auto-tax-sub {
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .live-tax-preview {

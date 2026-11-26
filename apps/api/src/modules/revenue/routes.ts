@@ -270,6 +270,66 @@ revenueRouter.post('/customers', requirePermission('revenue:create'), async (req
   }
 });
 
+const updateCustomerSchema = z.object({
+  name: z.string().min(3).optional(),
+  organizationType: z.enum(['CORPORATE', 'GOVERNMENT', 'SOE_BUMN', 'INDIVIDUAL', 'INTERNAL_UT']).optional(),
+  taxCollectorProfile: z
+    .enum(['FP_040_UMUM', 'FP_020_INSTANSI', 'FP_030_BUMN', 'BADAN_POTONG_PPH', 'INTERNAL_UT'])
+    .optional(),
+  taxIdNpwp: z.string().nullable().optional(),
+  contactPerson: z.string().min(2).optional(),
+  email: z.string().email().optional(),
+  phone: z.string().min(6).optional(),
+  address: z.string().min(5).optional(),
+  creditLimit: z.number().nonnegative().optional(),
+});
+
+revenueRouter.put('/customers/:id', requirePermission('revenue:create'), async (req, res, next) => {
+  try {
+    const parsed = updateCustomerSchema.parse(req.body);
+    const existing = await prisma.customer.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw new AppError(404, 'CUSTOMER_NOT_FOUND', 'Pelanggan tidak ditemukan.');
+
+    const updated = await prisma.customer.update({
+      where: { id: existing.id },
+      data: {
+        ...(parsed.name !== undefined ? { name: parsed.name.trim() } : {}),
+        ...(parsed.organizationType !== undefined ? { organizationType: parsed.organizationType } : {}),
+        ...(parsed.taxCollectorProfile !== undefined ? { taxCollectorProfile: parsed.taxCollectorProfile } : {}),
+        ...(parsed.taxIdNpwp !== undefined ? { taxIdNpwp: parsed.taxIdNpwp?.trim() || null } : {}),
+        ...(parsed.contactPerson !== undefined ? { contactPerson: parsed.contactPerson.trim() } : {}),
+        ...(parsed.email !== undefined ? { email: parsed.email.toLowerCase().trim() } : {}),
+        ...(parsed.phone !== undefined ? { phone: parsed.phone.trim() } : {}),
+        ...(parsed.address !== undefined ? { address: parsed.address.trim() } : {}),
+        ...(parsed.creditLimit !== undefined ? { creditLimit: fromCents(toCents(parsed.creditLimit)) } : {}),
+      },
+    });
+
+    await recordAuditLog({
+      actorId: req.user!.userId,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: 'CUSTOMER_UPDATED',
+      module: 'REVENUE',
+      entityType: 'Customer',
+      entityId: updated.id,
+      entityCode: updated.code,
+      summary: `Memperbarui data pelanggan ${updated.code} (${updated.name}) - Profil Pajak ${updated.taxCollectorProfile}`,
+      beforeData: existing,
+      afterData: updated,
+      requestId: req.requestId,
+    });
+
+    res.json({
+      success: true,
+      data: { ...updated, creditLimit: Number(updated.creditLimit) },
+      meta: { requestId: req.requestId },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 revenueRouter.get('/products', requirePermission('revenue:view'), async (req, res, next) => {
   try {
     const includeInactive = req.query.includeInactive === 'true';
@@ -309,7 +369,9 @@ const createProductSchema = z.object({
   unitPrice: z.number().nonnegative(),
   unit: z.string().default('Paket'),
   taxCode: z.string().default('PPN-12'),
-  taxScheme: z.enum(['PB1_10', 'PPN12_PMK131', 'PPN12_PPH4_2', 'PPN12_PPH23', 'BEBAS_PAJAK']).default('PPN12_PMK131'),
+  taxScheme: z
+    .enum(['PB1_10', 'PPN12_PMK131', 'PPN12_PPH4_2', 'PPN12_PPH23', 'PPN12_PPH23_15', 'PPH21_5', 'BEBAS_PAJAK'])
+    .default('PPN12_PMK131'),
   taxInclusive: z.boolean().default(true),
   revenueAccountCode: z.string().default('420301090100'),
   overtimeNote: z.string().optional().nullable(),
