@@ -139,6 +139,17 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('pmo_active_workspace');
   }
 
+  function ensureValidWorkspace() {
+    if (!user.value) return;
+    if (activeWorkspace.value === 'PENERIMAAN' && canAccessPenerimaan.value) return;
+    if (activeWorkspace.value === 'PENGELUARAN' && canAccessPengeluaran.value) return;
+    if (canAccessPenerimaan.value) {
+      setWorkspace('PENERIMAAN');
+    } else if (canAccessPengeluaran.value) {
+      setWorkspace('PENGELUARAN');
+    }
+  }
+
   async function login(email: string, password: string) {
     const res = await apiFetch<{ token: string; user: UserProfile }>('/auth/login', {
       method: 'POST',
@@ -215,6 +226,7 @@ export const useAuthStore = defineStore('auth', () => {
     canAccessPengeluaran,
     setWorkspace,
     resetWorkspace,
+    ensureValidWorkspace,
     effectiveRoleCode,
     effectiveRoleName,
     effectivePermissions,

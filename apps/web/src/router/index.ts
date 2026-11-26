@@ -20,6 +20,9 @@ import HrisView from '../modules/HrisView.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior() {
+    return { top: 0 };
+  },
   routes: [
     {
       path: '/login',
@@ -35,7 +38,7 @@ export const router = createRouter({
           path: '',
           name: 'apps-launcher',
           component: AppsLauncherView,
-          meta: { title: 'Menu Aplikasi ERP' },
+          meta: { title: 'Pilih Modul Keuangan' },
         },
         {
           path: 'apps',

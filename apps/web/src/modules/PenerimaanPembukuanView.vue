@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { apiFetch, downloadApiBlob } from '../services/api';
 import { formatRupiah, formatDate } from '../utils/format';
@@ -10,12 +10,39 @@ import AlertBanner from '../components/AlertBanner.vue';
 import PenerimaanPrintModal, { type PrintDocMode } from '../components/PenerimaanPrintModal.vue';
 
 const auth = useAuthStore();
-const router = useRouter();
+const route = useRoute();
 
-type PembukuanTab = 'umum' | 'pajak';
-const activeTab = ref<PembukuanTab>('umum');
-const umumSubTab = ref<'bku' | 'jurnal'>('bku');
-const pajakSubTab = ref<'perincian' | 'surat'>('perincian');
+type PembukuanSection = 'bku' | 'jurnal' | 'perincian' | 'surat';
+const activeSection = ref<PembukuanSection>('bku');
+
+function applySectionFromQuery() {
+  const qSec = typeof route.query.section === 'string' ? route.query.section : '';
+  if (qSec === 'bku' || qSec === 'jurnal' || qSec === 'perincian' || qSec === 'surat') {
+    activeSection.value = qSec;
+  }
+}
+
+watch(() => route.query.section, applySectionFromQuery);
+
+const pageTitle = computed(() => {
+  if (activeSection.value === 'jurnal') return 'Jurnal Umum Penerimaan';
+  if (activeSection.value === 'perincian') return 'Perincian Pajak Penerimaan';
+  if (activeSection.value === 'surat') return 'Surat Penarikan Pajak & Pivot COA';
+  return 'Buku Kas Umum (BKU) Penerimaan';
+});
+
+const pageSubtitle = computed(() => {
+  if (activeSection.value === 'jurnal') {
+    return 'Jurnal otomatis Buku Besar atas transaksi penerimaan yang disetujui beserta potongan pajak PTNBH';
+  }
+  if (activeSection.value === 'perincian') {
+    return 'Rincian PPN 12%, PPh 4(2) 10%, PPh 23 2%, PB1 10%, kontrol rekening tampungan, dan bukti potong';
+  }
+  if (activeSection.value === 'surat') {
+    return 'Rekap penarikan pajak ke Universitas Terbuka, rincian lebih bayar, dan pivot penerimaan per akun COA';
+  }
+  return 'Mutasi masuk Bank Mandiri, komponen potongan pajak UT, dan saldo bersih berjalan kas PMO';
+});
 
 const loading = ref(true);
 const exporting = ref(false);
@@ -192,7 +219,10 @@ async function exportMonthlyExcel() {
   }
 }
 
-onMounted(loadData);
+onMounted(() => {
+  applySectionFromQuery();
+  loadData();
+});
 </script>
 
 <template>
@@ -200,7 +230,8 @@ onMounted(loadData);
     <!-- Top Bar -->
     <div class="rev-top-bar">
       <div>
-        <h1 class="rev-title">Pembukuan Penerimaan</h1>
+        <h1 class="rev-title">{{ pageTitle }}</h1>
+        <p class="rev-subtitle">{{ pageSubtitle }}</p>
       </div>
 
       <div class="rev-top-actions">
@@ -254,54 +285,65 @@ onMounted(loadData);
         >
           Rekon Bank ({{ recapData?.summary?.reconciledCount || 0 }})
         </button>
-        <button type="button" class="unit-pill" @click="router.push('/reconciliation')">
-          &larr; Rekonsiliasi
-        </button>
       </div>
     </div>
 
     <AlertBanner v-if="feedbackMsg" variant="success" title="Berhasil" :message="feedbackMsg" @dismiss="feedbackMsg = ''" />
     <AlertBanner v-if="errorMsg" variant="danger" title="Perhatian" :message="errorMsg" @dismiss="errorMsg = ''" />
 
-    <!-- Poital 4-Card KPI Row -->
+    <!-- DropX Luminous 4-Card Gradient KPI Row -->
     <section class="kpi-metric-row">
-      <article class="metric-card hero-card">
-        <span class="metric-title">Masuk Rekening ({{ recapData?.period?.label || selectedMonth }})</span>
-        <strong class="metric-number-val money">{{ formatRupiah(recapData?.summary?.totalReceived || 0) }}</strong>
-        <span class="trend-text">
+      <article class="dropx-kpi-card kpi-grad-navy">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Masuk Rekening ({{ recapData?.period?.label || selectedMonth }})</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(recapData?.summary?.totalReceived || 0) }}</strong>
+        <span class="kpi-foot">
           {{ reconciledOnly ? 'Khusus terekonsiliasi Bank Mandiri' : `${recapData?.summary?.totalTransactions || 0} transaksi tercatat` }}
         </span>
       </article>
-      <article class="metric-card blue-card">
-        <span class="metric-title">Saldo Bersih PMO (BKU Umum)</span>
-        <strong class="metric-number-val money dark-num">{{ formatRupiah(recapData?.summary?.totalNetClean || 0) }}</strong>
-        <span class="trend-text">Setelah pajak UT &amp; pengembalian</span>
+
+      <article class="dropx-kpi-card kpi-grad-emerald">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Saldo Bersih PMO (BKU Umum)</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(recapData?.summary?.totalNetClean || 0) }}</strong>
+        <span class="kpi-foot">Setelah pajak UT &amp; pengembalian</span>
       </article>
-      <article class="metric-card amber-card">
-        <span class="metric-title">Total Penarikan Pajak ke UT</span>
-        <strong class="metric-number-val money dark-num">{{ formatRupiah(recapData?.summary?.totalTaxWithdrawal || 0) }}</strong>
-        <span class="trend-text">PPN 12% · PPh 4(2) · PB1 10%</span>
+
+      <article class="dropx-kpi-card kpi-grad-amber">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Total Penarikan Pajak ke UT</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(recapData?.summary?.totalTaxWithdrawal || 0) }}</strong>
+        <span class="kpi-foot">PPN 12% · PPh 4(2) · PB1 10%</span>
       </article>
-      <article class="metric-card white-card">
-        <span class="metric-title">Lebih Bayar / Pengembalian</span>
-        <strong class="metric-number-val money dark-num">{{ formatRupiah(recapData?.summary?.totalOverpaymentRefund || 0) }}</strong>
-        <span class="trend-text">
+
+      <article class="dropx-kpi-card kpi-grad-ocean">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Lebih Bayar / Pengembalian</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(recapData?.summary?.totalOverpaymentRefund || 0) }}</strong>
+        <span class="kpi-foot">
           {{ recapData?.withdrawal?.excludedCount || 0 }} transaksi potong sendiri / tampungan
         </span>
       </article>
     </section>
 
-    <!-- 2 Primary PIC Tabs: UMUM & PAJAK -->
-    <div class="rev-tab-strip">
-      <div class="tab-pills" role="tablist">
-        <button type="button" class="tab-pill" :class="{ active: activeTab === 'umum' }" @click="activeTab = 'umum'">
-          1. Pembukuan Umum (BKU &amp; Jurnal)
-        </button>
-        <button type="button" class="tab-pill" :class="{ active: activeTab === 'pajak' }" @click="activeTab = 'pajak'">
-          2. Pembukuan Pajak (Perincian &amp; Surat Penarikan)
-        </button>
-      </div>
-
+    <!-- Search Bar only (Sub-pages BKU / Jurnal / Perincian / Surat switched strictly via Left Sidebar) -->
+    <div class="rev-search-strip">
       <input
         v-model="searchQuery"
         type="search"
@@ -312,22 +354,11 @@ onMounted(loadData);
 
     <StateBanner v-if="loading" state="loading" title="Menyusun Pembukuan" message="Mengambil Buku Kas Umum, Jurnal Penerimaan, dan Perincian Pajak..." />
 
-    <!-- ==================== TAB 1: PEMBUKUAN UMUM (BKU & JURNAL) ==================== -->
-    <div v-else-if="activeTab === 'umum'" class="rev-stack">
-      <div class="subtab-bar">
-        <div class="tab-pills">
-          <button type="button" class="tab-pill sm" :class="{ active: umumSubTab === 'bku' }" @click="umumSubTab = 'bku'">
-            Buku Kas Umum (BKU) ({{ bkuRowsWithRunning.length }})
-          </button>
-          <button type="button" class="tab-pill sm" :class="{ active: umumSubTab === 'jurnal' }" @click="umumSubTab = 'jurnal'">
-            Jurnal Buku Besar Penerimaan ({{ recapData?.journals?.length || 0 }})
-          </button>
-        </div>
-      </div>
-
+    <!-- ==================== 1A: BUKU KAS UMUM (BKU) ==================== -->
+    <div v-else-if="activeSection === 'bku' || activeSection === 'jurnal'" class="rev-stack">
       <!-- 1A: Buku Kas Umum (BKU) -->
-      <section v-if="umumSubTab === 'bku'" class="poital-card">
-        <div class="card-head-row">
+      <section v-if="activeSection === 'bku'" class="poital-card table-card-flush">
+        <div class="card-head-pad">
           <div>
             <h2 class="card-title">Buku Kas Umum (BKU) Penerimaan · {{ recapData?.period?.label }}</h2>
             <span class="card-sub">Mutasi penerimaan Bank Mandiri beserta potongan pajak UT dan saldo bersih berjalan PMO</span>
@@ -338,34 +369,32 @@ onMounted(loadData);
           <table class="clean-table compact">
             <thead>
               <tr>
-                <th>No</th>
-                <th>Tanggal &amp; Dokumen</th>
+                <th>Tgl &amp; Dokumen</th>
                 <th>Uraian &amp; Unit</th>
                 <th>Bank</th>
                 <th class="col-num">Bruto Masuk</th>
                 <th class="col-num">PPN 12%</th>
-                <th class="col-num">PPh 4(2)</th>
-                <th class="col-num">PB1 10%</th>
-                <th class="col-num">PPh 23/21</th>
+                <th class="col-num">PPh &amp; PB1</th>
                 <th class="col-num">Bersih PMO</th>
                 <th class="col-num">Saldo Berjalan</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="bkuRowsWithRunning.length === 0">
-                <td colspan="11" class="empty-cell">
+                <td colspan="8" class="empty-cell">
                   {{ reconciledOnly ? 'Belum ada transaksi yang terekonsiliasi Bank Mandiri pada periode ini.' : 'Belum ada data BKU pada periode ini.' }}
                 </td>
               </tr>
               <tr v-for="r in bkuRowsWithRunning" :key="r.id">
-                <td>{{ r.no }}</td>
-                <td>
-                  <div class="mono-code">{{ r.paymentDate }}</div>
-                  <div class="cell-sub">{{ r.receiptNumber }}</div>
+                <td class="nowrap-cell">
+                  <div class="mono-code">{{ r.receiptNumber }}</div>
+                  <div class="cell-sub">{{ r.paymentDate }}</div>
                 </td>
                 <td>
-                  <strong>{{ r.activityTitle }}</strong>
-                  <span class="unit-mini-tag">{{ r.businessUnitCode.replace('BU-', '') }}</span>
+                  <div class="uraian-line">
+                    <strong>{{ r.activityTitle }}</strong>
+                    <span class="unit-mini-tag">{{ r.businessUnitCode.replace('BU-', '') }}</span>
+                  </div>
                   <div class="cell-sub">{{ r.payerName }} · COA {{ r.revenueAccountCode }}</div>
                 </td>
                 <td>
@@ -374,9 +403,14 @@ onMounted(loadData);
                 </td>
                 <td class="col-num money">{{ formatRupiah(r.bankReceivedAmount) }}</td>
                 <td class="col-num money">{{ formatRupiah(r.ppnAmount) }}</td>
-                <td class="col-num money">{{ formatRupiah(r.pph42Amount) }}</td>
-                <td class="col-num money">{{ formatRupiah(r.pb1Amount) }}</td>
-                <td class="col-num money">{{ formatRupiah((r.pph23Amount || 0) + (r.pph23Rate15Amount || 0) + (r.pph21Amount || 0)) }}</td>
+                <td class="col-num">
+                  <div class="money">
+                    {{ formatRupiah((r.pph42Amount || 0) + (r.pb1Amount || 0) + (r.pph23Amount || 0) + (r.pph23Rate15Amount || 0) + (r.pph21Amount || 0)) }}
+                  </div>
+                  <div class="cell-sub" v-if="(r.pb1Amount || 0) > 0">PB1 {{ formatRupiah(r.pb1Amount) }}</div>
+                  <div class="cell-sub" v-else-if="(r.pph42Amount || 0) > 0">PPh 4(2) {{ formatRupiah(r.pph42Amount) }}</div>
+                  <div class="cell-sub" v-else-if="((r.pph23Amount || 0) + (r.pph23Rate15Amount || 0) + (r.pph21Amount || 0)) > 0">PPh 23/21</div>
+                </td>
                 <td class="col-num"><strong class="money text-pos">{{ formatRupiah(r.netClean) }}</strong></td>
                 <td class="col-num"><strong class="money">{{ formatRupiah(r.runningBalance) }}</strong></td>
               </tr>
@@ -438,19 +472,8 @@ onMounted(loadData);
 
     <!-- ==================== TAB 2: PEMBUKUAN PAJAK (PERINCIAN & SURAT PENARIKAN) ==================== -->
     <div v-else class="rev-stack">
-      <div class="subtab-bar">
-        <div class="tab-pills">
-          <button type="button" class="tab-pill sm" :class="{ active: pajakSubTab === 'perincian' }" @click="pajakSubTab = 'perincian'">
-            Perincian Pajak ({{ filteredRows.length }})
-          </button>
-          <button type="button" class="tab-pill sm" :class="{ active: pajakSubTab === 'surat' }" @click="pajakSubTab = 'surat'">
-            Surat Penarikan Pajak &amp; Pivot COA
-          </button>
-        </div>
-      </div>
-
       <!-- 2A: Perincian Pajak -->
-      <section v-if="pajakSubTab === 'perincian'" class="poital-card">
+      <section v-if="activeSection === 'perincian'" class="poital-card">
         <div class="card-head-row">
           <div>
             <h2 class="card-title">Perincian Pajak Penerimaan · {{ recapData?.period?.label }}</h2>
@@ -653,25 +676,43 @@ onMounted(loadData);
 
 <style scoped>
 .poital-penerimaan {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+  padding-bottom: 28px;
 }
 
 .rev-top-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
+}
+
+.rev-top-bar > div:first-child {
+  flex: 1;
+  min-width: 240px;
 }
 
 .rev-title {
   margin: 0;
-  font-size: 1.55rem;
-  font-weight: 800;
-  color: #0b2144;
-  letter-spacing: -0.02em;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+  color: #111827;
+  letter-spacing: -0.025em;
+}
+
+.rev-subtitle {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.45;
+  max-width: 560px;
 }
 
 .rev-top-actions {
@@ -679,18 +720,46 @@ onMounted(loadData);
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+.table-card-flush {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.card-head-pad {
+  padding: 18px 20px 14px;
+}
+
+.nowrap-cell {
+  white-space: nowrap;
+}
+
+.uraian-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .pill-month-input,
 .pill-search-input {
-  height: 38px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  color: #0f172a;
-  font-size: 0.85rem;
-  font-weight: 500;
+  color: #111827;
+  font-size: 13.5px;
+  font-weight: 400;
+  outline: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.pill-month-input:focus,
+.pill-search-input:focus {
+  border-color: #034693;
+  box-shadow: 0 0 0 2px rgba(3, 70, 147, 0.2);
 }
 
 .pill-search-input {
@@ -699,33 +768,35 @@ onMounted(loadData);
 
 .pill-btn-navy,
 .pill-btn-soft {
-  height: 38px;
-  padding: 0 16px;
-  border-radius: 999px;
-  font-size: 0.84rem;
-  font-weight: 600;
+  height: 36px;
+  padding: 0 15px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: all 0.15s ease;
+  transition: background 140ms ease, border-color 140ms ease;
 }
 
 .pill-btn-navy {
-  background: #0b2144;
+  background: #034693;
+  border-color: #034693;
   color: #ffffff;
 }
 
-.pill-btn-navy:hover {
-  background: #133163;
+.pill-btn-navy:hover:not(:disabled) {
+  background: #023470;
 }
 
 .pill-btn-soft {
   background: #ffffff;
-  color: #0b2144;
-  border-color: #cbd5e1;
+  color: #111827;
+  border-color: #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-.pill-btn-soft:hover {
-  background: #f8fafc;
+.pill-btn-soft:hover:not(:disabled) {
+  background: #f3f4f6;
 }
 
 .unit-filter-bar {
@@ -741,94 +812,76 @@ onMounted(loadData);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
 }
 
 .unit-pill,
 .recon-pill {
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #475569;
-  font-size: 0.8rem;
-  font-weight: 600;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #6b7280;
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.unit-pill:hover:not(.active),
+.recon-pill:hover:not(.active) {
+  background: #f3f4f6;
+  color: #111827;
 }
 
-.unit-pill.active {
-  background: #0b2144;
-  border-color: #0b2144;
-  color: #ffffff;
-}
-
+.unit-pill.active,
 .recon-pill.active {
-  background: #eff6ff;
-  border-color: #2563eb;
-  color: #1d4ed8;
+  background: #034693;
+  color: #ffffff;
 }
 
 .kpi-metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
 
-.metric-card {
+.dropx-kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  padding: 20px;
+  color: #ffffff;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 18px 20px;
-  border-radius: 20px;
-  border: 1px solid #e2e8f0;
+  gap: 4px;
+  border: none;
+  box-shadow: 0 4px 14px -4px rgba(17, 24, 39, 0.16);
+}
+.dropx-kpi-card::before,
+.dropx-kpi-card::after {
+  content: '';
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+.dropx-kpi-card::before { width: 124px; height: 124px; right: -28px; top: -28px; background: rgba(255, 255, 255, 0.12); }
+.dropx-kpi-card::after { width: 92px; height: 92px; right: 24px; bottom: -38px; background: rgba(255, 255, 255, 0.07); }
+.kpi-grad-navy { background: linear-gradient(135deg, #0b2144 0%, #034693 100%); }
+.kpi-grad-emerald { background: linear-gradient(135deg, #22c55e 0%, #10b981 55%, #059669 100%); }
+.kpi-grad-ocean { background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 55%, #0284c7 100%); }
+.kpi-grad-amber { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+
+.rev-search-strip {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.hero-card {
-  background: #0b2144;
-  border-color: #0b2144;
-  color: #ffffff;
-}
-
-.blue-card {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-
-.amber-card {
-  background: #fef9ed;
-  border-color: #fde68a;
-}
-
-.white-card {
-  background: #ffffff;
-}
-
-.metric-title {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.hero-card .metric-title,
-.hero-card .trend-text {
-  color: #cbd5e1;
-}
-
-.metric-number-val {
-  font-size: clamp(1rem, 1.55vw, 1.4rem);
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-
-.dark-num {
-  color: #0b2144;
-}
-
-.trend-text {
-  font-size: 0.76rem;
-  color: #64748b;
-}
+.kpi-top-row { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.kpi-label { font-size: 13px; font-weight: 400; color: rgba(255, 255, 255, 0.9); }
+.kpi-icon-box { width: 38px; height: 38px; border-radius: 8px; background: rgba(255, 255, 255, 0.18); color: #ffffff; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.kpi-value { position: relative; z-index: 1; margin-top: 6px; font-size: clamp(1.25rem, 1.55vw, 1.5rem); line-height: 1.2; font-weight: 700; color: #ffffff; letter-spacing: -0.025em; }
+.kpi-foot { position: relative; z-index: 1; margin-top: 4px; font-size: 12px; font-weight: 400; color: rgba(255, 255, 255, 0.84); }
 
 .rev-tab-strip,
 .subtab-bar {
@@ -836,44 +889,46 @@ onMounted(loadData);
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 6px;
 }
 
 .tab-pills {
-  display: flex;
+  display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  background: #f1f5f9;
-  padding: 4px;
-  border-radius: 999px;
+  gap: 4px;
+  margin-bottom: -7px;
 }
 
 .tab-pill {
-  padding: 8px 16px;
-  border-radius: 999px;
+  padding: 8px 12px 10px;
+  border-radius: 6px 6px 0 0;
   border: none;
+  border-bottom: 2px solid transparent;
   background: transparent;
-  color: #475569;
-  font-size: 0.84rem;
-  font-weight: 600;
+  color: #6b7280;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease;
 }
 
-.tab-pill.sm {
-  padding: 6px 14px;
-  font-size: 0.8rem;
+.tab-pill:hover {
+  color: #111827;
 }
 
 .tab-pill.active {
-  background: #ffffff;
-  color: #0b2144;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+  color: #034693;
+  border-bottom-color: #034693;
+  font-weight: 600;
 }
 
 .rev-stack {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .split-2-grid {
@@ -884,9 +939,10 @@ onMounted(loadData);
 
 .poital-card {
   background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
   padding: 20px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
 }
 
 .card-head-row {
@@ -900,14 +956,16 @@ onMounted(loadData);
 
 .card-title {
   margin: 0;
-  font-size: 1.02rem;
-  font-weight: 700;
-  color: #0b2144;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: #111827;
 }
 
 .card-sub {
-  font-size: 0.8rem;
-  color: #64748b;
+  font-size: 13px;
+  font-weight: 400;
+  color: #6b7280;
 }
 
 .table-wrap {
@@ -918,26 +976,35 @@ onMounted(loadData);
 .clean-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.84rem;
+  font-size: 13.5px;
 }
 
 .clean-table.compact {
-  font-size: 0.79rem;
+  font-size: 13px;
 }
 
 .clean-table th {
   text-align: left;
-  padding: 10px 10px;
-  color: #64748b;
-  font-weight: 600;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 11px 12px;
+  color: #6b7280;
+  background: #fafafa;
+  font-size: 12px;
+  font-weight: 500;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
   white-space: nowrap;
 }
 
 .clean-table td {
-  padding: 11px 10px;
-  border-bottom: 1px solid #f1f5f9;
-  vertical-align: top;
+  padding: 12px 12px;
+  color: #111827;
+  font-weight: 400;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+
+.clean-table tbody tr:hover td {
+  background: rgba(249, 250, 251, 0.85);
 }
 
 .col-num {
@@ -947,20 +1014,21 @@ onMounted(loadData);
 
 .empty-cell {
   text-align: center;
-  padding: 28px !important;
-  color: #64748b;
+  padding: 32px !important;
+  color: #6b7280;
 }
 
 .mono-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #1e293b;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: #034693;
 }
 
 .cell-sub {
-  font-size: 0.75rem;
-  color: #64748b;
+  font-size: 12px;
+  color: #6b7280;
   margin-top: 2px;
 }
 
@@ -968,35 +1036,38 @@ onMounted(loadData);
   display: inline-block;
   margin-left: 6px;
   padding: 1px 7px;
-  border-radius: 999px;
-  background: #f1f5f9;
-  color: #334155;
-  font-size: 0.7rem;
-  font-weight: 700;
+  border-radius: 9999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .tag-pill {
-  display: inline-block;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
+  border: none;
 }
 
 .tag-pill.ok {
-  background: #dcfce7;
-  color: #166534;
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
 }
 
 .tag-pill.info {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
 }
 
 .tag-pill.muted {
-  background: #f1f5f9;
-  color: #64748b;
+  background: #f3f4f6;
+  color: #4b5563;
 }
 
 .text-pos {
@@ -1011,15 +1082,19 @@ onMounted(loadData);
 }
 
 .mini-action-btn {
-  padding: 5px 10px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  color: #0b2144;
-  font-size: 0.75rem;
-  font-weight: 600;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
 }
+.mini-action-btn:hover { background: #f3f4f6; color: #111827; }
+.mini-action-btn.navy { background: #034693; border-color: #034693; color: #ffffff; }
+.mini-action-btn.navy:hover { background: #023470; }
 
 .mini-action-btn.navy {
   background: #0b2144;
@@ -1088,9 +1163,28 @@ onMounted(loadData);
   }
 }
 
+@media (max-width: 768px) {
+  .pill-month-input,
+  .pill-search-input,
+  .pill-btn-navy,
+  .pill-btn-soft {
+    min-height: 44px;
+    height: auto;
+  }
+  .unit-pill,
+  .recon-pill,
+  .tab-pill,
+  .mini-action-btn {
+    min-height: 40px;
+  }
+}
+
 @media (max-width: 680px) {
   .kpi-metric-row {
     grid-template-columns: 1fr;
+  }
+  .dropx-kpi-card {
+    padding: 16px;
   }
   .pill-search-input {
     width: 100%;

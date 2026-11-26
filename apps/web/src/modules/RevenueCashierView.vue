@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import { useRoute } from 'vue-router';
 import Select from 'primevue/select';
 import { useAuthStore } from '../stores/auth';
 import { apiFetch, downloadApiBlob, fetchApiBlob } from '../services/api';
@@ -26,7 +26,6 @@ function getLocalMonthIso(): string {
 }
 
 const auth = useAuthStore();
-const router = useRouter();
 const route = useRoute();
 
 type MainTab = 'buku_harian' | 'invoices' | 'layanan';
@@ -84,6 +83,22 @@ function openReviewModal(targetType: 'PAYMENT' | 'INVOICE', row: any) {
   reviewModalOpen.value = true;
 }
 
+const pageTitle = computed(() => {
+  if (activeTab.value === 'invoices') return 'Tagihan & Invoice Penerimaan';
+  if (activeTab.value === 'layanan') return 'Katalog Layanan & Tarif';
+  return 'Buku Harian Penerimaan';
+});
+
+const pageSubtitle = computed(() => {
+  if (activeTab.value === 'invoices') {
+    return 'Kelola tagihan klien, persetujuan Manajer Keuangan, cetak Invoice KU-003, dan pelunasan piutang';
+  }
+  if (activeTab.value === 'layanan') {
+    return 'Daftar tarif layanan operasional 4 unit bisnis (MICE, Klinik, ITS, TCI) dan pemetaan akun COA resmi';
+  }
+  return 'Pencatatan uang masuk Kwitansi (KU-001) & Tanda Terima (KU-002), persetujuan Manajer Keuangan, serta status rekonsiliasi Bank Mandiri';
+});
+
 function applyRouteQueryFilters() {
   const qTab = typeof route.query.tab === 'string' ? route.query.tab : '';
   const qStatus = typeof route.query.status === 'string' ? route.query.status : '';
@@ -93,6 +108,8 @@ function applyRouteQueryFilters() {
       invoiceStatusFilter.value = qStatus;
       invPage.value = 1;
     }
+  } else if (qTab === 'layanan') {
+    activeTab.value = 'layanan';
   } else if (qTab === 'buku_harian' || qTab === 'buku-harian') {
     activeTab.value = 'buku_harian';
     if (['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'VOID'].includes(qStatus)) {
@@ -1623,18 +1640,6 @@ function formatTimeShort(iso?: string | null): string {
   }
 }
 
-function jumpToPendingApprovals() {
-  if (cashInCounts.value.pendingApproval > 0) {
-    activeTab.value = 'buku_harian';
-    bhApprovalFilter.value = 'PENDING_APPROVAL';
-    bhPage.value = 1;
-  } else if (invPendingApprovalCount.value > 0) {
-    activeTab.value = 'invoices';
-    invoiceStatusFilter.value = 'PENDING_APPROVAL';
-    invPage.value = 1;
-  }
-}
-
 async function approveDocument(targetType: 'PAYMENT' | 'INVOICE', row: any) {
   approvalBusyId.value = row.id;
   errorMsg.value = '';
@@ -2210,21 +2215,23 @@ onMounted(() => {
 
 <template>
   <div class="poital-penerimaan">
-    <!-- Top Header Bar -->
+    <!-- DropX Page Header: Title + Subtitle left, Controls neatly aligned right -->
     <div class="rev-top-bar">
-      <div>
-        <h1 class="rev-title">Buku Harian Penerimaan</h1>
+      <div class="rev-title-group">
+        <h1 class="rev-title">{{ pageTitle }}</h1>
+        <p class="rev-subtitle">{{ pageSubtitle }}</p>
       </div>
 
       <div class="rev-top-actions">
         <input
+          v-if="activeTab !== 'layanan'"
           v-model="selectedMonth"
           type="month"
           class="pill-month-input"
           aria-label="Pilih Bulan Periode"
         />
         <button
-          v-if="auth.hasPermission('payment:create')"
+          v-if="activeTab === 'buku_harian' && auth.hasPermission('payment:create')"
           type="button"
           class="pill-btn-soft"
           @click="openImportCsvModal"
@@ -2232,18 +2239,107 @@ onMounted(() => {
           Import CSV
         </button>
         <button
-          v-if="auth.hasPermission('payment:create') || auth.hasPermission('revenue:create')"
+          v-if="activeTab === 'buku_harian' && (auth.hasPermission('payment:create') || auth.hasPermission('revenue:create'))"
           type="button"
           class="pill-btn-navy"
           @click="openBukuHarianModal('KWITANSI')"
         >
           + Input Buku Harian
         </button>
+        <button
+          v-if="activeTab === 'invoices' && auth.hasPermission('revenue:create')"
+          type="button"
+          class="pill-btn-navy"
+          @click="openCreateInvoice()"
+        >
+          + Buat Invoice
+        </button>
+        <button
+          v-if="activeTab === 'layanan' && auth.hasPermission('revenue:create')"
+          type="button"
+          class="pill-btn-soft"
+          @click="addCustModalOpen = true"
+        >
+          + Pelanggan Baru
+        </button>
+        <button
+          v-if="activeTab === 'layanan' && auth.hasPermission('revenue:create')"
+          type="button"
+          class="pill-btn-navy"
+          @click="openAddProductModal"
+        >
+          + Tambah Layanan
+        </button>
       </div>
     </div>
 
-    <!-- 4-Unit Pill Filter + Secondary Settings Toggle -->
-    <div class="unit-filter-bar">
+    <AlertBanner v-if="feedbackMsg" variant="success" title="Berhasil" :message="feedbackMsg" @dismiss="feedbackMsg = ''" />
+    <AlertBanner v-if="errorMsg" variant="danger" title="Perhatian" :message="errorMsg" @dismiss="errorMsg = ''" />
+
+    <!-- DropX 4 Luminous Gradient KPI Cards (Strictly Read-Only Metrics, No Cross-Feature Routing) -->
+    <section class="kpi-metric-row">
+      <article class="dropx-kpi-card kpi-grad-navy">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Masuk Rekening ({{ bukuHarianData?.period?.label || selectedMonth }})</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(bukuHarianData?.summary?.totalReceived || 0) }}</strong>
+        <span class="kpi-foot">{{ bukuHarianData?.summary?.totalTransactions || 0 }} transaksi · Bank Mandiri</span>
+      </article>
+
+      <article class="dropx-kpi-card kpi-grad-ocean">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Piutang Terbuka (Invoice)</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(agingData?.buckets?.totalOutstanding || 0) }}</strong>
+        <span class="kpi-foot">{{ agingData?.buckets?.openCount || 0 }} invoice menunggu pelunasan</span>
+      </article>
+
+      <article class="dropx-kpi-card kpi-grad-amber">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Rekonsiliasi Bank Mandiri</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M6 10v11"/><path d="M12 10v11"/><path d="M18 10v11"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value">
+          {{ bukuHarianData?.summary?.reconciledCount || 0 }} / {{ bukuHarianData?.summary?.allScopeCount || 0 }}
+        </strong>
+        <span class="kpi-foot">
+          {{ (bukuHarianData?.summary?.unreconciledCount || 0) > 0
+            ? `${bukuHarianData.summary.unreconciledCount} transaksi belum cocok rekening koran`
+            : 'Semua cocok dengan rekening koran' }}
+        </span>
+      </article>
+
+      <article
+        class="dropx-kpi-card"
+        :class="totalPendingApprovals > 0 ? 'kpi-grad-amber' : 'kpi-grad-emerald'"
+      >
+        <div class="kpi-top-row">
+          <span class="kpi-label">Approval Manajer Keuangan</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value">
+          {{ totalPendingApprovals > 0 ? `${totalPendingApprovals} Menunggu` : `${totalApprovedDocs} Disetujui` }}
+        </strong>
+        <span class="kpi-foot">
+          {{ totalPendingApprovals > 0
+            ? `${cashInCounts.pendingApproval} Kwitansi/TT · ${invPendingApprovalCount} Invoice`
+            : `${kwitansiRows.length} KU · ${tandaTerimaRows.length} TT · ${customerInvoices.length} Inv` }}
+        </span>
+      </article>
+    </section>
+
+    <!-- Focused Unit Filter Bar Only (Switch between Buku Harian / Invoice / Layanan strictly via Sidebar) -->
+    <div class="unit-filter-bar-clean">
       <div class="unit-filter-row" role="tablist" aria-label="Filter Unit Bisnis">
         <button
           type="button"
@@ -2264,184 +2360,118 @@ onMounted(() => {
           {{ u.code.replace('BU-', '') }}
         </button>
       </div>
-
-      <div class="unit-quick-links">
-        <button
-          type="button"
-          class="unit-pill"
-          :class="{ active: activeTab === 'layanan' }"
-          @click="activeTab = activeTab === 'layanan' ? 'buku_harian' : 'layanan'"
-        >
-          Layanan ({{ products.length }})
-        </button>
-        <button type="button" class="unit-pill" @click="router.push('/reconciliation')">
-          Rekonsiliasi Bank &rarr;
-        </button>
-      </div>
-    </div>
-
-    <AlertBanner v-if="feedbackMsg" variant="success" title="Berhasil" :message="feedbackMsg" @dismiss="feedbackMsg = ''" />
-    <AlertBanner v-if="errorMsg" variant="danger" title="Perhatian" :message="errorMsg" @dismiss="errorMsg = ''" />
-
-    <!-- Signature Poital 4-Card KPI Row -->
-    <section class="kpi-metric-row">
-      <article class="metric-card hero-card">
-        <span class="metric-title">Masuk Rekening ({{ bukuHarianData?.period?.label || selectedMonth }})</span>
-        <strong class="metric-number-val money">{{ formatRupiah(bukuHarianData?.summary?.totalReceived || 0) }}</strong>
-        <span class="trend-text">{{ bukuHarianData?.summary?.totalTransactions || 0 }} transaksi · Bank Mandiri</span>
-      </article>
-      <article class="metric-card blue-card" style="cursor: pointer;" @click="activeTab = 'invoices'">
-        <span class="metric-title">Piutang Terbuka (Invoice)</span>
-        <strong class="metric-number-val money dark-num">{{ formatRupiah(agingData?.buckets?.totalOutstanding || 0) }}</strong>
-        <span class="trend-text">{{ agingData?.buckets?.openCount || 0 }} invoice menunggu pelunasan</span>
-      </article>
-      <article class="metric-card amber-card" style="cursor: pointer;" @click="router.push('/reconciliation')">
-        <span class="metric-title">Rekonsiliasi Bank Mandiri</span>
-        <strong class="metric-number-val dark-num">
-          {{ bukuHarianData?.summary?.reconciledCount || 0 }} / {{ bukuHarianData?.summary?.allScopeCount || 0 }}
-        </strong>
-        <span class="trend-text">
-          {{ (bukuHarianData?.summary?.unreconciledCount || 0) > 0
-            ? `${bukuHarianData.summary.unreconciledCount} transaksi belum cocok · Klik buka`
-            : 'Semua cocok dengan rekening koran' }}
-        </span>
-      </article>
-      <article
-        class="metric-card"
-        :class="totalPendingApprovals > 0 ? 'amber-card' : 'white-card'"
-        :style="totalPendingApprovals > 0 ? 'cursor: pointer;' : ''"
-        @click="totalPendingApprovals > 0 && jumpToPendingApprovals()"
-      >
-        <span class="metric-title">Approval Manajer Keuangan</span>
-        <strong class="metric-number-val dark-num">
-          {{ totalPendingApprovals > 0 ? `${totalPendingApprovals} Menunggu` : `${totalApprovedDocs} Disetujui` }}
-        </strong>
-        <span class="trend-text">
-          {{ totalPendingApprovals > 0
-            ? `${cashInCounts.pendingApproval} Kwitansi/TT · ${invPendingApprovalCount} Invoice · Klik filter`
-            : `${kwitansiRows.length} KU · ${tandaTerimaRows.length} TT · ${customerInvoices.length} Inv` }}
-        </span>
-      </article>
-    </section>
-
-    <!-- 2 Focused Main Tabs: Buku Harian (Uang Masuk) vs Tagihan & Invoice (Piutang) -->
-    <div class="rev-tab-strip">
-      <div class="tab-pills" role="tablist">
-        <button type="button" class="tab-pill" :class="{ active: activeTab === 'buku_harian' }" @click="activeTab = 'buku_harian'">
-          Buku Harian · Uang Masuk ({{ cashInCounts.all }})
-          <span v-if="cashInCounts.pendingApproval > 0" class="tab-pending-dot">{{ cashInCounts.pendingApproval }}</span>
-        </button>
-        <button type="button" class="tab-pill" :class="{ active: activeTab === 'invoices' }" @click="activeTab = 'invoices'">
-          Tagihan &amp; Invoice ({{ customerInvoices.length }})
-          <span v-if="invPendingApprovalCount > 0" class="tab-pending-dot">{{ invPendingApprovalCount }}</span>
-        </button>
-      </div>
-
-      <input
-        v-model="searchQuery"
-        type="search"
-        class="pill-search-input"
-        placeholder="Cari nomor, klien, kegiatan, COA..."
-      />
     </div>
 
     <StateBanner v-if="loading" state="loading" title="Memuat Penerimaan" message="Mengambil data Buku Harian Uang Masuk, Tagihan Invoice, dan status Rekonsiliasi Bank..." />
 
-    <!-- ==================== TAB 1: BUKU HARIAN (100% UANG MASUK: KWITANSI / TANDA TERIMA) ==================== -->
-    <section v-else-if="activeTab === 'buku_harian'" class="poital-card">
-      <div class="card-head-row">
-        <div>
-          <h2 class="card-title">Buku Harian Penerimaan (Uang Masuk)</h2>
-          <span class="card-sub">
-            {{ bukuHarianData?.period?.label }} · {{ bhFilteredSummary.count }} transaksi masuk ·
-            Total Masuk <strong class="text-pos">{{ formatRupiah(bhFilteredSummary.cashIn) }}</strong>
-          </span>
+    <!-- ==================== TAB 1: BUKU HARIAN (DROPX SINGLE-CARD FULL-BLEED TABLE) ==================== -->
+    <section v-else-if="activeTab === 'buku_harian'" class="poital-card table-card-flush">
+      <div class="dropx-card-head">
+        <div class="dropx-head-top">
+          <div>
+            <h2 class="card-title">Buku Harian Penerimaan (Uang Masuk)</h2>
+            <span class="card-sub">
+              {{ bukuHarianData?.period?.label }} · {{ bhFilteredSummary.count }} transaksi masuk ·
+              Total Masuk (Disetujui) <strong class="text-pos">{{ formatRupiah(bhFilteredSummary.cashIn) }}</strong>
+            </span>
+          </div>
+          <div class="btn-row">
+            <button v-if="hasActiveBhFilters" type="button" class="pill-btn-soft" @click="resetBhFilters">
+              Reset Filter
+            </button>
+            <button type="button" class="pill-btn-soft" @click="exportMonthlyExcel">
+              Export Excel
+            </button>
+          </div>
         </div>
-        <div class="btn-row">
-          <button v-if="hasActiveBhFilters" type="button" class="pill-btn-soft" @click="resetBhFilters">
-            Reset Filter
-          </button>
-          <button type="button" class="pill-btn-soft" @click="exportMonthlyExcel">
-            Export Excel
-          </button>
-        </div>
-      </div>
 
-      <!-- Structured Cash-In Filter & Sort Toolbar -->
-      <div class="bh-toolbar">
-        <div class="bh-filter-pills" role="group" aria-label="Filter Jenis Bukti Uang Masuk">
-          <button type="button" class="bh-filter-pill" :class="{ active: bhDocFilter === 'all' }" @click="bhDocFilter = 'all'">
-            Semua ({{ cashInCounts.all }})
+        <!-- DropX Integrated Search + Dropdowns Row -->
+        <div class="dropx-filter-row">
+          <div class="dropx-search-box">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input
+              v-model="searchQuery"
+              type="search"
+              class="dropx-search-input"
+              placeholder="Cari nomor bukti, klien, COA..."
+            />
+          </div>
+
+          <div class="bh-toolbar-selects">
+            <select v-model="bhApprovalFilter" class="pill-select compact" aria-label="Filter Status Approval">
+              <option value="">Approval: Semua</option>
+              <option value="PENDING_APPROVAL">Menunggu Approval</option>
+              <option value="APPROVED">Disetujui</option>
+              <option value="REJECTED">Perlu Revisi</option>
+              <option value="VOID">Dibatalkan</option>
+            </select>
+
+            <select v-model="bhReconFilter" class="pill-select compact" aria-label="Filter Status Rekonsiliasi Bank">
+              <option value="">Rekon Bank: Semua</option>
+              <option value="RECONCILED">Terekonsiliasi</option>
+              <option value="UNRECONCILED">Belum Rekon</option>
+            </select>
+
+            <select v-model="stageFilter" class="pill-select compact" aria-label="Filter Tahap Bayar">
+              <option value="">Tahap: Semua</option>
+              <option value="UANG_MUKA">Uang Muka (DP)</option>
+              <option value="TERMIN">Termin</option>
+              <option value="PELUNASAN">Pelunasan</option>
+            </select>
+
+            <select v-model="bhProofFilter" class="pill-select compact" aria-label="Filter Bukti Pembayaran">
+              <option value="">Bukti: Semua</option>
+              <option value="HAS_PROOF">Ada Bukti</option>
+              <option value="NO_PROOF">Belum Ada Bukti</option>
+            </select>
+
+            <select v-model="bhSortBy" class="pill-select compact sort-select" aria-label="Urutkan Data Buku Harian">
+              <option value="newest">Terbaru Diinput</option>
+              <option value="date_desc">Tanggal Terbaru</option>
+              <option value="date_asc">Tanggal Terlama</option>
+              <option value="amount_desc">Nominal Terbesar</option>
+              <option value="amount_asc">Nominal Terkecil</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- DropX Compact Status Filter Pills with Colored Dots & Count Chips -->
+        <div class="dropx-pill-row" role="group" aria-label="Filter Jenis Bukti Uang Masuk">
+          <button type="button" class="dx-filter-tab" :class="{ active: bhDocFilter === 'all' && !bhApprovalFilter }" @click="bhDocFilter = 'all'; bhApprovalFilter = ''">
+            Semua <span class="dx-count">{{ cashInCounts.all }}</span>
           </button>
-          <button type="button" class="bh-filter-pill" :class="{ active: bhDocFilter === 'KU' }" @click="bhDocFilter = 'KU'">
-            Kwitansi ({{ cashInCounts.kwitansi }})
+          <button type="button" class="dx-filter-tab" :class="{ active: bhDocFilter === 'KU' }" @click="bhDocFilter = 'KU'">
+            <span class="dx-dot dot-emerald"></span> Kwitansi <span class="dx-count">{{ cashInCounts.kwitansi }}</span>
           </button>
-          <button type="button" class="bh-filter-pill" :class="{ active: bhDocFilter === 'TT' }" @click="bhDocFilter = 'TT'">
-            Tanda Terima ({{ cashInCounts.tandaTerima }})
+          <button type="button" class="dx-filter-tab" :class="{ active: bhDocFilter === 'TT' }" @click="bhDocFilter = 'TT'">
+            <span class="dx-dot dot-blue"></span> Tanda Terima <span class="dx-count">{{ cashInCounts.tandaTerima }}</span>
           </button>
           <button
             v-if="cashInCounts.langsung > 0"
             type="button"
-            class="bh-filter-pill"
+            class="dx-filter-tab"
             :class="{ active: bhDocFilter === 'DIRECT' }"
             @click="bhDocFilter = 'DIRECT'"
           >
-            Langsung ({{ cashInCounts.langsung }})
+            <span class="dx-dot dot-sky"></span> Langsung <span class="dx-count">{{ cashInCounts.langsung }}</span>
           </button>
           <button
             type="button"
-            class="bh-filter-pill"
-            :class="bhApprovalFilter === 'PENDING_APPROVAL' ? 'active' : (cashInCounts.pendingApproval > 0 ? 'warn-pill' : '')"
+            class="dx-filter-tab"
+            :class="{ active: bhApprovalFilter === 'PENDING_APPROVAL' }"
             @click="bhApprovalFilter = bhApprovalFilter === 'PENDING_APPROVAL' ? '' : 'PENDING_APPROVAL'"
           >
-            Menunggu Approval ({{ cashInCounts.pendingApproval }})
+            <span class="dx-dot dot-amber"></span> Menunggu Approval <span class="dx-count">{{ cashInCounts.pendingApproval }}</span>
           </button>
           <button
             v-if="cashInCounts.rejected > 0"
             type="button"
-            class="bh-filter-pill"
-            :class="bhApprovalFilter === 'REJECTED' ? 'active' : 'danger-pill'"
+            class="dx-filter-tab"
+            :class="{ active: bhApprovalFilter === 'REJECTED' }"
             @click="bhApprovalFilter = bhApprovalFilter === 'REJECTED' ? '' : 'REJECTED'"
           >
-            Perlu Revisi ({{ cashInCounts.rejected }})
+            <span class="dx-dot dot-red"></span> Perlu Revisi <span class="dx-count">{{ cashInCounts.rejected }}</span>
           </button>
-        </div>
-
-        <div class="bh-toolbar-selects">
-          <select v-model="bhApprovalFilter" class="pill-select compact" aria-label="Filter Status Approval">
-            <option value="">Approval: Semua</option>
-            <option value="PENDING_APPROVAL">Menunggu Approval</option>
-            <option value="APPROVED">Disetujui</option>
-            <option value="REJECTED">Perlu Revisi</option>
-            <option value="VOID">Dibatalkan</option>
-          </select>
-
-          <select v-model="bhReconFilter" class="pill-select compact" aria-label="Filter Status Rekonsiliasi Bank">
-            <option value="">Rekon Bank: Semua</option>
-            <option value="RECONCILED">Terekonsiliasi Bank</option>
-            <option value="UNRECONCILED">Belum Rekon Bank</option>
-          </select>
-
-          <select v-model="stageFilter" class="pill-select compact" aria-label="Filter Tahap Bayar">
-            <option value="">Tahap: Semua</option>
-            <option value="UANG_MUKA">Uang Muka (DP)</option>
-            <option value="TERMIN">Termin</option>
-            <option value="PELUNASAN">Pelunasan</option>
-          </select>
-
-          <select v-model="bhProofFilter" class="pill-select compact" aria-label="Filter Bukti Pembayaran">
-            <option value="">Bukti: Semua</option>
-            <option value="HAS_PROOF">Sudah Ada Bukti</option>
-            <option value="NO_PROOF">Belum Ada Bukti</option>
-          </select>
-
-          <select v-model="bhSortBy" class="pill-select compact sort-select" aria-label="Urutkan Data Buku Harian">
-            <option value="newest">Urut: Terbaru Diinput</option>
-            <option value="date_desc">Urut: Tanggal Terbaru</option>
-            <option value="date_asc">Urut: Tanggal Terlama</option>
-            <option value="amount_desc">Urut: Nominal Terbesar</option>
-            <option value="amount_asc">Urut: Nominal Terkecil</option>
-          </select>
         </div>
       </div>
 
@@ -2449,44 +2479,42 @@ onMounted(() => {
         <table class="clean-table">
           <thead>
             <tr>
-              <th style="width: 42px;">#</th>
-              <th>Tanggal &amp; No. Bukti</th>
-              <th>Dokumen &amp; Metode</th>
-              <th>Unit · Pembayar &amp; Uraian</th>
-              <th>COA</th>
-              <th class="col-num">Nominal Masuk</th>
-              <th>Status Approval &amp; Bank</th>
-              <th class="col-num">Bukti, Approval &amp; Cetak</th>
+              <th>No. Bukti &amp; Tgl</th>
+              <th>Jenis &amp; COA</th>
+              <th>Pembayar &amp; Uraian</th>
+              <th class="col-num">Nominal</th>
+              <th>Status &amp; Bank</th>
+              <th class="col-num">Aksi</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="paginatedBukuHarian.length === 0">
-              <td colspan="8" class="empty-cell">
+              <td colspan="6" class="empty-cell">
                 {{ hasActiveBhFilters ? 'Tidak ada penerimaan yang cocok dengan filter saat ini.' : 'Belum ada uang masuk di Buku Harian pada periode ini. Klik "+ Input Buku Harian" untuk mulai mencatat.' }}
               </td>
             </tr>
-            <tr v-for="(item, idx) in paginatedBukuHarian" :key="item.uid" :class="{ 'row-void': item.status === 'VOID' }">
-              <td class="row-num-cell">{{ (bhPage - 1) * pageSize + idx + 1 }}</td>
-              <td>
+            <tr v-for="item in paginatedBukuHarian" :key="item.uid" :class="{ 'row-void': item.status === 'VOID' }">
+              <td class="nowrap-cell">
                 <button type="button" class="doc-link-btn mono-code" title="Klik untuk melihat detail lengkap" @click="openReviewModal('PAYMENT', item.raw)">
                   {{ item.primaryDocNo }}
                 </button>
-                <div class="cell-sub nowrap-cell">{{ formatDate(item.dateDisplay) }}</div>
+                <div class="cell-sub">{{ formatDate(item.dateDisplay) }}</div>
               </td>
               <td>
                 <span class="tag-pill" :class="item.receiptType === 'TANDA_TERIMA' ? 'info' : 'ok'">
                   {{ formatReceiptDocLabel(item.receiptType) }}
                 </span>
                 <div class="cell-sub">{{ formatStageLabel(item.stageLabel) }} · {{ formatMethodLabel(item.method) }}</div>
-                <div v-if="item.invoiceDocNo" class="cell-sub">Ref: {{ item.invoiceDocNo }}</div>
+                <div class="cell-sub mono-sub">{{ item.coaCode }}<template v-if="item.invoiceDocNo"> · {{ item.invoiceDocNo }}</template></div>
               </td>
               <td>
-                <strong>{{ item.payerName }}</strong>
-                <span class="unit-mini-tag">{{ item.unitCode.replace('BU-', '') }}</span>
-                <div class="cell-sub">{{ formatActivitySub(item.activityTitle, item.rincianLabel) }}</div>
+                <div class="payer-line">
+                  <strong>{{ item.payerName }}</strong>
+                  <span class="unit-mini-tag">{{ item.unitCode.replace('BU-', '') }}</span>
+                </div>
+                <div class="cell-sub desc-clamp">{{ formatActivitySub(item.activityTitle, item.rincianLabel) }}</div>
               </td>
-              <td><span class="mono-code">{{ item.coaCode }}</span></td>
-              <td class="col-num">
+              <td class="col-num nowrap-cell">
                 <strong class="money" :class="item.approvalStatus === 'APPROVED' && item.status === 'CONFIRMED' ? 'text-pos' : ''">+ {{ formatRupiah(item.amount) }}</strong>
                 <div v-if="item.overpaymentAmount > 0" class="cell-warn">
                   Lebih bayar {{ formatRupiah(item.overpaymentAmount) }}
@@ -2502,10 +2530,10 @@ onMounted(() => {
                   <span class="tag-pill warn-soft">Menunggu Approval</span>
                   <div class="cell-sub">
                     <template v-if="auth.hasPermission('payment:approve')">
-                      Perlu persetujuan Anda{{ item.reminderCount > 0 ? ` · Diingatkan ${item.reminderCount}x (${formatTimeShort(item.lastRemindedAt)})` : '' }}
+                      Perlu persetujuan Anda{{ item.reminderCount > 0 ? ` · Diingatkan ${item.reminderCount}x` : '' }}
                     </template>
                     <template v-else>
-                      {{ item.reminderCount > 0 ? `Diingatkan ${item.reminderCount}x (${formatTimeShort(item.lastRemindedAt)})` : 'Menunggu Manajer Keuangan' }}
+                      {{ item.reminderCount > 0 ? `Diingatkan ${item.reminderCount}x` : 'Menunggu Manajer Keuangan' }}
                     </template>
                   </div>
                 </template>
@@ -2516,23 +2544,21 @@ onMounted(() => {
                 <template v-else>
                   <span class="tag-pill ok">Disetujui</span>
                   <div class="cell-sub">
-                    {{ item.isReconciled ? `Rekon ${item.reconciledImportNumber || 'Mandiri'}` : 'Sah · Belum Rekon Bank' }}
+                    {{ item.isReconciled ? `Rekon ${item.reconciledImportNumber || 'Mandiri'}` : 'Sah · Belum Rekon' }}
                   </div>
                 </template>
               </td>
               <td class="col-num">
                 <div class="inline-actions">
-                  <!-- Button 1: Upload / Lihat Bukti (selalu bisa sebelum maupun sesudah approval) -->
                   <button
                     type="button"
                     class="mini-action-btn"
                     :class="item.raw.paymentProof ? 'proof-ok' : 'soft'"
                     @click="openProofModal(item.raw, 'PAYMENT')"
                   >
-                    {{ item.raw.paymentProof ? 'Lihat Bukti' : '+ Bukti' }}
+                    {{ item.raw.paymentProof ? 'Bukti' : '+ Bukti' }}
                   </button>
 
-                  <!-- Button 2: Ingatkan (khusus Operator/PIC) ATAU Tinjau, Setujui & Revisi (khusus Manajer Keuangan) -->
                   <template v-if="item.status !== 'VOID' && item.approvalStatus === 'PENDING_APPROVAL'">
                     <button
                       v-if="!auth.hasPermission('payment:approve') && (auth.hasPermission('payment:create') || auth.hasPermission('revenue:create'))"
@@ -2587,7 +2613,7 @@ onMounted(() => {
                       class="mini-action-btn danger"
                       @click="openVoidPaymentModal(item.raw)"
                     >
-                      Batalkan
+                      Batal
                     </button>
                   </template>
                   <template v-else-if="item.status === 'CONFIRMED' && item.approvalStatus === 'APPROVED'">
@@ -2602,7 +2628,6 @@ onMounted(() => {
                     </button>
                   </template>
 
-                  <!-- Button 3: Cetak Kwitansi / TT (TERKUNCI / DISABLED sebelum disetujui Manajer Keuangan) -->
                   <button
                     type="button"
                     class="mini-action-btn"
@@ -2617,7 +2642,7 @@ onMounted(() => {
                     "
                     @click="openPrintReceipt(item.raw)"
                   >
-                    {{ item.receiptType === 'TANDA_TERIMA' ? 'Cetak TT' : item.receiptType === 'KUITANSI_UM' ? 'Cetak KU-UM' : 'Cetak Kwitansi' }}
+                    {{ item.receiptType === 'TANDA_TERIMA' ? 'Cetak TT' : 'Cetak' }}
                   </button>
                 </div>
               </td>
@@ -2675,87 +2700,91 @@ onMounted(() => {
         </button>
       </section>
 
-      <section class="poital-card">
-        <div class="card-head-row">
-          <div>
-            <h2 class="card-title">Tagihan &amp; Invoice Pelanggan</h2>
-            <span class="card-sub">
-              {{ invFilteredSummary.count }} invoice tampil ·
-              Total Tagihan <strong>{{ formatRupiah(invFilteredSummary.totalNet) }}</strong>
-              <template v-if="invFilteredSummary.totalOpen > 0">
-                · Sisa Piutang <strong>{{ formatRupiah(invFilteredSummary.totalOpen) }}</strong>
-              </template>
-            </span>
+      <section class="poital-card table-card-flush">
+        <div class="dropx-card-head">
+          <div class="dropx-head-top">
+            <div>
+              <h2 class="card-title">Tagihan &amp; Invoice Pelanggan</h2>
+              <span class="card-sub">
+                {{ invFilteredSummary.count }} invoice tampil ·
+                Total Tagihan <strong>{{ formatRupiah(invFilteredSummary.totalNet) }}</strong>
+                <template v-if="invFilteredSummary.totalOpen > 0">
+                  · Sisa Piutang <strong>{{ formatRupiah(invFilteredSummary.totalOpen) }}</strong>
+                </template>
+              </span>
+            </div>
+            <div class="btn-row">
+              <button v-if="hasActiveInvFilters" type="button" class="pill-btn-soft" @click="resetInvFilters">
+                Reset Filter
+              </button>
+              <button type="button" class="pill-btn-soft" @click="exportAgingExcel">
+                Export Aging .xlsx
+              </button>
+            </div>
           </div>
-          <div class="btn-row">
-            <button v-if="hasActiveInvFilters" type="button" class="pill-btn-soft" @click="resetInvFilters">
-              Reset Filter
-            </button>
-            <button type="button" class="pill-btn-soft" @click="exportAgingExcel">
-              Export Aging .xlsx
-            </button>
-            <button
-              v-if="auth.hasPermission('revenue:create')"
-              type="button"
-              class="pill-btn-navy"
-              @click="openCreateInvoice()"
-            >
-              + Buat Invoice
-            </button>
-          </div>
-        </div>
 
-        <div class="bh-toolbar">
-          <div class="bh-filter-pills" role="group" aria-label="Filter Cepat Status Invoice">
-            <button type="button" class="bh-filter-pill" :class="{ active: invoiceStatusFilter === '' }" @click="invoiceStatusFilter = ''">
-              Semua ({{ customerInvoices.length }})
+          <div class="dropx-filter-row">
+            <div class="dropx-search-box">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input
+                v-model="searchQuery"
+                type="search"
+                class="dropx-search-input"
+                placeholder="Cari no. invoice, pelanggan, kegiatan..."
+              />
+            </div>
+
+            <div class="bh-toolbar-selects">
+              <select v-model="invoiceStatusFilter" class="pill-select compact" aria-label="Filter Status Invoice">
+                <option value="">Status: Semua</option>
+                <option value="PENDING_APPROVAL">Menunggu Approval</option>
+                <option value="REJECTED">Perlu Revisi</option>
+                <option value="OPEN">Belum Lunas (Semua)</option>
+                <option value="ISSUED">Disetujui · Belum Bayar</option>
+                <option value="PARTIALLY_PAID">Sebagian Bayar</option>
+                <option value="PAID">Lunas</option>
+                <option value="VOID">HANGUS / Batal</option>
+              </select>
+
+              <select v-model="invSortBy" class="pill-select compact sort-select" aria-label="Urutkan Daftar Invoice">
+                <option value="newest">Terbaru Dibuat</option>
+                <option value="due_asc">Jatuh Tempo Terdekat</option>
+                <option value="balance_desc">Sisa Piutang Terbesar</option>
+                <option value="amount_desc">Nilai Tagihan Terbesar</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="dropx-pill-row" role="group" aria-label="Filter Cepat Status Invoice">
+            <button type="button" class="dx-filter-tab" :class="{ active: invoiceStatusFilter === '' }" @click="invoiceStatusFilter = ''">
+              Semua <span class="dx-count">{{ customerInvoices.length }}</span>
             </button>
             <button
               type="button"
-              class="bh-filter-pill"
-              :class="invoiceStatusFilter === 'PENDING_APPROVAL' ? 'active' : (invPendingApprovalCount > 0 ? 'warn-pill' : '')"
+              class="dx-filter-tab"
+              :class="{ active: invoiceStatusFilter === 'PENDING_APPROVAL' }"
               @click="invoiceStatusFilter = invoiceStatusFilter === 'PENDING_APPROVAL' ? '' : 'PENDING_APPROVAL'"
             >
-              Menunggu Approval ({{ invPendingApprovalCount }})
+              <span class="dx-dot dot-amber"></span> Menunggu Approval <span class="dx-count">{{ invPendingApprovalCount }}</span>
             </button>
             <button
               v-if="invRejectedCount > 0"
               type="button"
-              class="bh-filter-pill"
-              :class="invoiceStatusFilter === 'REJECTED' ? 'active' : 'danger-pill'"
+              class="dx-filter-tab"
+              :class="{ active: invoiceStatusFilter === 'REJECTED' }"
               @click="invoiceStatusFilter = invoiceStatusFilter === 'REJECTED' ? '' : 'REJECTED'"
             >
-              Perlu Revisi ({{ invRejectedCount }})
+              <span class="dx-dot dot-red"></span> Perlu Revisi <span class="dx-count">{{ invRejectedCount }}</span>
             </button>
-            <button type="button" class="bh-filter-pill" :class="{ active: invoiceStatusFilter === 'OPEN' }" @click="invoiceStatusFilter = 'OPEN'">
-              Belum Lunas ({{ invOpenCount }})
+            <button type="button" class="dx-filter-tab" :class="{ active: invoiceStatusFilter === 'OPEN' }" @click="invoiceStatusFilter = 'OPEN'">
+              <span class="dx-dot dot-blue"></span> Belum Lunas <span class="dx-count">{{ invOpenCount }}</span>
             </button>
-            <button type="button" class="bh-filter-pill" :class="{ active: invoiceStatusFilter === 'PAID' }" @click="invoiceStatusFilter = 'PAID'">
-              Lunas ({{ invPaidCount }})
+            <button type="button" class="dx-filter-tab" :class="{ active: invoiceStatusFilter === 'PAID' }" @click="invoiceStatusFilter = 'PAID'">
+              <span class="dx-dot dot-emerald"></span> Lunas <span class="dx-count">{{ invPaidCount }}</span>
             </button>
-            <button type="button" class="bh-filter-pill" :class="{ active: invoiceStatusFilter === 'VOID' }" @click="invoiceStatusFilter = 'VOID'">
-              HANGUS ({{ invVoidCount }})
+            <button type="button" class="dx-filter-tab" :class="{ active: invoiceStatusFilter === 'VOID' }" @click="invoiceStatusFilter = 'VOID'">
+              <span class="dx-dot dot-red"></span> HANGUS <span class="dx-count">{{ invVoidCount }}</span>
             </button>
-          </div>
-
-          <div class="bh-toolbar-selects">
-            <select v-model="invoiceStatusFilter" class="pill-select compact" aria-label="Filter Status Invoice">
-              <option value="">Status: Semua</option>
-              <option value="PENDING_APPROVAL">Menunggu Approval</option>
-              <option value="REJECTED">Perlu Revisi</option>
-              <option value="OPEN">Belum Lunas (Semua)</option>
-              <option value="ISSUED">Disetujui · Belum Bayar</option>
-              <option value="PARTIALLY_PAID">Sebagian Bayar</option>
-              <option value="PAID">Lunas</option>
-              <option value="VOID">HANGUS / Batal</option>
-            </select>
-
-            <select v-model="invSortBy" class="pill-select compact sort-select" aria-label="Urutkan Daftar Invoice">
-              <option value="newest">Urut: Terbaru Dibuat</option>
-              <option value="due_asc">Urut: Jatuh Tempo Terdekat</option>
-              <option value="balance_desc">Urut: Sisa Piutang Terbesar</option>
-              <option value="amount_desc">Urut: Nilai Tagihan Terbesar</option>
-            </select>
           </div>
         </div>
 
@@ -2763,41 +2792,39 @@ onMounted(() => {
           <table class="clean-table">
             <thead>
               <tr>
-                <th style="width: 42px;">#</th>
-                <th>No. Invoice &amp; Jenis</th>
+                <th>No. Invoice</th>
                 <th>Pelanggan &amp; Kegiatan</th>
                 <th>Jatuh Tempo</th>
-                <th class="col-num">Tagihan Neto</th>
-                <th class="col-num">Sisa Piutang</th>
-                <th>Status &amp; Approval</th>
-                <th class="col-num">Bukti, Approval &amp; Cetak</th>
+                <th class="col-num">Tagihan / Sisa</th>
+                <th>Status</th>
+                <th class="col-num">Aksi</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="paginatedInvoices.length === 0">
-                <td colspan="8" class="empty-cell">Tidak ada invoice yang cocok dengan filter saat ini.</td>
+                <td colspan="6" class="empty-cell">Tidak ada invoice yang cocok dengan filter saat ini.</td>
               </tr>
-              <tr v-for="(inv, idx) in paginatedInvoices" :key="inv.id" :class="{ 'row-void': inv.status === 'VOID' }">
-                <td class="row-num-cell">{{ (invPage - 1) * pageSize + idx + 1 }}</td>
-                <td>
+              <tr v-for="inv in paginatedInvoices" :key="inv.id" :class="{ 'row-void': inv.status === 'VOID' }">
+                <td class="nowrap-cell">
                   <button type="button" class="doc-link-btn mono-code" title="Klik untuk meninjau rincian item & pajak Invoice" @click="openReviewModal('INVOICE', inv)">
                     {{ inv.docNumber }}
                   </button>
-                  <div class="cell-sub nowrap-cell">{{ formatStageLabel(inv.invoiceType) }} · FP {{ inv.fakturPajakCode || '040' }}</div>
+                  <div class="cell-sub">{{ formatStageLabel(inv.invoiceType) }} · FP {{ inv.fakturPajakCode || '040' }}</div>
                 </td>
                 <td>
-                  <strong>{{ inv.customer?.name }}</strong>
-                  <span class="unit-mini-tag">{{ inv.businessUnit?.code?.replace('BU-', '') }}</span>
-                  <div class="cell-sub">{{ inv.activityTitle || inv.lines?.[0]?.description }}</div>
+                  <div class="payer-line">
+                    <strong>{{ inv.customer?.name }}</strong>
+                    <span class="unit-mini-tag">{{ inv.businessUnit?.code?.replace('BU-', '') }}</span>
+                  </div>
+                  <div class="cell-sub desc-clamp">{{ inv.activityTitle || inv.lines?.[0]?.description }}</div>
                 </td>
                 <td class="nowrap-cell">
                   <div>{{ formatDate(inv.dueDate) }}</div>
                   <span v-if="getDaysOverdue(inv) > 0 && inv.approvalStatus === 'APPROVED'" class="overdue-chip">Lewat {{ getDaysOverdue(inv) }} hari</span>
                 </td>
-                <td class="col-num money">{{ formatRupiah(inv.totalAmount) }}</td>
-                <td class="col-num">
+                <td class="col-num nowrap-cell">
                   <strong class="money" :class="inv.approvalStatus !== 'APPROVED' ? 'muted-money' : ''">{{ formatRupiah(inv.balanceDue) }}</strong>
-                  <div v-if="inv.approvalStatus !== 'APPROVED' && inv.status !== 'VOID'" class="cell-sub">(Belum posting)</div>
+                  <div class="cell-sub">Total {{ formatRupiah(inv.totalAmount) }}<template v-if="inv.approvalStatus !== 'APPROVED' && inv.status !== 'VOID'"> · Belum posting</template></div>
                 </td>
                 <td>
                   <span
@@ -2836,7 +2863,7 @@ onMounted(() => {
                       :class="inv.invoiceProof ? 'proof-ok' : 'soft'"
                       @click="openProofModal(inv, 'INVOICE')"
                     >
-                      {{ inv.invoiceProof ? 'Lihat Bukti' : '+ Bukti' }}
+                      {{ inv.invoiceProof ? 'Bukti' : '+ Bukti' }}
                     </button>
 
                     <!-- Button 2: Ingatkan (Operator/PIC) ATAU Tinjau, Setujui & Revisi (Manajer Keuangan) -->
@@ -2915,7 +2942,7 @@ onMounted(() => {
                       "
                       @click="openPrintInvoice(inv)"
                     >
-                      Cetak Invoice
+                      Cetak
                     </button>
 
                     <button
@@ -3003,19 +3030,24 @@ onMounted(() => {
 
     <!-- ==================== TAB 5: KATALOG LAYANAN 4 UNIT & PELANGGAN ==================== -->
     <div v-else class="rev-stack">
-      <section class="poital-card">
-        <div class="card-head-row">
-          <div>
-            <h2 class="card-title">Katalog Layanan &amp; Mapping COA (4 Unit)</h2>
-            <span class="card-sub">Kode layanan dibuat otomatis oleh sistem; tarif, kategori, COA Pertor 310, dan pajak dapat diperbarui kapan saja</span>
+      <section class="poital-card table-card-flush">
+        <div class="dropx-card-head">
+          <div class="dropx-head-top">
+            <div>
+              <h2 class="card-title">Katalog Layanan &amp; Mapping COA (4 Unit)</h2>
+              <span class="card-sub">Kode layanan dibuat otomatis oleh sistem; tarif, kategori, COA Pertor 310, dan pajak dapat diperbarui kapan saja</span>
+            </div>
           </div>
-          <div class="btn-row">
-            <button v-if="auth.hasPermission('revenue:create')" type="button" class="pill-btn-soft" @click="addCustModalOpen = true">
-              + Pelanggan Baru
-            </button>
-            <button v-if="auth.hasPermission('revenue:create')" type="button" class="pill-btn-navy" @click="openAddProductModal">
-              + Tambah Layanan
-            </button>
+          <div class="dropx-filter-row">
+            <div class="dropx-search-box">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input
+                v-model="searchQuery"
+                type="search"
+                class="dropx-search-input"
+                placeholder="Cari kode layanan, nama, COA..."
+              />
+            </div>
           </div>
         </div>
 
@@ -4383,29 +4415,42 @@ onMounted(() => {
 <style scoped>
 .poital-penerimaan {
   width: 100%;
-  padding-bottom: 84px;
-  max-width: 1400px;
+  max-width: 1440px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding-bottom: 84px;
+  gap: 18px;
+  padding-bottom: 28px;
 }
 
 .rev-top-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
+}
+
+.rev-title-group {
+  flex: 1;
+  min-width: 260px;
 }
 
 .rev-title {
   margin: 0;
-  font-size: 1.35rem;
-  font-weight: 750;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
   letter-spacing: -0.025em;
-  color: var(--text-primary);
+  color: #111827;
+}
+
+.rev-subtitle {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.45;
+  max-width: 680px;
 }
 
 .rev-top-actions {
@@ -4413,30 +4458,141 @@ onMounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  flex-shrink: 0;
 }
 
-.unit-filter-bar {
+/* DropX Integrated Table Card Header */
+.table-card-flush {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.dropx-card-head {
+  padding: 18px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dropx-head-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   flex-wrap: wrap;
-  gap: 10px;
 }
 
-.unit-quick-links {
+.dropx-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dropx-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 290px;
+  max-width: 100%;
+}
+
+.dropx-search-box svg {
+  position: absolute;
+  left: 11px;
+  color: #6b7280;
+  pointer-events: none;
+}
+
+.dropx-search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 34px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13.5px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.dropx-search-input:focus {
+  border-color: #034693;
+  box-shadow: 0 0 0 2px rgba(3, 70, 147, 0.2);
+}
+
+.dropx-pill-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
+
+.dx-filter-tab {
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.dx-filter-tab:hover:not(.active) {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.dx-filter-tab.active {
+  background: #034693;
+  color: #ffffff;
+}
+
+.dx-count {
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.dx-filter-tab.active .dx-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.dx-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.dx-filter-tab.active .dx-dot {
+  background: #ffffff;
+}
+
+.dot-emerald { background: #10b981; }
+.dot-blue { background: #3b82f6; }
+.dot-sky { background: #0ea5e9; }
+.dot-amber { background: #f59e0b; }
+.dot-red { background: #ef4444; }
 
 .bh-filter-pills {
   display: flex;
   align-items: center;
-  gap: 4px;
-  background: #e2e8f080;
-  padding: 3px;
-  border-radius: 999px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .bh-toolbar {
@@ -4445,11 +4601,7 @@ onMounted(() => {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
-  padding: 10px 12px;
   margin-bottom: 14px;
-  border-radius: 16px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
 }
 
 .bh-toolbar-selects {
@@ -4460,38 +4612,43 @@ onMounted(() => {
 }
 
 .pill-select.compact {
-  padding: 6px 12px;
-  font-size: 0.77rem;
+  height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
 }
 
 .pill-select.sort-select {
-  border-color: #94a3b8;
-  color: #0b2144;
+  color: #111827;
 }
 
 .row-num-cell {
-  font-size: 0.76rem;
-  font-weight: 600;
-  color: #94a3b8;
+  font-size: 13px;
+  color: #6b7280;
   text-align: center;
   white-space: nowrap;
 }
 
 .bh-filter-pill {
-  padding: 5px 12px;
-  border-radius: 999px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
   border: none;
   background: transparent;
-  color: #475569;
-  font-size: 0.76rem;
-  font-weight: 600;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.bh-filter-pill:hover:not(.active) {
+  background: #f3f4f6;
+  color: #111827;
 }
 
 .bh-filter-pill.active {
-  background: #ffffff;
-  color: #0b2144;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+  background: #034693;
+  color: #ffffff;
 }
 
 .tag-pill.warn-soft {
@@ -4683,115 +4840,209 @@ onMounted(() => {
 .pill-month-input,
 .pill-select,
 .pill-search-input {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 9999px;
-  padding: 7px 14px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-primary);
+  height: 36px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  font-weight: 400;
+  color: #111827;
   outline: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.pill-month-input:focus,
+.pill-select:focus,
+.pill-search-input:focus {
+  border-color: #034693;
+  box-shadow: 0 0 0 2px rgba(3, 70, 147, 0.2);
 }
 
 .pill-search-input {
   min-width: 240px;
-  font-weight: 500;
 }
 
 .pill-btn-navy {
-  border: none;
-  border-radius: 9999px;
-  padding: 8px 18px;
-  background: #0b2144;
+  height: 36px;
+  border: 1px solid #034693;
+  border-radius: 8px;
+  padding: 0 16px;
+  background: #034693;
   color: #ffffff;
-  font-size: 0.8rem;
-  font-weight: 650;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
-  transition: opacity 140ms ease;
+  transition: background 140ms ease, border-color 140ms ease;
 }
-.pill-btn-navy:hover { opacity: 0.9; }
+.pill-btn-navy:hover {
+  background: #023470;
+  border-color: #023470;
+}
 
 .pill-btn-soft {
-  border: none;
-  border-radius: 9999px;
-  padding: 8px 16px;
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: 0.8rem;
-  font-weight: 600;
-  box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.06);
+  height: 36px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13.5px;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
 }
-.pill-btn-soft:hover { background: #eff6ff; color: #034693; }
+.pill-btn-soft:hover { background: #f3f4f6; }
 
 .pill-btn-danger {
-  border: none;
-  border-radius: 9999px;
-  padding: 8px 18px;
-  background: #dc2626;
+  height: 36px;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  padding: 0 16px;
+  background: #ef4444;
   color: #ffffff;
-  font-size: 0.8rem;
-  font-weight: 650;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
 }
+.pill-btn-danger:hover { background: #dc2626; }
 
-/* Unit Filter Pills */
+/* Unit Filter Compact Buttons */
 .unit-filter-row {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
 .unit-pill {
-  border: none;
-  border-radius: 9999px;
-  padding: 6px 14px;
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 0.76rem;
-  font-weight: 650;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease;
 }
+.unit-pill:hover:not(.active) {
+  background: #f3f4f6;
+  color: #111827;
+}
 .unit-pill.active {
-  background: #0b2144;
+  background: #034693;
   color: #ffffff;
 }
 
-/* Signature Poital 4-Card Row */
+/* DropX Luminous 4-Card Gradient KPI Row */
 .kpi-metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
-.metric-card {
-  border-radius: 20px;
-  padding: 20px 22px;
+.dropx-kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  padding: 20px;
+  color: #ffffff;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+  gap: 4px;
+  border: none;
+  box-shadow: 0 4px 14px -4px rgba(17, 24, 39, 0.16);
 }
-.metric-title { font-size: 0.8rem; font-weight: 600; }
-.metric-number-val {
-  font-size: clamp(1.12rem, 1.4vw, 1.48rem);
-  font-weight: 750;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
+
+.dropx-kpi-card::before,
+.dropx-kpi-card::after {
+  content: '';
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.dropx-kpi-card::before {
+  width: 124px;
+  height: 124px;
+  right: -28px;
+  top: -28px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dropx-kpi-card::after {
+  width: 92px;
+  height: 92px;
+  right: 24px;
+  bottom: -38px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.kpi-grad-navy { background: linear-gradient(135deg, #0b2144 0%, #034693 100%); }
+.kpi-grad-emerald { background: linear-gradient(135deg, #22c55e 0%, #10b981 55%, #059669 100%); }
+.kpi-grad-ocean { background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 55%, #0284c7 100%); }
+.kpi-grad-amber { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+
+.unit-filter-bar-clean {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.kpi-top-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kpi-label {
+  font-size: 13px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.kpi-icon-box {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpi-value {
+  position: relative;
+  z-index: 1;
+  margin-top: 6px;
+  font-size: clamp(1.25rem, 1.55vw, 1.5rem);
+  line-height: 1.2;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.025em;
   overflow-wrap: anywhere;
 }
-.trend-text { font-size: 0.74rem; color: var(--text-secondary); }
-.hero-card { background: #0b2144; color: #ffffff; }
-.hero-card .metric-title { color: rgba(255, 255, 255, 0.82); }
-.hero-card .trend-text { color: rgba(255, 255, 255, 0.65); }
-.blue-card { background: #eff6ff; color: #034693; }
-.amber-card { background: #fef9ed; color: #b45309; }
-.white-card { background: var(--bg-surface); color: var(--text-primary); }
-.dark-num { color: var(--text-primary); }
 
-/* Tabs & Cards */
+.kpi-foot {
+  position: relative;
+  z-index: 1;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.84);
+}
+
+/* Sub-Nav Underline Strip & DropX Pure White Cards */
 .rev-tab-strip,
 .subtab-bar {
   display: flex;
@@ -4799,36 +5050,45 @@ onMounted(() => {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 6px;
 }
 
 .tab-pills {
   display: inline-flex;
-  padding: 4px;
-  border-radius: 9999px;
-  background: var(--bg-surface);
-  box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.05);
+  align-items: center;
   flex-wrap: wrap;
-  gap: 2px;
+  gap: 4px;
+  margin-bottom: -7px;
 }
 
 .tab-pill {
   border: none;
+  border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  font-weight: 650;
-  padding: 7px 15px;
-  border-radius: 9999px;
+  color: #6b7280;
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 8px 12px 10px;
+  border-radius: 6px 6px 0 0;
   cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease;
 }
-.tab-pill.sm { padding: 6px 13px; font-size: 0.76rem; }
-.tab-pill.active { background: #0b2144; color: #ffffff; }
+.tab-pill:hover {
+  color: #111827;
+}
+.tab-pill.active {
+  color: #034693;
+  border-bottom-color: #034693;
+  font-weight: 600;
+}
 
 .poital-card {
-  background: var(--bg-surface);
-  border-radius: 20px;
-  padding: 20px 22px;
-  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
   min-width: 0;
 }
 
@@ -4844,8 +5104,8 @@ onMounted(() => {
   margin-bottom: 14px;
 }
 
-.card-title { margin: 0; font-size: 1rem; font-weight: 700; color: var(--text-primary); }
-.card-sub { display: block; font-size: 0.76rem; color: var(--text-secondary); margin-top: 2px; }
+.card-title { margin: 0; font-size: 14.5px; font-weight: 600; letter-spacing: -0.015em; color: #111827; }
+.card-sub { display: block; font-size: 13px; font-weight: 400; color: #6b7280; margin-top: 2px; }
 .btn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* Aging Piutang Strip */
@@ -4856,11 +5116,11 @@ onMounted(() => {
 }
 
 .aging-bucket-card {
-  border: 2px solid transparent;
-  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
   padding: 14px 16px;
-  background: var(--bg-surface);
-  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.04);
+  background: #ffffff;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -4869,37 +5129,45 @@ onMounted(() => {
   text-align: left;
   transition: transform 140ms ease, border-color 140ms ease;
 }
-.aging-bucket-card:hover { transform: translateY(-2px); }
-.aging-bucket-card span { font-size: 0.74rem; font-weight: 600; color: var(--text-secondary); }
-.aging-bucket-card strong { font-size: 1.05rem; font-weight: 750; color: var(--text-primary); }
-.aging-bucket-card.warn strong { color: #b45309; }
-.aging-bucket-card.danger strong { color: #dc2626; }
-.aging-bucket-card.active { border-color: #0b2144; background: #eff6ff; }
+.aging-bucket-card:hover { transform: translateY(-1px); border-color: #d1d5db; }
+.aging-bucket-card span { font-size: 12.5px; font-weight: 400; color: #6b7280; }
+.aging-bucket-card strong { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; color: #111827; }
+.aging-bucket-card.warn strong { color: #d97706; }
+.aging-bucket-card.danger strong { color: #ef4444; }
+.aging-bucket-card.active { border-color: #034693; background: rgba(3, 70, 147, 0.04); }
 
-/* Clean Tables */
+/* Exact DropX Data Table */
 .table-wrap { width: 100%; overflow-x: auto; }
 .clean-table { width: 100%; border-collapse: collapse; }
 .clean-table th {
   text-align: left;
-  font-size: 0.73rem;
-  font-weight: 650;
-  color: var(--text-secondary);
-  padding: 9px 10px;
-  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #fafafa;
+  padding: 11px 12px;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
   white-space: nowrap;
 }
 .clean-table td {
-  padding: 10px;
-  font-size: 0.81rem;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--border-subtle);
-  vertical-align: top;
+  padding: 12px 12px;
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 20px;
+  color: #111827;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
 }
-.clean-table.compact td, .clean-table.compact th { padding: 8px 8px; font-size: 0.76rem; }
+.clean-table tbody tr:hover td {
+  background: rgba(249, 250, 251, 0.85);
+}
+.clean-table.compact td, .clean-table.compact th { padding: 10px 12px; font-size: 13px; }
 .col-num,
 .clean-table th.col-num { text-align: right; white-space: nowrap; }
 .nowrap-cell { white-space: nowrap; }
-.muted-money { color: #64748b; }
+.muted-money { color: #6b7280; }
 .doc-link-btn {
   border: none;
   background: transparent;
@@ -4909,71 +5177,97 @@ onMounted(() => {
   white-space: nowrap;
 }
 .doc-link-btn:hover { text-decoration: underline; }
+.payer-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.payer-line strong {
+  font-weight: 500;
+  color: #111827;
+}
+.desc-clamp {
+  max-width: 260px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.mono-sub {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: #6b7280;
+}
 .review-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 14px;
   padding: 12px 14px;
-  border-radius: 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
 }
 .review-meta-grid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.review-meta-grid span { font-size: 0.7rem; color: var(--text-secondary); }
-.review-meta-grid strong { font-size: 0.82rem; color: var(--text-primary); }
-.empty-cell { text-align: center; padding: 28px !important; color: var(--text-secondary); }
+.review-meta-grid span { font-size: 12px; color: #6b7280; }
+.review-meta-grid strong { font-size: 13.5px; color: #111827; }
+.empty-cell { text-align: center; padding: 32px !important; color: #6b7280; }
 .row-void { opacity: 0.6; }
-.summary-row td { background: #eff6ff; border-top: 1.5px solid #0b2144; }
+.summary-row td { background: #f9fafb; border-top: 1px solid #d1d5db; font-weight: 600; }
 
-.mono-code { font-family: ui-monospace, monospace; font-size: 0.76rem; font-weight: 650; color: #034693; }
-.cell-sub { font-size: 0.73rem; color: var(--text-secondary); margin-top: 2px; }
-.cell-warn { font-size: 0.72rem; color: #b45309; font-weight: 600; margin-top: 2px; }
+.mono-code { font-family: var(--font-mono); font-size: 12.5px; font-weight: 500; letter-spacing: -0.015em; color: #034693; }
+.cell-sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+.cell-warn { font-size: 12px; color: #d97706; font-weight: 500; margin-top: 2px; }
 .unit-mini-tag {
-  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 9999px;
-  background: var(--bg-subtle); color: var(--text-secondary); font-size: 0.68rem; font-weight: 700;
+  display: inline-block; padding: 1px 7px; border-radius: 9999px;
+  background: #f3f4f6; color: #4b5563; font-size: 11px; font-weight: 500;
 }
 
+/* DropX True Borderless Soft Rounded-Full Status Pills */
 .tag-pill {
-  display: inline-block; padding: 2px 9px; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; white-space: nowrap;
+  display: inline-flex; align-items: center; padding: 2px 10px; height: 22px;
+  border-radius: 9999px; font-size: 12px; font-weight: 500; white-space: nowrap; border: none;
 }
-.tag-pill.ok { background: #ecfdf5; color: #047857; }
-.tag-pill.info { background: #eff6ff; color: #034693; }
-.tag-pill.muted { background: var(--bg-subtle); color: var(--text-secondary); }
-.tag-pill.danger { background: #fef2f2; color: #dc2626; }
+.tag-pill.ok { background: rgba(16, 185, 129, 0.12); color: #059669; }
+.tag-pill.info { background: rgba(59, 130, 246, 0.12); color: #2563eb; }
+.tag-pill.muted { background: #f3f4f6; color: #4b5563; }
+.tag-pill.danger { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
+.tag-pill.warn-soft { background: rgba(245, 158, 11, 0.14); color: #d97706; }
 
 .overdue-chip {
-  display: inline-block; margin-top: 2px; padding: 1px 7px; border-radius: 9999px;
-  background: #fef2f2; color: #dc2626; font-size: 0.68rem; font-weight: 700;
+  display: inline-block; margin-top: 2px; padding: 2px 8px; border-radius: 9999px;
+  background: rgba(239, 68, 68, 0.1); color: #dc2626; font-size: 11px; font-weight: 500;
 }
 
-.inline-actions { display: inline-flex; gap: 5px; justify-content: flex-end; flex-wrap: wrap; }
+.inline-actions { display: inline-flex; gap: 5px; justify-content: flex-end; flex-wrap: wrap; max-width: 190px; }
 .mini-action-btn {
-  border: none; border-radius: 9999px; padding: 5px 11px; font-size: 0.72rem; font-weight: 650;
-  background: #eff6ff; color: #034693; cursor: pointer; white-space: nowrap;
+  border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px 9px; height: 28px; font-size: 12px; font-weight: 500;
+  background: #ffffff; color: #374151; cursor: pointer; white-space: nowrap;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
-.mini-action-btn.navy { background: #0b2144; color: #ffffff; }
-.mini-action-btn.soft { background: var(--bg-subtle); color: var(--text-primary); }
-.mini-action-btn.warn { background: #fef3c7; color: #92400e; }
-.mini-action-btn.danger { background: #fef2f2; color: #dc2626; }
-.mini-action-btn.approve-ok { background: #059669; color: #ffffff; }
-.mini-action-btn.approve-ok:hover:not(:disabled) { background: #047857; }
-.mini-action-btn.revise-warn { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
-.mini-action-btn.revise-warn:hover:not(:disabled) { background: #fef3c7; }
+.mini-action-btn:hover:not(:disabled) { background: #f3f4f6; color: #111827; }
+.mini-action-btn.navy { background: #034693; border-color: #034693; color: #ffffff; }
+.mini-action-btn.navy:hover:not(:disabled) { background: #023470; }
+.mini-action-btn.soft { background: #ffffff; border-color: #e5e7eb; color: #374151; }
+.mini-action-btn.warn { background: rgba(245, 158, 11, 0.12); border-color: transparent; color: #b45309; }
+.mini-action-btn.danger { background: rgba(239, 68, 68, 0.1); border-color: transparent; color: #dc2626; }
+.mini-action-btn.approve-ok { background: #10b981; border-color: #10b981; color: #ffffff; }
+.mini-action-btn.approve-ok:hover:not(:disabled) { background: #059669; }
+.mini-action-btn.revise-warn { background: rgba(245, 158, 11, 0.12); color: #b45309; border-color: transparent; }
 .mini-action-btn.locked-print,
 .mini-action-btn:disabled {
-  background: #e2e8f0;
-  color: #94a3b8;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+  color: #9ca3af;
   cursor: not-allowed;
-  opacity: 0.85;
 }
-.tag-pill.warn-soft { background: #fef3c7; color: #92400e; }
-.bh-filter-pill.warn-pill { background: #fef3c7; color: #92400e; border-color: #fde68a; }
-.bh-filter-pill.danger-pill { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.bh-filter-pill.warn-pill { background: rgba(245, 158, 11, 0.12); color: #b45309; }
+.bh-filter-pill.danger-pill { background: rgba(239, 68, 68, 0.1); color: #dc2626; }
 .tab-pending-dot {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 18px; height: 18px; padding: 0 5px; margin-left: 5px;
   border-radius: 9999px; background: #f59e0b; color: #ffffff;
-  font-size: 0.68rem; font-weight: 800; line-height: 1;
+  font-size: 11px; font-weight: 600; line-height: 1;
 }
 
 .overpay-note {
@@ -5006,8 +5300,8 @@ onMounted(() => {
 .inline-link-btn:hover { text-decoration: underline; }
 .pill-btn-outline {
   display: inline-flex; align-items: center; gap: 6px;
-  border: 1px solid #cbd5e1; border-radius: 9999px; padding: 6px 13px;
-  background: #ffffff; color: #0b2144; font-size: 0.78rem; font-weight: 650; cursor: pointer;
+  border: 1px solid #cbd5e1; border-radius: 8px; padding: 6px 13px;
+  background: #ffffff; color: #0b2144; font-size: 0.8rem; font-weight: 650; cursor: pointer;
   white-space: nowrap; transition: background 140ms ease, border-color 140ms ease;
 }
 .pill-btn-outline:hover { background: #eff6ff; border-color: #93c5fd; color: #034693; }
@@ -5095,12 +5389,41 @@ onMounted(() => {
   .live-tax-preview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+@media (max-width: 768px) {
+  .pill-month-input,
+  .pill-select,
+  .pill-search-input,
+  .pill-btn-navy,
+  .pill-btn-soft,
+  .pill-btn-danger,
+  .dropx-search-input {
+    min-height: 44px;
+    height: auto;
+  }
+  .unit-pill,
+  .dx-filter-tab,
+  .tab-pill,
+  .mini-action-btn {
+    min-height: 40px;
+  }
+  .dropx-search-box {
+    width: 100%;
+  }
+  .rev-top-actions {
+    width: 100%;
+  }
+}
+
 @media (max-width: 680px) {
   .kpi-metric-row, .aging-strip-grid, .form-2col, .form-3col, .line-card-top, .line-card-bottom, .direct-calc-strip { grid-template-columns: 1fr; }
+  .dropx-kpi-card { padding: 16px; }
+  .dropx-card-head { padding: 14px 14px 12px; }
   .direct-calc-op { display: none; }
   .line-sub-col { text-align: left; }
   .line-sub-val { justify-content: flex-start; }
   .pill-search-input { width: 100%; min-width: 0; }
-  .poital-card { padding: 16px; }
+  .bh-toolbar-selects { width: 100%; }
+  .bh-toolbar-selects .pill-select { flex: 1 1 calc(50% - 4px); min-width: 140px; }
+  .poital-card { padding: 14px; }
 }
 </style>

@@ -101,9 +101,9 @@ function onSizeChange(e: Event) {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  padding-top: 14px;
-  margin-top: 12px;
-  border-top: 1px solid #f1f5f9;
+  padding: 12px 20px;
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
 }
 
 .pg-left {
@@ -111,13 +111,13 @@ function onSizeChange(e: Event) {
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
-  font-size: 0.8rem;
-  color: #64748b;
+  font-size: 13px;
+  color: #6b7280;
 }
 
 .pg-info strong {
-  color: #0b2144;
-  font-weight: 700;
+  color: #111827;
+  font-weight: 600;
 }
 
 .pg-size-wrap {
@@ -128,13 +128,13 @@ function onSizeChange(e: Event) {
 
 .pg-select {
   height: 30px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  color: #0b2144;
-  font-size: 0.78rem;
-  font-weight: 600;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .pg-nav {
@@ -149,30 +149,29 @@ function onSizeChange(e: Event) {
   height: 32px;
   min-width: 32px;
   padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #334155;
-  font-size: 0.78rem;
-  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.14s ease;
+  transition: background 140ms ease, color 140ms ease;
 }
 
 .pg-btn:hover:not(:disabled),
 .pg-num:hover:not(.active) {
-  background: #f8fafc;
-  border-color: #cbd5e1;
+  background: #f3f4f6;
+  color: #111827;
 }
 
 .pg-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .pg-num.active {
-  background: #0b2144;
-  border-color: #0b2144;
+  background: #034693;
   color: #ffffff;
 }
 

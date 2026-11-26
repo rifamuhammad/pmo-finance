@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { apiFetch } from '../services/api';
 import { formatRupiah } from '../utils/format';
@@ -10,7 +9,6 @@ type TimeRangeKey = 'weekly' | 'monthly' | 'quarterly' | 'yearly';
 type ChartView = 'pnl' | 'flow';
 
 const auth = useAuthStore();
-const router = useRouter();
 
 const loading = ref(true);
 const errorMsg = ref('');
@@ -218,13 +216,20 @@ const points = computed(() => {
 function buildCurve(pts: Array<{ x: number; y: number }>): string {
   if (!pts.length) return '';
   if (pts.length === 1) return `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  const maxY = Math.max(...pts.map((p) => p.y));
+  const minY = Math.min(...pts.map((p) => p.y));
+  const clampY = (val: number) => Math.max(minY, Math.min(maxY, val));
   let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[Math.max(0, i - 1)];
     const p1 = pts[i];
     const p2 = pts[i + 1];
     const p3 = pts[Math.min(pts.length - 1, i + 2)];
-    d += ` C ${(p1.x + (p2.x - p0.x) / 6).toFixed(1)} ${(p1.y + (p2.y - p0.y) / 6).toFixed(1)}, ${(p2.x - (p3.x - p1.x) / 6).toFixed(1)} ${(p2.y - (p3.y - p1.y) / 6).toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+    const segMinY = Math.min(p1.y, p2.y);
+    const segMaxY = Math.max(p1.y, p2.y);
+    const c1y = Math.max(segMinY, Math.min(segMaxY, clampY(p1.y + (p2.y - p0.y) / 6)));
+    const c2y = Math.max(segMinY, Math.min(segMaxY, clampY(p2.y - (p3.y - p1.y) / 6)));
+    d += ` C ${(p1.x + (p2.x - p0.x) / 6).toFixed(1)} ${c1y.toFixed(1)}, ${(p2.x - (p3.x - p1.x) / 6).toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
   }
   return d;
 }
@@ -239,8 +244,15 @@ const revCurve = computed(() => buildCurve(points.value.map((p) => ({ x: p.x, y:
 const expCurve = computed(() => buildCurve(points.value.map((p) => ({ x: p.x, y: p.yExp }))));
 
 const mainColor = computed(() => {
-  if (profileType.value === 'PROCUREMENT_OPS') return '#034693';
-  return activeSummary.value.netPnl >= 0 ? '#059669' : '#e11d48';
+  if (activeSummary.value.netPnl < 0 && profileType.value !== 'REVENUE_OPS') return '#ef4444';
+  return '#034693';
+});
+
+const dashboardSubtitle = computed(() => {
+  if (auth.activeWorkspace === 'PENERIMAAN' || profileType.value === 'REVENUE_OPS') {
+    return 'Ringkasan arus kas masuk, tagihan invoice, rekonsiliasi Bank Mandiri, dan kinerja 4 unit bisnis.';
+  }
+  return 'Ringkasan kinerja keuangan, neraca, dan realisasi operasional PMO UTama secara menyeluruh.';
 });
 
 const activeDot = computed(() =>
@@ -286,13 +298,16 @@ onMounted(loadDashboard);
 
 <template>
   <div class="poital-dashboard">
-    <!-- Minimal Original Poital Header -->
+    <!-- DropX Page Header -->
     <section class="overview-header">
-      <h1 class="page-title">{{ headerTitle }}</h1>
+      <div>
+        <h1 class="page-title">{{ headerTitle }}</h1>
+        <p class="page-subtitle">{{ dashboardSubtitle }}</p>
+      </div>
       <div class="header-pills">
         <select v-model="selectedYear" class="date-range-pill" aria-label="Tahun Buku">
-          <option value="2026">FY-2026</option>
-          <option value="2025">FY-2025</option>
+          <option value="2026">Tahun Buku FY-2026</option>
+          <option value="2025">Tahun Buku FY-2025</option>
         </select>
       </div>
     </section>
@@ -313,19 +328,25 @@ onMounted(loadDashboard);
     />
 
     <div v-else class="dashboard-content-grid">
-      <!-- 1. FOUR SIGNATURE POITAL KPI CARDS (ADAPTED PER ROLE) -->
+      <!-- 1. FOUR DROPX LUMINOUS GRADIENT KPI CARDS -->
       <section class="kpi-metric-row">
         <article
-          v-for="card in roleKpiCards"
+          v-for="(card, cIdx) in roleKpiCards"
           :key="card.title"
-          class="metric-card"
-          :class="card.tone"
+          class="dropx-kpi-card"
+          :class="['kpi-grad-navy', 'kpi-grad-emerald', 'kpi-grad-ocean', 'kpi-grad-amber'][cIdx % 4]"
         >
-          <span class="metric-title">{{ card.title }}</span>
-          <div class="metric-number-val money" :class="{ 'dark-num': card.tone !== 'hero-card' }">
-            {{ card.val }}
+          <div class="kpi-top-row">
+            <span class="kpi-label">{{ card.title }}</span>
+            <span class="kpi-icon-box" aria-hidden="true">
+              <svg v-if="cIdx === 0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              <svg v-else-if="cIdx === 1" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+              <svg v-else-if="cIdx === 2" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M6 10v11"/><path d="M12 10v11"/><path d="M18 10v11"/></svg>
+              <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            </span>
           </div>
-          <span class="trend-text">{{ card.foot }}</span>
+          <div class="kpi-value money">{{ card.val }}</div>
+          <span class="kpi-foot">{{ card.foot }}</span>
         </article>
       </section>
 
@@ -524,15 +545,6 @@ onMounted(loadDashboard);
               <strong class="money">{{ formatRupiah(balanceSheet.totalLiabilities) }}</strong>
             </div>
           </div>
-
-          <button
-            v-if="auth.hasPermission('report:view')"
-            type="button"
-            class="clean-link-btn"
-            @click="router.push('/reports')"
-          >
-            Laporan Lengkap
-          </button>
         </article>
 
         <!-- Right: Cashier Ops Card -->
@@ -549,9 +561,6 @@ onMounted(loadDashboard);
             <div class="n-row"><span>61 - 90 Hari</span><strong class="money">{{ formatRupiah(roleSummary.agingReceivables.days61to90) }}</strong></div>
             <div class="n-row"><span>&gt; 90 Hari</span><strong class="money text-neg">{{ formatRupiah(roleSummary.agingReceivables.over90) }}</strong></div>
           </div>
-          <button type="button" class="clean-link-btn" @click="router.push('/revenue')">
-            Buka Buku Penerimaan
-          </button>
         </article>
 
         <!-- Right: Procurement Ops Card -->
@@ -568,9 +577,6 @@ onMounted(loadDashboard);
             <div class="n-row"><span>61 - 90 Hari</span><strong class="money">{{ formatRupiah(roleSummary.agingPayables.days61to90) }}</strong></div>
             <div class="n-row"><span>&gt; 90 Hari</span><strong class="money text-neg">{{ formatRupiah(roleSummary.agingPayables.over90) }}</strong></div>
           </div>
-          <button type="button" class="clean-link-btn" @click="router.push('/procurement')">
-            Buka Pengadaan &amp; PO
-          </button>
         </article>
       </section>
 
@@ -621,13 +627,6 @@ onMounted(loadDashboard);
         <article class="poital-card">
           <div class="card-header-bar">
             <h2 class="card-title">{{ profileType === 'AUDITOR' ? 'Log Audit Terbaru' : 'Menunggu Persetujuan' }}</h2>
-            <button
-              type="button"
-              class="mini-reset-btn"
-              @click="router.push(profileType === 'AUDITOR' ? '/admin' : '/approvals')"
-            >
-              Semua
-            </button>
           </div>
 
           <template v-if="profileType === 'AUDITOR'">
@@ -648,8 +647,7 @@ onMounted(loadDashboard);
               <div
                 v-for="apr in pendingApprovals.slice(0, 5)"
                 :key="apr.id"
-                class="slim-item clickable"
-                @click="router.push('/approvals')"
+                class="slim-item"
               >
                 <div class="slim-left">
                   <strong>{{ apr.entityCode }}</strong>
@@ -667,7 +665,6 @@ onMounted(loadDashboard);
         <article class="poital-card">
           <div class="card-header-bar">
             <h2 class="card-title">Aging Penerimaan</h2>
-            <button v-if="auth.hasPermission('revenue:view')" type="button" class="mini-reset-btn" @click="router.push('/revenue')">Detail</button>
           </div>
           <div class="aging-4">
             <div><span>0-30h</span><strong class="money">{{ formatRupiah(roleSummary.agingReceivables.current) }}</strong></div>
@@ -680,7 +677,6 @@ onMounted(loadDashboard);
         <article class="poital-card">
           <div class="card-header-bar">
             <h2 class="card-title">Aging Pembayaran</h2>
-            <button v-if="auth.hasPermission('procurement:view')" type="button" class="mini-reset-btn" @click="router.push('/procurement')">Detail</button>
           </div>
           <div class="aging-4">
             <div><span>0-30h</span><strong class="money">{{ formatRupiah(roleSummary.agingPayables.current) }}</strong></div>
@@ -697,35 +693,45 @@ onMounted(loadDashboard);
 <style scoped>
 .poital-dashboard {
   width: 100%;
-  max-width: 1400px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding-bottom: 84px;
+  padding-bottom: 24px;
 }
 
 .overview-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 18px;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
 }
 
 .page-title {
-  font-size: 1.35rem;
-  font-weight: 750;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
   letter-spacing: -0.025em;
-  color: var(--text-primary);
+  color: #111827;
   margin: 0;
 }
 
+.page-subtitle {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: #6b7280;
+}
+
 .date-range-pill {
-  background: var(--bg-surface);
-  border: none;
-  border-radius: 9999px;
-  padding: 8px 16px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.05);
+  height: 36px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #111827;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
   cursor: pointer;
 }
 
@@ -735,58 +741,118 @@ onMounted(loadDashboard);
   gap: 18px;
 }
 
-/* Signature Poital 4-Card Row */
+/* DropX Luminous 4-Card Gradient KPI Row (PMO UTama Palette) */
 .kpi-metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
+  gap: 16px;
 }
 
-.metric-card {
-  border-radius: 20px;
-  padding: 20px 22px;
+.dropx-kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  padding: 20px;
+  color: #ffffff;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+  gap: 4px;
+  border: none;
+  box-shadow: 0 4px 14px -4px rgba(17, 24, 39, 0.16);
 }
 
-.metric-title {
-  font-size: 0.84rem;
-  font-weight: 600;
+.dropx-kpi-card::before,
+.dropx-kpi-card::after {
+  content: '';
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
 }
 
-.metric-number-val {
-  font-size: clamp(1.15rem, 1.4vw, 1.5rem);
-  font-weight: 750;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
+.dropx-kpi-card::before {
+  width: 126px;
+  height: 126px;
+  right: -28px;
+  top: -28px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dropx-kpi-card::after {
+  width: 96px;
+  height: 96px;
+  right: 26px;
+  bottom: -40px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.kpi-grad-navy {
+  background: linear-gradient(135deg, #0b2144 0%, #034693 100%);
+}
+.kpi-grad-emerald {
+  background: linear-gradient(135deg, #22c55e 0%, #10b981 55%, #059669 100%);
+}
+.kpi-grad-ocean {
+  background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 55%, #0284c7 100%);
+}
+.kpi-grad-amber {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.kpi-top-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kpi-label {
+  font-size: 13px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.kpi-icon-box {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpi-value {
+  position: relative;
+  z-index: 1;
+  margin-top: 6px;
+  font-size: clamp(1.25rem, 1.55vw, 1.5rem);
+  line-height: 1.2;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.025em;
   overflow-wrap: anywhere;
 }
 
-.trend-text {
-  font-size: 0.76rem;
-  color: var(--text-secondary);
+.kpi-foot {
+  position: relative;
+  z-index: 1;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.84);
 }
 
-.hero-card {
-  background: #0b2144;
-  color: #ffffff;
-}
-.hero-card .metric-title { color: rgba(255, 255, 255, 0.82); }
-.hero-card .trend-text { color: rgba(255, 255, 255, 0.65); }
-
-.blue-card { background: #eff6ff; color: #034693; }
-.amber-card { background: #fef9ed; color: #b45309; }
-.white-card { background: var(--bg-surface); color: var(--text-primary); }
-.dark-num { color: var(--text-primary); }
-
-/* Poital Soft Cards */
+/* DropX Pure White Cards */
 .poital-card {
-  background: var(--bg-surface);
-  border-radius: 20px;
-  padding: 22px 24px;
-  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -794,7 +860,7 @@ onMounted(loadDashboard);
 
 .dashboard-row-grid {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .split-60-40 { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
@@ -809,9 +875,10 @@ onMounted(loadDashboard);
 
 .card-title {
   margin: 0;
-  font-size: 1.02rem;
-  font-weight: 700;
-  color: var(--text-primary);
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: #111827;
 }
 
 /* Portfolio PnL Chart */
@@ -826,21 +893,21 @@ onMounted(loadDashboard);
 
 .pnl-kicker {
   display: block;
-  font-size: 0.76rem;
+  font-size: 12.5px;
   color: var(--text-secondary);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .pnl-amount-line {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 .pnl-hero-num {
-  font-size: 1.85rem;
-  font-weight: 800;
+  font-size: 1.625rem;
+  font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--text-primary);
 }
@@ -848,8 +915,8 @@ onMounted(loadDashboard);
 .pnl-hero-num.is-neg { color: #e11d48; }
 
 .pnl-delta {
-  font-size: 0.78rem;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
   padding: 2px 8px;
   border-radius: 9999px;
 }
@@ -866,18 +933,19 @@ onMounted(loadDashboard);
 .range-pills {
   display: inline-flex;
   padding: 3px;
-  border-radius: 9999px;
-  background: var(--bg-subtle);
+  border-radius: 8px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
 }
 
 .range-btn {
   border: none;
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.74rem;
-  font-weight: 700;
-  padding: 5px 11px;
-  border-radius: 9999px;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease;
 }
@@ -928,8 +996,8 @@ onMounted(loadDashboard);
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.7rem;
-  font-weight: 600;
+  font-size: 11.5px;
+  font-weight: 400;
   padding: 4px 2px;
   border-radius: 6px;
   cursor: pointer;
@@ -957,34 +1025,34 @@ onMounted(loadDashboard);
 }
 
 .pnl-mini-foot span {
-  font-size: 0.72rem;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
 .pnl-mini-foot strong {
-  font-size: 0.9rem;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 /* Clean Neraca / Asset Allocation Card */
 .mini-pill {
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 10px;
   border-radius: 9999px;
 }
-.mini-pill.ok { background: #ecfdf5; color: #047857; }
-.mini-pill.warn { background: #fef2f2; color: #b91c1c; }
+.mini-pill.ok { background: rgba(16, 185, 129, 0.12); color: #059669; }
+.mini-pill.warn { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
 
 .neraca-hero-val {
-  font-size: 1.5rem;
-  font-weight: 800;
+  font-size: 1.45rem;
+  font-weight: 700;
   letter-spacing: -0.025em;
   color: var(--text-primary);
 }
 
 .neraca-hero-sub {
-  font-size: 0.76rem;
+  font-size: 12.5px;
   color: var(--text-secondary);
   margin-top: 2px;
 }
@@ -1013,13 +1081,13 @@ onMounted(loadDashboard);
 .n-row {
   display: flex;
   justify-content: space-between;
-  font-size: 0.84rem;
+  font-size: 13.5px;
   color: var(--text-secondary);
 }
 
 .n-row strong {
   color: var(--text-primary);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .clean-link-btn {
@@ -1053,18 +1121,28 @@ onMounted(loadDashboard);
 
 .clean-products-table th {
   text-align: left;
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  background: transparent;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .clean-products-table td {
-  padding: 11px 10px;
-  font-size: 0.82rem;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 12px 14px;
+  font-size: 13.5px;
+  font-weight: 400;
+  color: #111827;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.clean-products-table td strong {
+  font-weight: 500;
+}
+
+.clean-products-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .col-price {
@@ -1115,14 +1193,18 @@ onMounted(loadDashboard);
 }
 
 .mini-reset-btn {
-  border: none;
-  background: var(--bg-subtle);
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
   color: #034693;
-  font-size: 0.74rem;
-  font-weight: 700;
-  padding: 5px 12px;
-  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: 6px;
   cursor: pointer;
+}
+.mini-reset-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
 }
 
 .aging-4 {
@@ -1133,15 +1215,15 @@ onMounted(loadDashboard);
 
 .aging-4 > div {
   padding: 12px;
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--bg-subtle);
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.aging-4 span { font-size: 0.72rem; color: var(--text-secondary); }
-.aging-4 strong { font-size: 0.86rem; font-weight: 700; }
+.aging-4 span { font-size: 12px; color: var(--text-secondary); }
+.aging-4 strong { font-size: 13.5px; font-weight: 600; }
 
 .empty-note {
   padding: 20px;
@@ -1160,8 +1242,10 @@ onMounted(loadDashboard);
 
 @media (max-width: 680px) {
   .kpi-metric-row { grid-template-columns: 1fr; gap: 12px; }
-  .metric-card { padding: 16px 18px; }
-  .poital-card { padding: 16px 18px; }
+  .dropx-kpi-card { padding: 16px; }
+  .date-range-pill { min-height: 44px; width: 100%; }
+  .range-btn { min-height: 40px; padding: 6px 12px; }
+  .poital-card { padding: 16px; }
   .aging-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pnl-hero-num { font-size: clamp(1.3rem, 5vw, 1.6rem); }
   .chart-wrap { grid-template-columns: 38px minmax(0, 1fr); gap: 6px; height: 190px; }

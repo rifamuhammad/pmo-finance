@@ -1,16 +1,37 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { apiFetch, downloadApiBlob } from '../services/api';
 import { formatRupiah } from '../utils/format';
 import StatusBadge from '../components/StatusBadge.vue';
 import StateBanner from '../components/StateBanner.vue';
 import AlertBanner from '../components/AlertBanner.vue';
 
-const router = useRouter();
+const route = useRoute();
 
 type LaporanTab = 'realisasi' | 'aging';
 const activeTab = ref<LaporanTab>('realisasi');
+
+function applySectionFromQuery() {
+  const qSec = typeof route.query.section === 'string' ? route.query.section : '';
+  if (qSec === 'realisasi' || qSec === 'aging') {
+    activeTab.value = qSec;
+  }
+}
+
+watch(() => route.query.section, applySectionFromQuery);
+
+const pageTitle = computed(() =>
+  activeTab.value === 'aging'
+    ? 'Aging Piutang Penerimaan'
+    : 'Realisasi Penerimaan & Target RAB'
+);
+
+const pageSubtitle = computed(() =>
+  activeTab.value === 'aging'
+    ? 'Monitoring umur piutang faktur klien yang belum lunas (0-30, 31-60, 61-90, dan > 90 hari)'
+    : 'Capaian realisasi penerimaan 4 unit bisnis (MICE, Klinik, ITS, TCI) terhadap target RAB dan pivot akun COA resmi'
+);
 
 const loading = ref(true);
 const exportingMonthly = ref(false);
@@ -133,7 +154,10 @@ async function exportAgingExcel() {
   }
 }
 
-onMounted(loadData);
+onMounted(() => {
+  applySectionFromQuery();
+  loadData();
+});
 </script>
 
 <template>
@@ -141,7 +165,8 @@ onMounted(loadData);
     <!-- Header -->
     <div class="rev-top-bar">
       <div>
-        <h1 class="rev-title">Laporan Penerimaan</h1>
+        <h1 class="rev-title">{{ pageTitle }}</h1>
+        <p class="rev-subtitle">{{ pageSubtitle }}</p>
       </div>
       <div class="rev-top-actions">
         <input
@@ -150,10 +175,22 @@ onMounted(loadData);
           class="pill-month-input"
           aria-label="Pilih Bulan Laporan"
         />
-        <button type="button" class="pill-btn-soft" :disabled="exportingAging" @click="exportAgingExcel">
+        <button
+          v-if="activeTab === 'aging'"
+          type="button"
+          class="pill-btn-navy"
+          :disabled="exportingAging"
+          @click="exportAgingExcel"
+        >
           {{ exportingAging ? 'Menyiapkan...' : 'Export Aging .xlsx' }}
         </button>
-        <button type="button" class="pill-btn-navy" :disabled="exportingMonthly" @click="exportMonthlyExcel">
+        <button
+          v-else
+          type="button"
+          class="pill-btn-navy"
+          :disabled="exportingMonthly"
+          @click="exportMonthlyExcel"
+        >
           {{ exportingMonthly ? 'Menyiapkan...' : 'Export Penerimaan .xlsx' }}
         </button>
       </div>
@@ -184,54 +221,62 @@ onMounted(loadData);
         <button type="button" class="recon-pill" :class="{ active: reconciledOnly }" @click="reconciledOnly = true">
           Rekon Bank ({{ recapData?.summary?.reconciledCount || 0 }})
         </button>
-        <button type="button" class="unit-pill" @click="router.push('/reconciliation')">
-          &larr; Rekonsiliasi
-        </button>
       </div>
     </div>
 
     <AlertBanner v-if="feedbackMsg" variant="success" title="Berhasil" :message="feedbackMsg" @dismiss="feedbackMsg = ''" />
     <AlertBanner v-if="errorMsg" variant="danger" title="Perhatian" :message="errorMsg" @dismiss="errorMsg = ''" />
 
-    <!-- KPI Row -->
+    <!-- DropX Luminous 4-Card Gradient KPI Row -->
     <section class="kpi-metric-row">
-      <article class="metric-card hero-card">
-        <span class="metric-title">Realisasi Penerimaan ({{ recapData?.period?.label || selectedMonth }})</span>
-        <strong class="metric-number-val money">{{ formatRupiah(recapData?.summary?.totalReceived || 0) }}</strong>
-        <span class="trend-text">{{ recapData?.summary?.totalTransactions || 0 }} transaksi masuk Bank Mandiri</span>
+      <article class="dropx-kpi-card kpi-grad-navy">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Realisasi Penerimaan ({{ recapData?.period?.label || selectedMonth }})</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(recapData?.summary?.totalReceived || 0) }}</strong>
+        <span class="kpi-foot">{{ recapData?.summary?.totalTransactions || 0 }} transaksi masuk Bank Mandiri</span>
       </article>
-      <article class="metric-card blue-card">
-        <span class="metric-title">Pendapatan Bersih PMO</span>
-        <strong class="metric-number-val money dark-num">{{ formatRupiah(recapData?.summary?.totalNetClean || 0) }}</strong>
-        <span class="trend-text">Neto setelah pajak UT &amp; lebih bayar</span>
+
+      <article class="dropx-kpi-card kpi-grad-emerald">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Pendapatan Bersih PMO</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(recapData?.summary?.totalNetClean || 0) }}</strong>
+        <span class="kpi-foot">Neto setelah pajak UT &amp; lebih bayar</span>
       </article>
-      <article class="metric-card amber-card" style="cursor: pointer;" @click="activeTab = 'aging'">
-        <span class="metric-title">Total Piutang Terbuka (Aging)</span>
-        <strong class="metric-number-val money dark-num">{{ formatRupiah(agingData?.buckets?.totalOutstanding || 0) }}</strong>
-        <span class="trend-text">{{ agingData?.buckets?.openCount || 0 }} faktur belum lunas</span>
+
+      <article class="dropx-kpi-card kpi-grad-amber">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Total Piutang Terbuka (Aging)</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value money">{{ formatRupiah(agingData?.buckets?.totalOutstanding || 0) }}</strong>
+        <span class="kpi-foot">{{ agingData?.buckets?.openCount || 0 }} faktur belum lunas</span>
       </article>
-      <article class="metric-card white-card">
-        <span class="metric-title">Tingkat Rekonsiliasi Bank</span>
-        <strong class="metric-number-val dark-num">
+
+      <article class="dropx-kpi-card kpi-grad-ocean">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Tingkat Rekonsiliasi Bank</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M6 10v11"/><path d="M18 10v11"/></svg>
+          </span>
+        </div>
+        <strong class="kpi-value">
           {{ recapData?.summary?.reconciledCount || 0 }} / {{ recapData?.summary?.allScopeCount || 0 }}
         </strong>
-        <span class="trend-text">
+        <span class="kpi-foot">
           Terverifikasi {{ formatRupiah(recapData?.summary?.reconciledAmount || 0) }}
         </span>
       </article>
     </section>
-
-    <!-- 2 Tabs -->
-    <div class="rev-tab-strip">
-      <div class="tab-pills" role="tablist">
-        <button type="button" class="tab-pill" :class="{ active: activeTab === 'realisasi' }" @click="activeTab = 'realisasi'">
-          1. Realisasi per Unit &amp; COA
-        </button>
-        <button type="button" class="tab-pill" :class="{ active: activeTab === 'aging' }" @click="activeTab = 'aging'">
-          2. Aging Penerimaan ({{ agingData?.buckets?.openCount || 0 }})
-        </button>
-      </div>
-    </div>
 
     <StateBanner v-if="loading" state="loading" title="Menyusun Laporan Penerimaan" message="Mengagregasi realisasi 4 unit bisnis, Pivot COA, dan Aging Piutang..." />
 
@@ -278,7 +323,7 @@ onMounted(loadData);
                   </span>
                 </td>
               </tr>
-              <tr v-if="recapData?.byUnit?.length > 1" style="background: #f8fafc; font-weight: 700;">
+              <tr v-if="recapData?.byUnit?.length > 1" style="background: #fafafa; font-weight: 600;">
                 <td>TOTAL 4 UNIT OPERASIONAL</td>
                 <td class="col-num">{{ recapData?.summary?.totalTransactions || 0 }}</td>
                 <td class="col-num money">{{ formatRupiah(recapData?.summary?.totalRabMonthlyTarget || 0) }}</td>
@@ -481,9 +526,6 @@ onMounted(loadData);
               class="pill-search-input"
               placeholder="Cari invoice, instansi, kegiatan..."
             />
-            <button type="button" class="pill-btn-soft" @click="router.push('/revenue')">
-              Buka Buku Harian
-            </button>
           </div>
         </div>
 
@@ -536,25 +578,43 @@ onMounted(loadData);
 
 <style scoped>
 .poital-penerimaan {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+  padding-bottom: 28px;
 }
 
 .rev-top-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
+}
+
+.rev-top-bar > div:first-child {
+  flex: 1;
+  min-width: 240px;
 }
 
 .rev-title {
   margin: 0;
-  font-size: 1.55rem;
-  font-weight: 800;
-  color: #0b2144;
-  letter-spacing: -0.02em;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+  color: #111827;
+  letter-spacing: -0.025em;
+}
+
+.rev-subtitle {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.45;
+  max-width: 560px;
 }
 
 .rev-top-actions {
@@ -562,44 +622,61 @@ onMounted(loadData);
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .pill-month-input,
 .pill-search-input {
-  height: 38px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  color: #0f172a;
-  font-size: 0.85rem;
-  font-weight: 500;
+  color: #111827;
+  font-size: 13.5px;
+  font-weight: 400;
+  outline: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.pill-month-input:focus,
+.pill-search-input:focus {
+  border-color: #034693;
+  box-shadow: 0 0 0 2px rgba(3, 70, 147, 0.2);
 }
 
 .pill-search-input {
-  min-width: 220px;
+  min-width: 240px;
 }
 
 .pill-btn-navy,
 .pill-btn-soft {
-  height: 38px;
-  padding: 0 16px;
-  border-radius: 999px;
-  font-size: 0.84rem;
-  font-weight: 600;
+  height: 36px;
+  padding: 0 15px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
   border: 1px solid transparent;
+  transition: background 140ms ease, border-color 140ms ease;
 }
 
 .pill-btn-navy {
-  background: #0b2144;
+  background: #034693;
+  border-color: #034693;
   color: #ffffff;
+}
+.pill-btn-navy:hover:not(:disabled) {
+  background: #023470;
 }
 
 .pill-btn-soft {
   background: #ffffff;
-  color: #0b2144;
-  border-color: #cbd5e1;
+  color: #111827;
+  border-color: #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.pill-btn-soft:hover:not(:disabled) {
+  background: #f3f4f6;
 }
 
 .unit-filter-bar {
@@ -615,146 +692,127 @@ onMounted(loadData);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
 }
 
 .unit-pill,
 .recon-pill {
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #475569;
-  font-size: 0.8rem;
-  font-weight: 600;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #6b7280;
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.unit-pill:hover:not(.active),
+.recon-pill:hover:not(.active) {
+  background: #f3f4f6;
+  color: #111827;
 }
 
-.unit-pill.active {
-  background: #0b2144;
-  border-color: #0b2144;
-  color: #ffffff;
-}
-
+.unit-pill.active,
 .recon-pill.active {
-  background: #eff6ff;
-  border-color: #2563eb;
-  color: #1d4ed8;
+  background: #034693;
+  color: #ffffff;
 }
 
 .kpi-metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
 
-.metric-card {
+.dropx-kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  padding: 20px;
+  color: #ffffff;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 18px 20px;
-  border-radius: 20px;
-  border: 1px solid #e2e8f0;
+  gap: 4px;
+  border: none;
+  box-shadow: 0 4px 14px -4px rgba(17, 24, 39, 0.16);
 }
+.dropx-kpi-card::before,
+.dropx-kpi-card::after { content: ''; position: absolute; border-radius: 9999px; pointer-events: none; }
+.dropx-kpi-card::before { width: 124px; height: 124px; right: -28px; top: -28px; background: rgba(255, 255, 255, 0.12); }
+.dropx-kpi-card::after { width: 92px; height: 92px; right: 24px; bottom: -38px; background: rgba(255, 255, 255, 0.07); }
 
-.hero-card {
-  background: #0b2144;
-  border-color: #0b2144;
-  color: #ffffff;
-}
+.kpi-grad-navy { background: linear-gradient(135deg, #0b2144 0%, #034693 100%); }
+.kpi-grad-emerald { background: linear-gradient(135deg, #22c55e 0%, #10b981 55%, #059669 100%); }
+.kpi-grad-ocean { background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 55%, #0284c7 100%); }
+.kpi-grad-amber { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
 
-.blue-card {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-
-.amber-card {
-  background: #fef9ed;
-  border-color: #fde68a;
-}
-
-.white-card {
-  background: #ffffff;
-}
-
-.metric-title {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.hero-card .metric-title,
-.hero-card .trend-text {
-  color: #cbd5e1;
-}
-
-.metric-number-val {
-  font-size: clamp(1rem, 1.55vw, 1.4rem);
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-
-.dark-num {
-  color: #0b2144;
-}
-
-.trend-text {
-  font-size: 0.76rem;
-  color: #64748b;
-}
+.kpi-top-row { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.kpi-label { font-size: 13px; font-weight: 400; color: rgba(255, 255, 255, 0.9); }
+.kpi-icon-box { width: 38px; height: 38px; border-radius: 8px; background: rgba(255, 255, 255, 0.18); color: #ffffff; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.kpi-value { position: relative; z-index: 1; margin-top: 6px; font-size: clamp(1.25rem, 1.55vw, 1.5rem); line-height: 1.2; font-weight: 700; color: #ffffff; letter-spacing: -0.025em; }
+.kpi-foot { position: relative; z-index: 1; margin-top: 4px; font-size: 12px; font-weight: 400; color: rgba(255, 255, 255, 0.84); }
 
 .rev-tab-strip {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 6px;
 }
 
 .tab-pills {
-  display: flex;
+  display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  background: #f1f5f9;
-  padding: 4px;
-  border-radius: 999px;
+  gap: 4px;
+  margin-bottom: -7px;
 }
 
 .tab-pill {
-  padding: 8px 16px;
-  border-radius: 999px;
+  padding: 8px 12px 10px;
+  border-radius: 6px 6px 0 0;
   border: none;
+  border-bottom: 2px solid transparent;
   background: transparent;
-  color: #475569;
-  font-size: 0.84rem;
-  font-weight: 600;
+  color: #6b7280;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.tab-pill:hover {
+  color: #111827;
 }
 
 .tab-pill.active {
-  background: #ffffff;
-  color: #0b2144;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+  color: #034693;
+  border-bottom-color: #034693;
+  font-weight: 600;
 }
 
 .rev-stack {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .split-2-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
 }
 
 .poital-card {
   background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
   padding: 20px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
 }
 
 .card-head-row {
@@ -768,14 +826,16 @@ onMounted(loadData);
 
 .card-title {
   margin: 0;
-  font-size: 1.02rem;
-  font-weight: 700;
-  color: #0b2144;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: #111827;
 }
 
 .card-sub {
-  font-size: 0.8rem;
-  color: #64748b;
+  font-size: 13px;
+  font-weight: 400;
+  color: #6b7280;
 }
 
 .table-wrap {
@@ -786,26 +846,35 @@ onMounted(loadData);
 .clean-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.84rem;
+  font-size: 13.5px;
 }
 
 .clean-table.compact {
-  font-size: 0.79rem;
+  font-size: 13px;
 }
 
 .clean-table th {
   text-align: left;
-  padding: 10px 10px;
-  color: #64748b;
-  font-weight: 600;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 11px 12px;
+  color: #6b7280;
+  background: #fafafa;
+  font-size: 12px;
+  font-weight: 500;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
   white-space: nowrap;
 }
 
 .clean-table td {
-  padding: 11px 10px;
-  border-bottom: 1px solid #f1f5f9;
-  vertical-align: top;
+  padding: 12px 12px;
+  color: #111827;
+  font-weight: 400;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+
+.clean-table tbody tr:hover td {
+  background: rgba(249, 250, 251, 0.85);
 }
 
 .col-num {
@@ -815,20 +884,21 @@ onMounted(loadData);
 
 .empty-cell {
   text-align: center;
-  padding: 28px !important;
-  color: #64748b;
+  padding: 32px !important;
+  color: #6b7280;
 }
 
 .mono-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #1e293b;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: #034693;
 }
 
 .cell-sub {
-  font-size: 0.75rem;
-  color: #64748b;
+  font-size: 12px;
+  color: #6b7280;
   margin-top: 2px;
 }
 
@@ -836,11 +906,11 @@ onMounted(loadData);
   display: inline-block;
   margin-left: 6px;
   padding: 1px 7px;
-  border-radius: 999px;
-  background: #f1f5f9;
-  color: #334155;
-  font-size: 0.7rem;
-  font-weight: 700;
+  border-radius: 9999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .text-pos {
@@ -858,78 +928,67 @@ onMounted(loadData);
   flex-direction: column;
   align-items: flex-start;
   text-align: left;
-  gap: 6px;
-  padding: 16px 18px;
-  border-radius: 20px;
-  border: 1.5px solid #e2e8f0;
+  gap: 5px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.aging-kpi-card:hover {
+  transform: translateY(-1px);
+  border-color: #d1d5db;
 }
 
 .aging-kpi-card.is-selected {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+  border-color: #034693;
+  box-shadow: 0 0 0 2px rgba(3, 70, 147, 0.2);
 }
 
 .aging-kpi-navy {
-  background: #0b2144;
-  border-color: #0b2144;
+  background: linear-gradient(135deg, #0b2144 0%, #034693 100%);
+  border-color: transparent;
   color: #ffffff;
 }
 
 .aging-kpi-navy .aging-kpi-label,
 .aging-kpi-navy .aging-kpi-meta {
-  color: #cbd5e1;
+  color: rgba(255, 255, 255, 0.85);
 }
 
-.aging-kpi-blue {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #0b2144;
-}
-
-.aging-kpi-amber {
-  background: #fef9ed;
-  border-color: #fde68a;
-  color: #78350f;
-}
-
-.aging-kpi-orange {
-  background: #fff7ed;
-  border-color: #fed7aa;
-  color: #9a3412;
-}
-
-.aging-kpi-red {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #991b1b;
-}
+.aging-kpi-blue { color: #034693; }
+.aging-kpi-amber { color: #d97706; }
+.aging-kpi-orange { color: #ea580c; }
+.aging-kpi-red { color: #dc2626; }
 
 .aging-kpi-label {
-  font-size: 0.76rem;
-  font-weight: 600;
-  color: #475569;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: #6b7280;
 }
 
 .aging-kpi-value {
-  font-size: clamp(0.95rem, 1.3vw, 1.2rem);
-  font-weight: 800;
-  line-height: 1.2;
+  font-size: clamp(1rem, 1.3vw, 1.2rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 
 .aging-kpi-meta {
-  font-size: 0.73rem;
-  color: #64748b;
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .aging-day-pill {
-  display: inline-block;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
 }
 

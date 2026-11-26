@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { apiFetch, downloadApiBlob } from '../services/api';
 import { formatRupiah, formatDate } from '../utils/format';
@@ -8,9 +7,9 @@ import StateBanner from '../components/StateBanner.vue';
 import ModalDialog from '../components/ModalDialog.vue';
 import AlertBanner from '../components/AlertBanner.vue';
 import CurrencyInput from '../components/CurrencyInput.vue';
+import TablePagination from '../components/TablePagination.vue';
 
 const auth = useAuthStore();
-const router = useRouter();
 
 const loading = ref(true);
 const errorMsg = ref('');
@@ -26,10 +25,12 @@ const penerimaanCandidates = ref<any>(null);
 const autoMatching = ref(false);
 const finalizing = ref(false);
 
-// Table filters
+// Table filters & pagination
 const lineStatusFilter = ref<'ALL' | 'UNMATCHED' | 'MATCHED' | 'EXCEPTION' | 'NEEDS_REVIEW'>('ALL');
 const lineSearch = ref('');
 const candidateSearch = ref('');
+const reconPage = ref(1);
+const reconPageSize = ref(15);
 
 // Preview & Import Modal State
 const importModalOpen = ref(false);
@@ -169,6 +170,22 @@ const selectedImportStats = computed(() => {
   return { total: lines.length, matched, unmatched, exception, review };
 });
 
+const previewTotals = computed(() => {
+  const rows = previewResult.value?.rows || [];
+  let totalCredit = 0;
+  let totalDebit = 0;
+  for (const r of rows) {
+    if (r.isDuplicate) continue;
+    const amt = Number(r.amount || 0);
+    if (r.direction === 'DEBIT') totalDebit += amt;
+    else totalCredit += amt;
+  }
+  return {
+    totalCredit: totalCredit > 0 ? totalCredit : parsedTotals.value.totalCredit,
+    totalDebit: totalDebit > 0 ? totalDebit : parsedTotals.value.totalDebit,
+  };
+});
+
 const filteredStatementLines = computed(() => {
   const lines = selectedImport.value?.lines || [];
   const q = lineSearch.value.trim().toLowerCase();
@@ -179,6 +196,15 @@ const filteredStatementLines = computed(() => {
       .toLowerCase()
       .includes(q);
   });
+});
+
+const paginatedStatementLines = computed(() => {
+  const start = (reconPage.value - 1) * reconPageSize.value;
+  return filteredStatementLines.value.slice(start, start + reconPageSize.value);
+});
+
+watch([lineStatusFilter, lineSearch, () => selectedImport.value?.id], () => {
+  reconPage.value = 1;
 });
 
 const filteredCandidates = computed(() => {
@@ -835,29 +861,6 @@ onMounted(loadReconciliation);
       </div>
     </div>
 
-    <!-- Compact Workflow Stepper (Penerimaan Only) -->
-    <div v-if="selectedAccountDomain === 'PENERIMAAN'" class="workflow-bar">
-      <div class="workflow-steps">
-        <button type="button" class="wf-step-link" @click="router.push('/revenue')">
-          1. Buku Harian
-        </button>
-        <span class="wf-sep" aria-hidden="true">/</span>
-        <span class="wf-step-active">2. Rekonsiliasi Bank Mandiri</span>
-        <span class="wf-sep" aria-hidden="true">/</span>
-        <button type="button" class="wf-step-link" @click="router.push('/penerimaan/pembukuan')">
-          3A. Pembukuan
-        </button>
-        <button type="button" class="wf-step-link" @click="router.push('/penerimaan/laporan')">
-          3B. Laporan Penerimaan
-        </button>
-      </div>
-      <div v-if="penerimaanCandidates" class="workflow-counter">
-        Sudah cocok: <strong class="text-pos">{{ penerimaanCandidates.reconciledCount }}</strong>
-        <span class="wf-dot">&middot;</span>
-        Menunggu cocok: <strong class="text-warn">{{ penerimaanCandidates.unreconciledCount }}</strong>
-      </div>
-    </div>
-
     <AlertBanner
       v-if="feedbackMsg"
       variant="success"
@@ -903,14 +906,19 @@ onMounted(loadReconciliation);
       </button>
     </section>
 
-    <!-- 3-Card Balance Comparison Summary -->
+    <!-- DropX Luminous 3-Card Balance Comparison Summary -->
     <section v-if="accountSummary" class="kpi-metric-row">
-      <div class="metric-card hero-card">
-        <span class="metric-title">
-          {{ accountSummary.bookBalanceBasis === 'APPROVED_PAYMENTS_PER_ACCOUNT' ? 'Saldo Buku Harian (Disetujui)' : 'Saldo Catatan Buku Kas (GL)' }}
-        </span>
-        <div class="metric-number-val money">{{ formatRupiah(accountSummary.bookBalance) }}</div>
-        <span class="trend-text">
+      <div class="dropx-kpi-card kpi-grad-navy">
+        <div class="kpi-top-row">
+          <span class="kpi-label">
+            {{ accountSummary.bookBalanceBasis === 'APPROVED_PAYMENTS_PER_ACCOUNT' ? 'Saldo Buku Harian (Disetujui)' : 'Saldo Catatan Buku Kas (GL)' }}
+          </span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value money">{{ formatRupiah(accountSummary.bookBalance) }}</div>
+        <span class="kpi-foot">
           {{
             accountSummary.bookBalanceBasis === 'APPROVED_PAYMENTS_PER_ACCOUNT'
               ? 'Total transaksi rekening ini yang sudah disetujui Manajer Keuangan'
@@ -919,10 +927,15 @@ onMounted(loadReconciliation);
         </span>
       </div>
 
-      <div class="metric-card blue-card">
-        <span class="metric-title">Saldo Rekening Koran Bank</span>
-        <div class="metric-number-val money">{{ formatRupiah(accountSummary.bankBalance) }}</div>
-        <span class="trend-text">
+      <div class="dropx-kpi-card kpi-grad-ocean">
+        <div class="kpi-top-row">
+          <span class="kpi-label">Saldo Rekening Koran Bank</span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M6 10v11"/><path d="M18 10v11"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value money">{{ formatRupiah(accountSummary.bankBalance) }}</div>
+        <span class="kpi-foot">
           {{
             accountSummary.totalImports > 0
               ? `Dari ${accountSummary.totalImports} batch mutasi bank yang diimpor`
@@ -931,15 +944,17 @@ onMounted(loadReconciliation);
         </span>
       </div>
 
-      <div class="metric-card" :class="accountSummary.isBalanced ? 'emerald-card' : 'amber-card'">
-        <div class="metric-head-inline">
-          <span class="metric-title">Selisih Buku vs Bank</span>
-          <span class="tag-pill" :class="accountSummary.isBalanced ? 'ok' : 'warn'">
-            {{ accountSummary.isBalanced ? 'Seimbang' : 'Ada Selisih' }}
+      <div class="dropx-kpi-card" :class="accountSummary.isBalanced ? 'kpi-grad-emerald' : 'kpi-grad-amber'">
+        <div class="kpi-top-row">
+          <span class="kpi-label">
+            Selisih Buku vs Bank ({{ accountSummary.isBalanced ? 'Seimbang' : 'Ada Selisih' }})
+          </span>
+          <span class="kpi-icon-box" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
           </span>
         </div>
-        <div class="metric-number-val money">{{ formatRupiah(Math.abs(accountSummary.difference)) }}</div>
-        <span class="trend-text">{{ differenceExplanation }}</span>
+        <div class="kpi-value money">{{ formatRupiah(Math.abs(accountSummary.difference)) }}</div>
+        <span class="kpi-foot">{{ differenceExplanation }}</span>
       </div>
     </section>
 
@@ -952,148 +967,150 @@ onMounted(loadReconciliation);
     />
 
     <!-- Main Content: Imported Bank Statement Lines -->
-    <section v-else-if="selectedImport" class="poital-card">
-      <div class="card-head-row">
-        <div>
-          <div class="batch-title-row">
-            <span class="mono-pill">{{ selectedImport.importNumber }}</span>
-            <span class="tag-pill" :class="selectedImport.status === 'FINALIZED' ? 'ok' : 'info'">
-              {{ selectedImport.status === 'FINALIZED' ? 'Terkunci Resmi' : 'Sedang Dicocokkan' }}
+    <section v-else-if="selectedImport" class="poital-card table-card-flush">
+      <div class="recon-card-head">
+        <div class="card-head-row">
+          <div class="batch-meta-col">
+            <div class="batch-title-row">
+              <span class="mono-pill">{{ selectedImport.importNumber }}</span>
+              <span class="tag-pill" :class="selectedImport.status === 'FINALIZED' ? 'ok' : 'info'">
+                {{ selectedImport.status === 'FINALIZED' ? 'Terkunci Resmi' : 'Sedang Dicocokkan' }}
+              </span>
+              <span class="batch-period">{{ selectedImport.periodLabel }}</span>
+            </div>
+            <h2 class="card-title">Mutasi Rekening Koran: {{ selectedImport.fileName }}</h2>
+            <span class="card-sub">
+              Total {{ selectedImportStats.total }} baris &middot;
+              Cocok: <strong>{{ selectedImportStats.matched }}</strong> &middot;
+              Belum Cocok: <strong>{{ selectedImportStats.unmatched }}</strong> &middot;
+              Catatan Khusus: <strong>{{ selectedImportStats.exception }}</strong>
+              <template v-if="selectedImport.duplicateCount > 0">
+                &middot; Duplikat dilewati: <strong>{{ selectedImport.duplicateCount }}</strong>
+              </template>
             </span>
-            <span class="batch-period">{{ selectedImport.periodLabel }}</span>
           </div>
-          <h2 class="card-title">Mutasi Rekening Koran: {{ selectedImport.fileName }}</h2>
-          <span class="card-sub">
-            Total {{ selectedImportStats.total }} baris &middot;
-            Cocok: <strong>{{ selectedImportStats.matched }}</strong> &middot;
-            Belum Cocok: <strong>{{ selectedImportStats.unmatched }}</strong> &middot;
-            Catatan Khusus: <strong>{{ selectedImportStats.exception }}</strong>
-            <template v-if="selectedImport.duplicateCount > 0">
-              &middot; Duplikat dilewati: <strong>{{ selectedImport.duplicateCount }}</strong>
-            </template>
-          </span>
+
+          <div class="batch-actions">
+            <select
+              v-if="accountImports.length > 1"
+              v-model="selectedImport"
+              class="pill-select batch-select"
+              aria-label="Pilih batch impor mutasi"
+            >
+              <option v-for="imp in accountImports" :key="imp.id" :value="imp">
+                {{ imp.importNumber }} - {{ imp.periodLabel }} ({{ imp.fileName }})
+              </option>
+            </select>
+
+            <button
+              v-if="selectedAccountDomain === 'PENERIMAAN' && selectedImport.status !== 'FINALIZED' && auth.hasPermission('reconciliation:manage')"
+              type="button"
+              class="pill-btn-outline"
+              :disabled="autoMatching"
+              @click="runAutoMatchPenerimaan(selectedImport)"
+            >
+              {{ autoMatching ? 'Mencocokkan...' : 'Cocokkan Otomatis' }}
+            </button>
+
+            <button
+              v-if="selectedImport.status !== 'FINALIZED' && auth.hasPermission('reconciliation:manage')"
+              type="button"
+              class="pill-btn-emerald"
+              :disabled="finalizing"
+              @click="requestFinalizeReconciliation"
+            >
+              Finalisasi &amp; Kunci
+            </button>
+          </div>
         </div>
 
-        <div class="batch-actions">
-          <select
-            v-if="accountImports.length > 1"
-            v-model="selectedImport"
-            class="pill-select"
-            aria-label="Pilih batch impor mutasi"
-          >
-            <option v-for="imp in accountImports" :key="imp.id" :value="imp">
-              {{ imp.importNumber }} - {{ imp.periodLabel }} ({{ imp.fileName }})
-            </option>
-          </select>
-
-          <button
-            v-if="selectedAccountDomain === 'PENERIMAAN' && selectedImport.status !== 'FINALIZED' && auth.hasPermission('reconciliation:manage')"
-            type="button"
-            class="pill-btn-outline"
-            :disabled="autoMatching"
-            @click="runAutoMatchPenerimaan(selectedImport)"
-          >
-            {{ autoMatching ? 'Mencocokkan...' : 'Cocokkan Otomatis' }}
-          </button>
-
-          <button
-            v-if="selectedImport.status !== 'FINALIZED' && auth.hasPermission('reconciliation:manage')"
-            type="button"
-            class="pill-btn-emerald"
-            :disabled="finalizing"
-            @click="requestFinalizeReconciliation"
-          >
-            Finalisasi &amp; Kunci
-          </button>
+        <!-- Filter Bar for Statement Lines -->
+        <div class="table-filter-bar">
+          <div class="filter-pills" role="tablist" aria-label="Filter Status Mutasi">
+            <button type="button" class="filter-pill" :class="{ active: lineStatusFilter === 'ALL' }" @click="lineStatusFilter = 'ALL'">
+              Semua ({{ selectedImportStats.total }})
+            </button>
+            <button type="button" class="filter-pill" :class="{ active: lineStatusFilter === 'UNMATCHED' }" @click="lineStatusFilter = 'UNMATCHED'">
+              Belum Cocok ({{ selectedImportStats.unmatched }})
+            </button>
+            <button type="button" class="filter-pill" :class="{ active: lineStatusFilter === 'MATCHED' }" @click="lineStatusFilter = 'MATCHED'">
+              Cocok ({{ selectedImportStats.matched }})
+            </button>
+            <button type="button" class="filter-pill" :class="{ active: lineStatusFilter === 'EXCEPTION' }" @click="lineStatusFilter = 'EXCEPTION'">
+              Catatan Khusus ({{ selectedImportStats.exception }})
+            </button>
+            <button
+              v-if="selectedImportStats.review > 0"
+              type="button"
+              class="filter-pill"
+              :class="{ active: lineStatusFilter === 'NEEDS_REVIEW' }"
+              @click="lineStatusFilter = 'NEEDS_REVIEW'"
+            >
+              Perlu Cek ({{ selectedImportStats.review }})
+            </button>
+          </div>
+          <input
+            v-model="lineSearch"
+            type="search"
+            class="pill-search-input"
+            placeholder="Cari no. referensi, uraian, atau kwitansi..."
+          />
         </div>
-      </div>
-
-      <!-- Filter Bar for Statement Lines -->
-      <div class="table-filter-bar">
-        <div class="filter-pills" role="tablist" aria-label="Filter Status Mutasi">
-          <button type="button" class="filter-pill" :class="{ active: lineStatusFilter === 'ALL' }" @click="lineStatusFilter = 'ALL'">
-            Semua ({{ selectedImportStats.total }})
-          </button>
-          <button type="button" class="filter-pill" :class="{ active: lineStatusFilter === 'UNMATCHED' }" @click="lineStatusFilter = 'UNMATCHED'">
-            Belum Cocok ({{ selectedImportStats.unmatched }})
-          </button>
-          <button type="button" class="filter-pill" :class="{ active: lineStatusFilter === 'MATCHED' }" @click="lineStatusFilter = 'MATCHED'">
-            Cocok ({{ selectedImportStats.matched }})
-          </button>
-          <button type="button" class="filter-pill" :class="{ active: lineStatusFilter === 'EXCEPTION' }" @click="lineStatusFilter = 'EXCEPTION'">
-            Catatan Khusus ({{ selectedImportStats.exception }})
-          </button>
-          <button
-            v-if="selectedImportStats.review > 0"
-            type="button"
-            class="filter-pill"
-            :class="{ active: lineStatusFilter === 'NEEDS_REVIEW' }"
-            @click="lineStatusFilter = 'NEEDS_REVIEW'"
-          >
-            Perlu Cek ({{ selectedImportStats.review }})
-          </button>
-        </div>
-        <input
-          v-model="lineSearch"
-          type="search"
-          class="pill-search-input"
-          placeholder="Cari no. referensi, uraian, atau kwitansi..."
-        />
       </div>
 
       <div class="table-wrap">
         <table class="clean-table">
           <thead>
             <tr>
-              <th>Tanggal &amp; Ref Bank</th>
-              <th>Uraian Mutasi Rekening</th>
+              <th>Tgl &amp; Ref Bank</th>
+              <th>Uraian Mutasi</th>
               <th>Jenis</th>
-              <th class="col-num">Nominal Mutasi</th>
-              <th>Pasangan Dokumen</th>
+              <th class="col-num">Nominal</th>
+              <th>Dokumen</th>
               <th>Status</th>
               <th class="col-num">Aksi</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="filteredStatementLines.length === 0">
+            <tr v-if="paginatedStatementLines.length === 0">
               <td colspan="7" class="empty-cell">
                 Tidak ada baris mutasi yang cocok dengan filter saat ini.
               </td>
             </tr>
-            <tr v-for="line in filteredStatementLines" :key="line.id">
+            <tr v-for="line in paginatedStatementLines" :key="line.id">
               <td>
-                <div class="mono-code">{{ line.referenceNo }}</div>
+                <div class="mono-code ref-clamp" :title="line.referenceNo">{{ line.referenceNo }}</div>
                 <div class="cell-sub">{{ formatDate(line.transactionDate) }}</div>
               </td>
               <td>
-                <div class="row-main-text">{{ line.description }}</div>
+                <div class="row-main-text recon-desc-clamp" :title="line.description">{{ line.description }}</div>
                 <div v-if="line.exceptionNote" class="note-sub">
                   Catatan: {{ line.exceptionNote }}
                 </div>
               </td>
-              <td>
+              <td class="nowrap-doc">
                 <span class="tag-pill" :class="line.direction === 'CREDIT' ? 'ok' : 'muted'">
-                  {{ line.direction === 'CREDIT' ? 'Uang Masuk' : 'Uang Keluar' }}
+                  {{ line.direction === 'CREDIT' ? 'Masuk' : 'Keluar' }}
                 </span>
               </td>
-              <td class="col-num">
+              <td class="col-num nowrap-doc">
                 <strong class="money" :class="line.direction === 'CREDIT' ? 'text-pos' : 'text-dark'">
                   {{ line.direction === 'CREDIT' ? '+' : '-' }}{{ formatRupiah(line.amount) }}
                 </strong>
               </td>
               <td>
                 <template v-if="line.matchedDocNumber">
-                  <div class="mono-code">{{ line.matchedDocNumber }}</div>
+                  <div class="mono-code nowrap-doc">{{ line.matchedDocNumber }}</div>
                   <div class="cell-sub">{{ formatEntityTypeLabel(line.matchedEntityType) }}</div>
                 </template>
-                <span v-else class="cell-sub">Belum dipasangkan</span>
+                <span v-else class="cell-sub">Belum cocok</span>
               </td>
-              <td>
+              <td class="nowrap-doc">
                 <span class="tag-pill" :class="getMatchStatusClass(line.matchStatus)">
                   {{ formatMatchStatusLabel(line.matchStatus) }}
                 </span>
               </td>
-              <td class="col-num">
+              <td class="col-num nowrap-doc">
                 <button
                   v-if="selectedImport.status !== 'FINALIZED' && auth.hasPermission('reconciliation:manage')"
                   type="button"
@@ -1109,6 +1126,12 @@ onMounted(loadReconciliation);
           </tbody>
         </table>
       </div>
+      <TablePagination
+        v-model:page="reconPage"
+        v-model:pageSize="reconPageSize"
+        :total-items="filteredStatementLines.length"
+        item-label="baris mutasi"
+      />
     </section>
 
     <!-- Honest Empty State when no import batch exists yet -->
@@ -1163,9 +1186,6 @@ onMounted(loadReconciliation);
             class="pill-search-input"
             placeholder="Cari no. kwitansi, pembayar, atau ref..."
           />
-          <button type="button" class="pill-btn-soft" @click="router.push('/revenue')">
-            Buka Buku Harian
-          </button>
         </div>
       </div>
 
@@ -1398,12 +1418,12 @@ onMounted(loadReconciliation);
             <div><span>Duplikat Dilewati</span><strong class="text-danger">{{ previewResult.summary.duplicateCount }}</strong></div>
           </div>
 
-          <div v-if="parsedTotals.totalCredit > 0 || parsedTotals.totalDebit > 0" class="preview-totals-bar">
+          <div v-if="previewTotals.totalCredit > 0 || previewTotals.totalDebit > 0" class="preview-totals-bar">
             <span>
-              Total Uang Masuk (Kredit): <strong class="money text-pos">{{ formatRupiah(parsedTotals.totalCredit) }}</strong>
+              Total Uang Masuk (Kredit): <strong class="money text-pos">{{ formatRupiah(previewTotals.totalCredit) }}</strong>
             </span>
             <span>
-              Total Uang Keluar (Debet): <strong class="money">{{ formatRupiah(parsedTotals.totalDebit) }}</strong>
+              Total Uang Keluar (Debet): <strong class="money">{{ formatRupiah(previewTotals.totalDebit) }}</strong>
             </span>
           </div>
 
@@ -1437,7 +1457,7 @@ onMounted(loadReconciliation);
                     <span class="tag-pill" :class="getMatchStatusClass(row.isDuplicate ? 'DUPLICATE' : row.matchStatus)">
                       {{ row.isDuplicate ? 'Duplikat (Dilewati)' : formatMatchStatusLabel(row.matchStatus) }}
                     </span>
-                    <div v-if="row.matchedDocNumber" class="cell-sub">{{ row.matchedDocNumber }}</div>
+                    <div v-if="row.matchedDocNumber" class="cell-sub nowrap-doc">{{ row.matchedDocNumber }}</div>
                   </td>
                 </tr>
               </tbody>
@@ -1620,10 +1640,13 @@ onMounted(loadReconciliation);
 
 <style scoped>
 .poital-recon {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding-bottom: 48px;
+  padding-bottom: 28px;
 }
 
 .recon-top-bar {
@@ -1631,22 +1654,29 @@ onMounted(loadReconciliation);
   align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 16px;
+}
+
+.recon-top-bar > div:first-child {
+  flex: 1;
+  min-width: 240px;
 }
 
 .recon-title {
   margin: 0;
-  font-size: 1.6rem;
-  font-weight: 800;
-  color: #0b2144;
-  letter-spacing: -0.02em;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+  color: #111827;
+  letter-spacing: -0.025em;
 }
 
 .recon-subtitle {
-  margin: 4px 0 0;
-  font-size: 0.88rem;
-  color: #475569;
-  max-width: 720px;
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.45;
+  max-width: 560px;
 }
 
 .recon-top-actions {
@@ -1654,112 +1684,69 @@ onMounted(loadReconciliation);
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .pill-btn-navy {
-  padding: 10px 18px;
-  border-radius: 999px;
-  border: none;
-  background: #0b2144;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid #034693;
+  background: #034693;
   color: #ffffff;
-  font-size: 0.84rem;
-  font-weight: 650;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
-  min-height: 44px;
+  height: 36px;
   transition: background 150ms ease;
 }
-.pill-btn-navy:hover:not(:disabled) { background: #143366; }
+.pill-btn-navy:hover:not(:disabled) { background: #023470; }
 .pill-btn-navy:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .pill-btn-emerald {
-  padding: 10px 18px;
-  border-radius: 999px;
-  border: none;
-  background: #059669;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid #10b981;
+  background: #10b981;
   color: #ffffff;
-  font-size: 0.84rem;
-  font-weight: 650;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
-  min-height: 44px;
+  height: 36px;
   transition: background 150ms ease;
 }
-.pill-btn-emerald:hover:not(:disabled) { background: #047857; }
+.pill-btn-emerald:hover:not(:disabled) { background: #059669; }
 .pill-btn-emerald:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .pill-btn-soft {
-  padding: 10px 16px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  color: #0b2144;
-  font-size: 0.84rem;
-  font-weight: 600;
+  color: #111827;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
-  min-height: 44px;
-  transition: background 150ms ease, border-color 150ms ease;
+  height: 36px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: background 150ms ease;
 }
-.pill-btn-soft:hover:not(:disabled) { background: #f8fafc; border-color: #94a3b8; }
+.pill-btn-soft:hover:not(:disabled) { background: #f3f4f6; }
 .pill-btn-soft:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .pill-btn-outline {
-  padding: 10px 16px;
-  border-radius: 999px;
+  padding: 0 14px;
+  border-radius: 8px;
   border: 1px solid #034693;
-  background: #eff6ff;
+  background: rgba(3, 70, 147, 0.06);
   color: #034693;
-  font-size: 0.84rem;
-  font-weight: 650;
+  font-size: 13.5px;
+  font-weight: 500;
   cursor: pointer;
-  min-height: 44px;
+  height: 36px;
   transition: background 150ms ease;
 }
-.pill-btn-outline:hover:not(:disabled) { background: #dbeafe; }
+.pill-btn-outline:hover:not(:disabled) { background: rgba(3, 70, 147, 0.12); }
 .pill-btn-outline:disabled { opacity: 0.55; cursor: not-allowed; }
-
-/* Workflow Stepper */
-.workflow-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 10px 16px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-}
-
-.workflow-steps {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.wf-step-link {
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #334155;
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-.wf-step-link:hover { background: #eff6ff; border-color: #bfdbfe; color: #034693; }
-
-.wf-step-active {
-  background: #0b2144;
-  color: #ffffff;
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.wf-sep { color: #cbd5e1; font-weight: 700; }
-.wf-dot { margin: 0 6px; color: #cbd5e1; }
-.workflow-counter { font-size: 0.82rem; color: #475569; }
 
 /* Bank Account Selector Cards */
 .bank-selector-grid {
@@ -1771,20 +1758,20 @@ onMounted(loadReconciliation);
 .bank-card {
   text-align: left;
   background: #ffffff;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   cursor: pointer;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
   transition: border-color 150ms ease, background 150ms ease;
 }
-.bank-card:hover { border-color: #94a3b8; }
+.bank-card:hover { border-color: #d1d5db; }
 .bank-card.active {
-  border-color: #0b2144;
-  background: #f8fafc;
-  box-shadow: 0 0 0 1px #0b2144;
+  border-color: #034693;
+  box-shadow: 0 0 0 2px rgba(3, 70, 147, 0.14);
 }
 
 .bank-card-top {
@@ -1795,66 +1782,132 @@ onMounted(loadReconciliation);
   flex-wrap: wrap;
 }
 .bank-card-badges { display: flex; align-items: center; gap: 6px; }
-.bank-card-name { font-size: 0.98rem; font-weight: 750; color: #0b2144; margin-top: 2px; }
-.bank-card-balance { font-size: 1.32rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; }
-.bank-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.78rem; color: #475569; }
+.bank-card-name { font-size: 14.5px; font-weight: 600; color: #111827; margin-top: 2px; letter-spacing: -0.015em; }
+.bank-card-balance { font-size: 20px; font-weight: 600; color: #111827; letter-spacing: -0.025em; }
+.bank-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; color: #6b7280; }
 
 .mono-pill {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.74rem;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
   padding: 2px 8px;
   border-radius: 6px;
-  background: #f1f5f9;
-  color: #0f172a;
+  background: #f3f4f6;
+  color: #111827;
 }
 
 .coa-pill {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.73rem;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
   color: #034693;
 }
 
-/* 3-Card Summary Row */
+/* DropX Luminous 3-Card Summary Row */
 .kpi-metric-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
 
-.metric-card {
-  border-radius: 16px;
-  padding: 18px 20px;
+.dropx-kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  padding: 20px;
+  color: #ffffff;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  border: 1px solid #e2e8f0;
+  gap: 4px;
+  border: none;
+  box-shadow: 0 4px 14px -4px rgba(17, 24, 39, 0.16);
 }
-.metric-head-inline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.metric-title { font-size: 0.82rem; font-weight: 650; }
-.metric-number-val { font-size: clamp(1.2rem, 1.6vw, 1.52rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
-.trend-text { font-size: 0.78rem; line-height: 1.4; }
 
-.hero-card { background: #0b2144; border-color: #0b2144; color: #ffffff; }
-.hero-card .metric-title { color: rgba(255, 255, 255, 0.85); }
-.hero-card .trend-text { color: rgba(255, 255, 255, 0.76); }
+.dropx-kpi-card::before,
+.dropx-kpi-card::after {
+  content: '';
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+}
 
-.blue-card { background: #eff6ff; border-color: #bfdbfe; color: #034693; }
-.blue-card .trend-text { color: #1e40af; }
+.dropx-kpi-card::before {
+  width: 126px;
+  height: 126px;
+  right: -28px;
+  top: -28px;
+  background: rgba(255, 255, 255, 0.12);
+}
 
-.emerald-card { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
-.emerald-card .trend-text { color: #047857; }
+.dropx-kpi-card::after {
+  width: 96px;
+  height: 96px;
+  right: 26px;
+  bottom: -40px;
+  background: rgba(255, 255, 255, 0.07);
+}
 
-.amber-card { background: #fffbeb; border-color: #fde68a; color: #92400e; }
-.amber-card .trend-text { color: #92400e; }
+.kpi-grad-navy { background: linear-gradient(135deg, #0b2144 0%, #034693 100%); }
+.kpi-grad-emerald { background: linear-gradient(135deg, #22c55e 0%, #10b981 55%, #059669 100%); }
+.kpi-grad-ocean { background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 55%, #0284c7 100%); }
+.kpi-grad-amber { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+
+.kpi-top-row { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.kpi-label { font-size: 13px; font-weight: 400; color: rgba(255, 255, 255, 0.9); }
+.kpi-icon-box { width: 38px; height: 38px; border-radius: 8px; background: rgba(255, 255, 255, 0.18); color: #ffffff; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.kpi-value { position: relative; z-index: 1; margin-top: 6px; font-size: clamp(1.25rem, 1.55vw, 1.5rem); line-height: 1.2; font-weight: 700; color: #ffffff; letter-spacing: -0.025em; }
+.kpi-foot { position: relative; z-index: 1; margin-top: 4px; font-size: 12px; font-weight: 400; color: rgba(255, 255, 255, 0.84); line-height: 1.4; }
 
 /* Main Cards & Tables */
 .poital-card {
   background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
   padding: 20px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+}
+
+.table-card-flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.recon-card-head {
+  padding: 18px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recon-card-head .card-head-row,
+.recon-card-head .table-filter-bar {
+  margin-bottom: 0;
+}
+
+.batch-meta-col {
+  flex: 1;
+  min-width: 260px;
+}
+
+.batch-select {
+  max-width: 260px;
+  text-overflow: ellipsis;
+}
+
+.ref-clamp {
+  max-width: 155px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recon-desc-clamp {
+  max-width: 230px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .card-head-row {
@@ -1873,9 +1926,9 @@ onMounted(loadReconciliation);
   flex-wrap: wrap;
   margin-bottom: 6px;
 }
-.batch-period { font-size: 0.78rem; font-weight: 600; color: #475569; }
-.card-title { margin: 0; font-size: 1.05rem; font-weight: 750; color: #0b2144; }
-.card-sub { display: block; margin-top: 3px; font-size: 0.82rem; color: #475569; }
+.batch-period { font-size: 13px; font-weight: 500; color: #6b7280; }
+.card-title { margin: 0; font-size: 15px; font-weight: 600; color: #111827; }
+.card-sub { display: block; margin-top: 3px; font-size: 13px; color: #6b7280; }
 
 .batch-actions {
   display: flex;
@@ -1885,14 +1938,15 @@ onMounted(loadReconciliation);
 }
 
 .pill-select {
-  height: 44px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  color: #0f172a;
-  font-size: 0.82rem;
-  font-weight: 600;
+  color: #111827;
+  font-size: 13.5px;
+  font-weight: 400;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .table-filter-bar {
@@ -1906,101 +1960,122 @@ onMounted(loadReconciliation);
 
 .filter-pills { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .filter-pill {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #334155;
-  font-size: 0.78rem;
-  font-weight: 600;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
 }
+.filter-pill:hover:not(.active) { background: #f3f4f6; color: #111827; }
 .filter-pill.active {
-  background: #0b2144;
-  border-color: #0b2144;
+  background: #034693;
   color: #ffffff;
 }
 
 .pill-search-input {
-  height: 40px;
+  height: 36px;
   min-width: 260px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  color: #0f172a;
-  font-size: 0.84rem;
+  color: #111827;
+  font-size: 13.5px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  outline: none;
+}
+.pill-search-input:focus {
+  border-color: #034693;
+  box-shadow: 0 0 0 2px rgba(3, 70, 147, 0.2);
 }
 
 .table-wrap { width: 100%; overflow-x: auto; }
-.clean-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.clean-table.compact { font-size: 0.8rem; }
+.clean-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.clean-table.compact { font-size: 13px; }
 .clean-table th {
   text-align: left;
-  padding: 10px 10px;
-  color: #475569;
-  font-size: 0.78rem;
-  font-weight: 650;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 11px 12px;
+  color: #6b7280;
+  background: #fafafa;
+  font-size: 12px;
+  font-weight: 500;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
   white-space: nowrap;
 }
 .clean-table td {
-  padding: 12px 10px;
-  border-bottom: 1px solid #f1f5f9;
-  vertical-align: top;
-  color: #0f172a;
+  padding: 12px 12px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+  font-weight: 400;
+  color: #111827;
+}
+.clean-table tbody tr:hover td {
+  background: rgba(249, 250, 251, 0.85);
 }
 .col-num { text-align: right !important; white-space: nowrap; }
-.empty-cell { text-align: center; padding: 28px !important; color: #475569; }
-.mono-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; font-weight: 650; color: #034693; }
-.row-main-text { font-weight: 600; color: #0f172a; }
-.cell-sub { font-size: 0.76rem; color: #475569; margin-top: 2px; }
-.note-sub { font-size: 0.77rem; color: #92400e; background: #fffbeb; padding: 3px 8px; border-radius: 6px; display: inline-block; margin-top: 4px; }
+.nowrap-doc { white-space: nowrap; }
+.empty-cell { text-align: center; padding: 32px !important; color: #6b7280; }
+.mono-code { font-family: var(--font-mono); font-size: 12.5px; font-weight: 500; letter-spacing: -0.015em; color: #034693; }
+.row-main-text { font-weight: 500; color: #111827; }
+.cell-sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+.note-sub { font-size: 12px; color: #b45309; background: rgba(245, 158, 11, 0.12); padding: 2px 8px; border-radius: 6px; display: inline-block; margin-top: 4px; }
 .unit-mini-tag {
   display: inline-block;
   margin-left: 6px;
   padding: 1px 7px;
-  border-radius: 999px;
-  background: #f1f5f9;
-  color: #334155;
-  font-size: 0.7rem;
-  font-weight: 700;
+  border-radius: 9999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .tag-pill {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 0.73rem;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
+  border: none;
 }
-.tag-pill.ok { background: #dcfce7; color: #166534; }
-.tag-pill.warn { background: #fef3c7; color: #92400e; }
-.tag-pill.info { background: #eff6ff; color: #1d4ed8; }
-.tag-pill.muted { background: #f1f5f9; color: #475569; }
-.tag-pill.danger { background: #fee2e2; color: #b91c1c; }
+.tag-pill.ok { background: rgba(16, 185, 129, 0.12); color: #059669; }
+.tag-pill.warn { background: rgba(245, 158, 11, 0.14); color: #d97706; }
+.tag-pill.info { background: rgba(59, 130, 246, 0.12); color: #2563eb; }
+.tag-pill.muted { background: #f3f4f6; color: #4b5563; }
+.tag-pill.danger { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
 
-.text-pos { color: #047857; }
-.text-warn { color: #b45309; }
-.text-danger { color: #b91c1c; }
-.text-dark { color: #0f172a; }
+.text-pos { color: #059669; }
+.text-warn { color: #d97706; }
+.text-danger { color: #dc2626; }
+.text-dark { color: #111827; }
 
 .inline-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .mini-action-btn {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  color: #0b2144;
-  font-size: 0.78rem;
-  font-weight: 650;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  min-height: 34px;
+  transition: background 140ms ease, color 140ms ease;
 }
-.mini-action-btn.navy { background: #0b2144; border-color: #0b2144; color: #ffffff; }
-.mini-action-btn.soft { background: #f8fafc; }
-.mini-action-btn.danger { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+.mini-action-btn:hover { background: #f3f4f6; color: #111827; }
+.mini-action-btn.navy { background: #034693; border-color: #034693; color: #ffffff; }
+.mini-action-btn.navy:hover { background: #023470; }
+.mini-action-btn.soft { background: #ffffff; }
+.mini-action-btn.danger { background: rgba(239, 68, 68, 0.1); border-color: transparent; color: #dc2626; }
 
 /* Empty Recon Card */
 .empty-recon-card { text-align: center; padding: 38px 24px; }
@@ -2122,7 +2197,7 @@ onMounted(loadReconciliation);
 }
 .preview-summary-strip span { font-size: 0.74rem; color: #475569; }
 .preview-summary-strip strong { font-size: 1.05rem; color: #0b2144; }
-.preview-table-wrap { max-height: 200px; overflow-y: auto; background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; }
+.preview-table-wrap { max-height: 280px; overflow-y: auto; background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; }
 
 .line-summary-banner {
   display: flex;
@@ -2172,14 +2247,37 @@ onMounted(loadReconciliation);
 }
 
 @media (max-width: 1024px) {
-  .kpi-metric-row { grid-template-columns: 1fr; }
+  .kpi-metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-3col { grid-template-columns: 1fr; }
   .preview-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+@media (max-width: 768px) {
+  .pill-btn-navy,
+  .pill-btn-emerald,
+  .pill-btn-soft,
+  .pill-btn-outline,
+  .pill-select,
+  .pill-search-input {
+    min-height: 44px;
+    height: auto;
+  }
+  .filter-pill,
+  .mini-action-btn {
+    min-height: 40px;
+  }
+  .batch-select {
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
 @media (max-width: 680px) {
+  .kpi-metric-row,
   .form-2col,
   .entry-mode-tabs { grid-template-columns: 1fr; }
+  .dropx-kpi-card { padding: 16px; }
+  .recon-card-head { padding: 14px; }
   .pill-search-input { width: 100%; min-width: 0; }
   .line-summary-amt { align-items: flex-start; }
 }
