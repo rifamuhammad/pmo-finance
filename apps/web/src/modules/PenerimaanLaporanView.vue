@@ -24,7 +24,7 @@ watch(() => route.query.section, applySectionFromQuery);
 const pageTitle = computed(() =>
   activeTab.value === 'aging'
     ? 'Aging Piutang Penerimaan'
-    : 'Realisasi Penerimaan & Target RAB'
+    : 'Realisasi RAB Penerimaan'
 );
 
 const pageSubtitle = computed(() =>

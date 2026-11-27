@@ -144,19 +144,19 @@ const sidebarSections = computed<SidebarSection[]>(() => {
         items: [
           {
             id: 'rev-transaksi',
-            label: 'Transaksi & Tagihan',
+            label: 'Transaksi',
             icon: 'receipt',
             permission: 'revenue:view',
             children: [
               {
                 id: 'rev-buku-harian',
-                label: 'Buku Harian (Kwitansi & TT)',
+                label: 'Buku Harian',
                 to: '/revenue?tab=buku_harian',
                 permission: 'revenue:view',
               },
               {
                 id: 'rev-invoices',
-                label: 'Tagihan & Invoice',
+                label: 'Invoice',
                 to: '/revenue?tab=invoices',
                 permission: 'revenue:view',
               },
@@ -164,7 +164,7 @@ const sidebarSections = computed<SidebarSection[]>(() => {
           },
           {
             id: 'reconciliation',
-            label: 'Rekonsiliasi Bank Mandiri',
+            label: 'Rekonsiliasi Bank',
             to: '/reconciliation',
             icon: 'bank',
             permission: 'reconciliation:view',
@@ -173,29 +173,29 @@ const sidebarSections = computed<SidebarSection[]>(() => {
       },
       {
         id: 'pembukuan-laporan',
-        title: 'PEMBUKUAN & LAPORAN',
+        title: 'AKUNTANSI',
         items: [
           {
             id: 'rev-pembukuan',
-            label: 'Pembukuan & Pajak',
+            label: 'Pembukuan',
             icon: 'book',
             permission: 'revenue:view',
             children: [
               {
                 id: 'pembukuan-bku',
-                label: 'Buku Kas Umum (BKU)',
+                label: 'Buku Kas Umum',
                 to: '/penerimaan/pembukuan?section=bku',
                 permission: 'revenue:view',
               },
               {
                 id: 'pembukuan-jurnal',
-                label: 'Jurnal Umum Penerimaan',
+                label: 'Jurnal Umum',
                 to: '/penerimaan/pembukuan?section=jurnal',
                 permission: 'revenue:view',
               },
               {
                 id: 'pembukuan-pajak',
-                label: 'Perincian Pajak PTNBH',
+                label: 'Perincian Pajak',
                 to: '/penerimaan/pembukuan?section=perincian',
                 permission: 'revenue:view',
               },
@@ -209,19 +209,19 @@ const sidebarSections = computed<SidebarSection[]>(() => {
           },
           {
             id: 'rev-laporan',
-            label: 'Laporan Penerimaan',
+            label: 'Laporan',
             icon: 'chart',
             permission: 'revenue:view',
             children: [
               {
                 id: 'laporan-realisasi',
-                label: 'Realisasi & Target RAB',
+                label: 'Realisasi RAB',
                 to: '/penerimaan/laporan?section=realisasi',
                 permission: 'revenue:view',
               },
               {
                 id: 'laporan-aging',
-                label: 'Aging Piutang Penerimaan',
+                label: 'Aging Piutang',
                 to: '/penerimaan/laporan?section=aging',
                 permission: 'revenue:view',
               },
@@ -241,31 +241,37 @@ const sidebarSections = computed<SidebarSection[]>(() => {
             children: [
               {
                 id: 'master-layanan',
-                label: 'Layanan & Tarif',
+                label: 'Tarif Layanan',
                 to: '/penerimaan/master/layanan',
                 permission: 'revenue:view',
               },
               {
                 id: 'master-pelanggan',
-                label: 'Pelanggan & Instansi',
+                label: 'Pelanggan',
                 to: '/penerimaan/master/pelanggan',
                 permission: 'revenue:view',
               },
               {
-                id: 'master-coa-pajak',
-                label: 'Akun COA & Pajak',
-                to: '/penerimaan/master/coa-pajak',
+                id: 'master-coa',
+                label: 'Akun COA',
+                to: '/penerimaan/master/coa',
                 permission: 'revenue:view',
               },
               {
-                id: 'master-bank-pejabat',
-                label: 'Bank & Penandatangan',
-                to: '/penerimaan/master/bank-pejabat',
+                id: 'master-bank',
+                label: 'Rekening Bank',
+                to: '/penerimaan/master/bank',
+                permission: 'revenue:view',
+              },
+              {
+                id: 'master-penandatangan',
+                label: 'Penandatangan',
+                to: '/penerimaan/master/penandatangan',
                 permission: 'revenue:view',
               },
               {
                 id: 'master-target-rab',
-                label: 'Target RAB Pendapatan',
+                label: 'Target RAB',
                 to: '/penerimaan/master/target-rab',
                 permission: 'revenue:view',
               },
@@ -275,11 +281,11 @@ const sidebarSections = computed<SidebarSection[]>(() => {
       },
       {
         id: 'sistem',
-        title: 'ADMINISTRASI',
+        title: 'SISTEM',
         items: [
           {
             id: 'admin',
-            label: 'Pengguna, Role & Audit',
+            label: 'Manajemen Akses',
             to: '/admin',
             icon: 'shield',
             permission: 'admin:view',
@@ -314,30 +320,30 @@ const sidebarSections = computed<SidebarSection[]>(() => {
     },
     {
       id: 'operasional-out',
-      title: 'BELANJA & ANGGARAN',
+      title: 'OPERASIONAL',
       items: [
         {
           id: 'budgets',
-          label: 'Perencanaan & Pagu',
+          label: 'Anggaran',
           to: '/budgets',
           icon: 'pie',
           permission: 'budget:view',
         },
         {
           id: 'out-pengadaan',
-          label: 'Pengadaan & Kas Kecil',
+          label: 'Pengadaan',
           icon: 'bag',
           permission: 'procurement:view',
           children: [
             {
               id: 'procurement',
-              label: 'Pengadaan & Tagihan LS',
+              label: 'Tagihan Langsung',
               to: '/procurement',
               permission: 'procurement:view',
             },
             {
               id: 'petty-cash',
-              label: 'Uang Persediaan (GUP/TUP)',
+              label: 'Uang Persediaan',
               to: '/petty-cash',
               permission: 'procurement:view',
             },
@@ -345,7 +351,7 @@ const sidebarSections = computed<SidebarSection[]>(() => {
         },
         {
           id: 'reconciliation',
-          label: 'Rekonsiliasi Bank BTN',
+          label: 'Rekonsiliasi Bank',
           to: '/reconciliation',
           icon: 'bank',
           permission: 'reconciliation:view',
@@ -354,25 +360,25 @@ const sidebarSections = computed<SidebarSection[]>(() => {
     },
     {
       id: 'akuntansi-out',
-      title: 'AKUNTANSI & SDM',
+      title: 'AKUNTANSI',
       items: [
         {
           id: 'accounting',
-          label: 'Akuntansi & Buku Besar',
+          label: 'Buku Besar',
           to: '/accounting',
           icon: 'book',
           permission: 'accounting:view',
         },
         {
           id: 'assets',
-          label: 'Inventaris & Aset PMO',
+          label: 'Aset Tetap',
           to: '/assets',
           icon: 'box',
           permission: 'accounting:view',
         },
         {
           id: 'hris',
-          label: 'Honorarium & Payroll',
+          label: 'Penggajian',
           to: '/hris',
           icon: 'users',
           permission: 'admin:view',
@@ -384,9 +390,15 @@ const sidebarSections = computed<SidebarSection[]>(() => {
           icon: 'chart',
           permission: 'report:view',
         },
+      ],
+    },
+    {
+      id: 'sistem-out',
+      title: 'SISTEM',
+      items: [
         {
           id: 'admin',
-          label: 'Pengguna, Role & Audit',
+          label: 'Manajemen Akses',
           to: '/admin',
           icon: 'shield',
           permission: 'admin:view',
@@ -454,39 +466,39 @@ const breadcrumbItems = computed<Array<{ label: string; to?: string }>>(() => {
   }
   if (route.path === '/revenue') {
     const tab = String(route.query.tab || 'buku_harian');
-    base.push({ label: 'Transaksi & Tagihan' });
-    if (tab === 'invoices') base.push({ label: 'Tagihan & Invoice' });
-    else if (tab === 'layanan') base.push({ label: 'Katalog Layanan' });
+    base.push({ label: 'Transaksi' });
+    if (tab === 'invoices') base.push({ label: 'Invoice' });
     else base.push({ label: 'Buku Harian' });
     return base;
   }
   if (route.path === '/reconciliation') {
-    base.push({ label: effectiveWorkspace.value === 'PENERIMAAN' ? 'Rekonsiliasi Bank Mandiri' : 'Rekonsiliasi Bank BTN' });
+    base.push({ label: 'Rekonsiliasi Bank' });
     return base;
   }
   if (route.path === '/penerimaan/pembukuan') {
     const sec = String(route.query.section || 'bku');
-    base.push({ label: 'Pembukuan & Pajak' });
+    base.push({ label: 'Pembukuan' });
     if (sec === 'jurnal') base.push({ label: 'Jurnal Umum' });
     else if (sec === 'perincian') base.push({ label: 'Perincian Pajak' });
     else if (sec === 'surat') base.push({ label: 'Surat Penarikan Pajak' });
-    else base.push({ label: 'Buku Kas Umum (BKU)' });
+    else base.push({ label: 'Buku Kas Umum' });
     return base;
   }
   if (route.path === '/penerimaan/laporan') {
     const sec = String(route.query.section || 'realisasi');
-    base.push({ label: 'Laporan Penerimaan' });
-    base.push({ label: sec === 'aging' ? 'Aging Piutang' : 'Realisasi & Target RAB' });
+    base.push({ label: 'Laporan' });
+    base.push({ label: sec === 'aging' ? 'Aging Piutang' : 'Realisasi RAB' });
     return base;
   }
   if (route.path.startsWith('/penerimaan/master')) {
     const sec = String(route.params.section || route.query.section || 'layanan');
-    base.push({ label: 'Master Data' });
-    if (sec === 'pelanggan') base.push({ label: 'Pelanggan & Instansi' });
-    else if (sec === 'coa-pajak') base.push({ label: 'Akun COA & Pajak' });
-    else if (sec === 'bank-pejabat') base.push({ label: 'Bank & Penandatangan' });
-    else if (sec === 'target-rab') base.push({ label: 'Target RAB Pendapatan' });
-    else base.push({ label: 'Layanan & Tarif' });
+    base.push({ label: 'Master Penerimaan' });
+    if (sec === 'pelanggan') base.push({ label: 'Pelanggan' });
+    else if (sec === 'coa' || sec === 'coa-pajak') base.push({ label: 'Akun COA' });
+    else if (sec === 'bank' || sec === 'bank-pejabat') base.push({ label: 'Rekening Bank' });
+    else if (sec === 'penandatangan') base.push({ label: 'Penandatangan' });
+    else if (sec === 'target-rab') base.push({ label: 'Target RAB' });
+    else base.push({ label: 'Tarif Layanan' });
     return base;
   }
   base.push({ label: String(route.meta.title || 'Modul') });
@@ -1006,7 +1018,7 @@ onUnmounted(() => {
                   class="pop-menu-item"
                   @click="router.push('/admin'); profileMenuOpen = false"
                 >
-                  Pengaturan &amp; Audit
+                  Manajemen Akses
                 </button>
                 <button type="button" class="pop-menu-item danger" @click="handleLogout">
                   Keluar dari Sistem

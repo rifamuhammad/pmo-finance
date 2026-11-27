@@ -87,7 +87,7 @@ function openReviewModal(targetType: 'PAYMENT' | 'INVOICE', row: any) {
 }
 
 const pageTitle = computed(() => {
-  if (activeTab.value === 'invoices') return 'Tagihan & Invoice Penerimaan';
+  if (activeTab.value === 'invoices') return 'Daftar Invoice';
   return 'Buku Harian Penerimaan';
 });
 

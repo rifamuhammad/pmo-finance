@@ -27,8 +27,8 @@ watch(() => route.query.section, applySectionFromQuery);
 const pageTitle = computed(() => {
   if (activeSection.value === 'jurnal') return 'Jurnal Umum Penerimaan';
   if (activeSection.value === 'perincian') return 'Perincian Pajak Penerimaan';
-  if (activeSection.value === 'surat') return 'Surat Penarikan Pajak & Pivot COA';
-  return 'Buku Kas Umum (BKU) Penerimaan';
+  if (activeSection.value === 'surat') return 'Surat Penarikan Pajak';
+  return 'Buku Kas Umum Penerimaan';
 });
 
 const pageSubtitle = computed(() => {

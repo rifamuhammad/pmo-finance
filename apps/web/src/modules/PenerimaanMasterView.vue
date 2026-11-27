@@ -13,11 +13,15 @@ import TablePagination from '../components/TablePagination.vue';
 const auth = useAuthStore();
 const route = useRoute();
 
-type MasterSection = 'layanan' | 'pelanggan' | 'coa-pajak' | 'bank-pejabat' | 'target-rab';
+type MasterSection = 'layanan' | 'pelanggan' | 'coa' | 'bank' | 'penandatangan' | 'target-rab';
 
 const activeSection = computed<MasterSection>(() => {
   const s = String(route.params.section || route.query.section || 'layanan');
-  if (s === 'pelanggan' || s === 'coa-pajak' || s === 'bank-pejabat' || s === 'target-rab') return s;
+  if (s === 'pelanggan') return 'pelanggan';
+  if (s === 'coa' || s === 'coa-pajak') return 'coa';
+  if (s === 'bank' || s === 'bank-pejabat') return 'bank';
+  if (s === 'penandatangan') return 'penandatangan';
+  if (s === 'target-rab') return 'target-rab';
   return 'layanan';
 });
 
@@ -149,18 +153,23 @@ const pageMeta = computed(() => {
   switch (activeSection.value) {
     case 'pelanggan':
       return {
-        title: 'Pelanggan & Instansi',
-        subtitle: 'Daftar klien, instansi, BUMN, dan profil pemungut Faktur Pajak (Auto-Fit) untuk seluruh transaksi.',
+        title: 'Daftar Pelanggan',
+        subtitle: 'Data klien, instansi, BUMN, dan profil pemungut Faktur Pajak otomatis untuk seluruh transaksi.',
       };
-    case 'coa-pajak':
+    case 'coa':
       return {
-        title: 'Akun COA & Aturan Pajak PTNBH',
-        subtitle: 'Referensi resmi 18 COA Pendapatan Pertor 310 v7, akun pendukung, serta aturan pajak otomatis (Auto-Fit).',
+        title: 'Akun COA Penerimaan',
+        subtitle: 'Referensi resmi 18 COA Pendapatan Pertor 310 v7, akun pendukung, serta aturan pajak otomatis.',
       };
-    case 'bank-pejabat':
+    case 'bank':
       return {
-        title: 'Rekening Bank & Pejabat Penandatangan',
-        subtitle: 'Konfigurasi rekening Bank Mandiri Penerimaan, rekening tujuan setor pajak BRI, dan pejabat cetak surat resmi.',
+        title: 'Rekening Bank',
+        subtitle: 'Konfigurasi rekening Bank Mandiri Penerimaan dan rekening tujuan setor pajak Bank BRI.',
+      };
+    case 'penandatangan':
+      return {
+        title: 'Pejabat Penandatangan',
+        subtitle: 'Konfigurasi pejabat penandatangan dan format nomor surat resmi untuk Kwitansi, Invoice, serta Surat Pajak.',
       };
     case 'target-rab':
       return {
@@ -169,7 +178,7 @@ const pageMeta = computed(() => {
       };
     default:
       return {
-        title: 'Layanan & Tarif',
+        title: 'Tarif Layanan',
         subtitle: 'Master tarif layanan 4 unit bisnis (MICE, Klinik, ITS, TCI), pemetaan COA resmi, dan skema pajak otomatis.',
       };
   }
@@ -530,8 +539,8 @@ async function saveCustomer() {
   }
 }
 
-// Bank & Signatory Config Save
-async function saveBankAndSignatory() {
+// Bank Config Save
+async function saveBankConfig() {
   saving.value = true;
   errorMsg.value = '';
   feedbackMsg.value = '';
@@ -550,13 +559,33 @@ async function saveBankAndSignatory() {
             }
           : {}),
         taxRemittanceBank: { ...taxBankForm.value },
+      }),
+    });
+    feedbackMsg.value = 'Konfigurasi rekening bank tersimpan permanen dan langsung aktif di dokumen serta rekonsiliasi.';
+    await loadAll();
+  } catch (err: any) {
+    errorMsg.value = err.message || 'Gagal menyimpan konfigurasi rekening bank.';
+  } finally {
+    saving.value = false;
+  }
+}
+
+// Signatory Config Save
+async function saveSignatoryConfig() {
+  saving.value = true;
+  errorMsg.value = '';
+  feedbackMsg.value = '';
+  try {
+    await apiFetch('/revenue/master/config', {
+      method: 'PUT',
+      body: JSON.stringify({
         signatory: { ...signatoryForm.value },
       }),
     });
-    feedbackMsg.value = 'Konfigurasi rekening bank dan pejabat penandatangan tersimpan permanen. Kwitansi, Invoice, dan Surat Penarikan Pajak otomatis menggunakan data terbaru.';
+    feedbackMsg.value = 'Data pejabat penandatangan dan format surat tersimpan permanen untuk seluruh cetak dokumen resmi.';
     await loadAll();
   } catch (err: any) {
-    errorMsg.value = err.message || 'Gagal menyimpan konfigurasi rekening dan penandatangan.';
+    errorMsg.value = err.message || 'Gagal menyimpan data pejabat penandatangan.';
   } finally {
     saving.value = false;
   }
@@ -633,13 +662,22 @@ onMounted(loadAll);
           + Pelanggan Baru
         </button>
         <button
-          v-else-if="activeSection === 'bank-pejabat' && canManageConfig"
+          v-else-if="activeSection === 'bank' && canManageConfig"
           type="button"
           class="pill-btn-navy"
           :disabled="saving"
-          @click="saveBankAndSignatory"
+          @click="saveBankConfig"
         >
-          {{ saving ? 'Menyimpan...' : 'Simpan Konfigurasi' }}
+          {{ saving ? 'Menyimpan...' : 'Simpan Rekening Bank' }}
+        </button>
+        <button
+          v-else-if="activeSection === 'penandatangan' && canManageConfig"
+          type="button"
+          class="pill-btn-navy"
+          :disabled="saving"
+          @click="saveSignatoryConfig"
+        >
+          {{ saving ? 'Menyimpan...' : 'Simpan Penandatangan' }}
         </button>
         <button
           v-else-if="activeSection === 'target-rab' && canManageConfig"
@@ -822,8 +860,8 @@ onMounted(loadAll);
       />
     </section>
 
-    <!-- ==================== 3. AKUN COA & ATURAN PAJAK ==================== -->
-    <div v-else-if="activeSection === 'coa-pajak'" class="master-stack">
+    <!-- ==================== 3. AKUN COA PENERIMAAN ==================== -->
+    <div v-else-if="activeSection === 'coa'" class="master-stack">
       <section class="master-card table-card-flush">
         <div class="card-toolbar">
           <div class="toolbar-left">
@@ -920,8 +958,8 @@ onMounted(loadAll);
       </section>
     </div>
 
-    <!-- ==================== 4. REKENING BANK & PENANDATANGAN ==================== -->
-    <div v-else-if="activeSection === 'bank-pejabat'" class="master-stack">
+    <!-- ==================== 4. REKENING BANK ==================== -->
+    <div v-else-if="activeSection === 'bank'" class="master-stack">
       <div class="config-2col">
         <section class="master-card">
           <div class="card-head-pad">
@@ -930,7 +968,7 @@ onMounted(loadAll);
           </div>
           <div class="form-stack">
             <div class="field">
-              <label for="mb-name">Nama Bank &amp; Keterangan Rekening</label>
+              <label for="mb-name">Nama Bank dan Keterangan Rekening</label>
               <input id="mb-name" v-model="primaryBankForm.bankName" type="text" class="input" :disabled="!canManageConfig" />
             </div>
             <div class="form-2col">
@@ -969,10 +1007,13 @@ onMounted(loadAll);
           </div>
         </section>
       </div>
+    </div>
 
+    <!-- ==================== 5. PEJABAT PENANDATANGAN ==================== -->
+    <div v-else-if="activeSection === 'penandatangan'" class="master-stack">
       <section class="master-card">
         <div class="card-head-pad">
-          <h2 class="card-title">Pejabat Penandatangan &amp; Format Surat Resmi</h2>
+          <h2 class="card-title">Pejabat Penandatangan dan Format Surat Resmi</h2>
           <p class="card-sub">Digunakan otomatis saat mencetak Kwitansi (KU-001), Tanda Terima (KU-002), Invoice (KU-003), dan Surat Penarikan Pajak.</p>
         </div>
 
